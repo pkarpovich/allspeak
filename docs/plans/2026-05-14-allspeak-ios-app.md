@@ -663,15 +663,16 @@ background context on background transition.
       Data and on-disk files share the same lifecycle.")
 
 ### Task 15: Update documentation
-- [ ] write `README.md` at repo root explaining: install `xcodegen`, run
+- [x] write `README.md` at repo root explaining: install `xcodegen`, run
       `xcodegen generate`, open in Xcode 26+, build to device/simulator; how a
       user supplies the `.m4a` + `.srt` (via Files app → in-app importer);
       reference to design tokens; note that persistence is Core Data, not JSON
-- [ ] note in README that the project ships with three project-local
+- [x] note in README that the project ships with three project-local
       agent skills under `.claude/skills/` and that future contributions should
       consult them before touching SwiftUI / Swift Testing / Core Data code
-- [ ] no source CLAUDE.md until patterns stabilize — premature
-- [ ] commit message convention: Conventional Commits (`feat:`, `fix:`,
+- [x] no source CLAUDE.md until patterns stabilize — premature (decision
+      recorded; no file created)
+- [x] commit message convention: Conventional Commits (`feat:`, `fix:`,
       `refactor:`) — note this in README
 
 ## Technical Details
