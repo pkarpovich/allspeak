@@ -1,0 +1,48 @@
+name: Allspeak
+options:
+  bundleIdPrefix: dev.karpovich
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+targets:
+  Allspeak:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Allspeak
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_FILE: Allspeak/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        ENABLE_PREVIEWS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: Allspeak
+    scheme:
+      testTargets:
+        - AllspeakTests
+      gatherCoverageData: true
+  AllspeakTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: AllspeakTests
+    dependencies:
+      - target: Allspeak
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak.tests
+        CODE_SIGNING_ALLOWED: NO
+        GENERATE_INFOPLIST_FILE: YES

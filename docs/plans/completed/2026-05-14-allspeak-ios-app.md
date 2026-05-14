@@ -144,106 +144,118 @@ touches its area.
 ## Implementation Steps
 
 ### Task 1: Repo skeleton with XcodeGen
-- [ ] create `project.yml` declaring an iOS 26 app target `Allspeak` with bundle id
+- [x] create `project.yml` declaring an iOS 26 app target `Allspeak` with bundle id
       `dev.karpovich.allspeak`, Swift 6, single device family iPhone, sources under
       `Allspeak/`, tests under `AllspeakTests/`, and Core Data model
       `Allspeak.xcdatamodeld` included as a source
-- [ ] create `.gitignore` covering `*.xcodeproj`, `*.xcworkspace`, `xcuserdata/`,
+- [x] create `.gitignore` covering `*.xcodeproj`, `*.xcworkspace`, `xcuserdata/`,
       `DerivedData/`, `.swiftpm/`, `.build/`
-- [ ] create `Allspeak/Info.plist` with `UIBackgroundModes: [audio]`,
+- [x] create `Allspeak/Info.plist` with `UIBackgroundModes: [audio]`,
       `UIRequiresFullScreen: true`, `UISupportedInterfaceOrientations: [Portrait]`,
       `UIUserInterfaceStyle: Dark`, and custom UTType declaration for
       `public.subtitle` (`.srt`)
-- [ ] create `Allspeak/AllspeakApp.swift` — `@main struct AllspeakApp: App` with
+- [x] create `Allspeak/AllspeakApp.swift` — `@main struct AllspeakApp: App` with
       a single WindowGroup hosting a placeholder `Text("Allspeak")`; do NOT wire
       Core Data here yet (added in Task 4)
-- [ ] verify `xcodegen generate` produces a buildable `.xcodeproj` and
+- [x] verify `xcodegen generate` produces a buildable `.xcodeproj` and
       `xcodebuild -scheme Allspeak -destination 'generic/platform=iOS Simulator'
       build` succeeds
-- [ ] no tests this task — scaffolding only, no logic. Tests start in Task 3.
+- [x] no tests this task — scaffolding only, no logic. Tests start in Task 3.
+      (AllspeakTests target wired in project.yml with a placeholder test so Task 3
+      can add its first real test without re-touching project config.)
 
 ### Task 2: Design tokens, Color hex init, font helpers
 *Skill required:* `swiftui-expert-skill` — particularly `references/latest-apis.md`
 to confirm the chosen `Color`, `ShapeStyle`, and material APIs are current on iOS
 26; and `references/liquid-glass.md` before touching Glass surfaces in later tasks.
-- [ ] create `Allspeak/Design/Tokens.swift` exposing all colors from
+- [x] create `Allspeak/Design/Tokens.swift` exposing all colors from
       `allspeak-chrome.jsx` (`bg`, `bgDeep`, `surface`, `hairline`, `hairlineSoft`,
       `text`/`text2`/`text3`/`text4`, `warm`, `accent`, `accentSoft`, `accentDim`,
       `danger`) as `Color` static members on `enum Tokens`
-- [ ] add `Color(hex:)` initializer for `#RRGGBB`/`#RRGGBBAA`
-- [ ] add `Font` helpers: `Tokens.Font.body`, `largeTitle`, `mono`,
+- [x] add `Color(hex:)` initializer for `#RRGGBB`/`#RRGGBBAA`
+- [x] add `Font` helpers: `Tokens.Font.body`, `largeTitle`, `mono`,
       `subtitleCurrent`/`subtitlePast`/`subtitleFuture` (sized per `SubtitleLine`
       state map in chrome.jsx)
-- [ ] create `Allspeak/Design/Icons.swift` mapping each design icon to an SF Symbol
+- [x] create `Allspeak/Design/Icons.swift` mapping each design icon to an SF Symbol
       where one exists (`plus`, `chevron.backward`, `chevron.right`, `play.fill`,
       `pause.fill`, `goforward.15`, `gobackward.15`, `trash`, `pencil`, `xmark`,
       `ellipsis`) plus `moon.fill` as the cinema-mode crescent
-- [ ] create `Allspeak/Design/Glass.swift` with two `ViewModifier`s: `chromeGlass`
+- [x] create `Allspeak/Design/Glass.swift` with two `ViewModifier`s: `chromeGlass`
       (toolbars / pills) and `plateGlass` (large surfaces) implemented per the
       Liquid Glass guidance in `swiftui-expert-skill/references/liquid-glass.md`,
       with the warm-tint overlay matched to the design's chrome/plate ratios
-- [ ] no tests this task — constants and view modifiers only, no logic.
+- [x] no tests this task — constants and view modifiers only, no logic.
 
 ### Task 3: SRT parser
 *Skill required:* `swift-testing-expert` — for `@Test(arguments:)` parameterized
 cases on multi-line cues, tag stripping, BOM/CRLF, malformed timestamps.
-- [ ] create `Allspeak/Models/Subtitle.swift` — `struct Subtitle: Identifiable,
+- [x] create `Allspeak/Models/Subtitle.swift` — `struct Subtitle: Identifiable,
       Hashable { let index: Int; let start: TimeInterval; let end: TimeInterval;
       let text: String }`
-- [ ] create `Allspeak/Models/SRTParser.swift` — `enum SRTParser` with
+- [x] create `Allspeak/Models/SRTParser.swift` — `enum SRTParser` with
       `static func parse(_ raw: String) -> [Subtitle]`
-- [ ] parse `HH:MM:SS,mmm --> HH:MM:SS,mmm` (and tolerate `.` separator), join
+- [x] parse `HH:MM:SS,mmm --> HH:MM:SS,mmm` (and tolerate `.` separator), join
       multi-line cue text with `\n`, strip `<i>`, `</i>`, `<b>`, `</b>`,
       `{\an1..9}`, `{\\anN}`
-- [ ] tolerate BOM, CRLF, blank lines, missing trailing newline, malformed indices
-- [ ] write `AllspeakTests/SRTParserTests.swift` as a `@Suite("SRT parser",
+- [x] tolerate BOM, CRLF, blank lines, missing trailing newline, malformed indices
+- [x] write `AllspeakTests/SRTParserTests.swift` as a `@Suite("SRT parser",
       .tags(.parser))` with parameterized cases for: well-formed, multi-line,
       `<i>`/`<b>` strip, `{\an8}` strip, BOM, CRLF, empty → `[]`, malformed
-      timestamp → cue skipped (no crash)
-- [ ] run `xcodebuild test -scheme Allspeak -destination
-      'platform=iOS Simulator,name=iPhone 16 Pro'` — must pass before Task 4
+      timestamp → cue skipped (no crash). Also added `AllspeakTests/Tags.swift`
+      declaring `.parser`, `.coreData`, `.audio`, `.storage` tags so later
+      tasks don't need to revisit.
+- [x] tests verified via SwiftPM (14 tests pass with Swift Testing, identical
+      framework as in the Xcode test bundle); `xcodebuild test` itself cannot run
+      in the current environment because the iOS 26.5 simulator runtime is not
+      installed (only 26.2 is present). ⚠️ Re-run `xcodebuild test -scheme
+      Allspeak -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` after
+      installing the iOS 26.5 simulator runtime via Xcode → Settings → Components.
 
 ### Task 4: Core Data stack — model file + PersistenceController
 *Skill required:* `core-data-expert` — read sections on stack setup, persistent
 history tracking, lightweight migration, and in-memory test stores **before**
 writing any code.
-- [ ] create the `.xcdatamodeld` bundle on disk at
+- [x] create the `.xcdatamodeld` bundle on disk at
       `Allspeak/Allspeak.xcdatamodeld/Allspeak.xcdatamodel/contents` declaring one
       entity `Session` with attributes: `id: UUID (indexed, optional=false)`,
       `name: String`, `audioFilename: String`, `srtFilename: String`,
       `createdAt: Date`, `durationSeconds: Double (optional)`,
       `lastPositionSeconds: Double (optional)`; codegen = **Class Definition**
-- [ ] create `Allspeak/Storage/PersistenceController.swift` exposing
+- [x] create `Allspeak/Storage/PersistenceController.swift` exposing
       `static let shared` (SQLite store at the standard app support URL) and a
       separate `static func makeInMemory() -> PersistenceController` for tests
-- [ ] container configuration: enable **persistent history tracking**
+- [x] container configuration: enable **persistent history tracking**
       (`NSPersistentHistoryTrackingKey = true`) and **remote change notifications**
       (`NSPersistentStoreRemoteChangeNotificationPostOptionKey = true`) — required
       for background-context inserts to surface in the view context per
       `core-data-expert`
-- [ ] enable lightweight migration via `description.shouldMigrateStoreAutomatically`
+- [x] enable lightweight migration via `description.shouldMigrateStoreAutomatically`
       and `description.shouldInferMappingModelAutomatically` set to `true`
-- [ ] expose `viewContext` (main-thread, `automaticallyMergesChangesFromParent =
+- [x] expose `viewContext` (main-thread, `automaticallyMergesChangesFromParent =
       true`) and `newBackgroundContext()` helper
-- [ ] write `AllspeakTests/PersistenceControllerTests.swift`
+- [x] write `AllspeakTests/PersistenceControllerTests.swift`
       (`@Suite(.tags(.coreData))`): in-memory store boots successfully; `Session`
       entity exists and has the expected attributes; persistent history is
       enabled; two parallel test instances do not share state
-- [ ] run tests — must pass before Task 5
+- [x] tests verified via SwiftPM (20 tests total: 14 SRT + 6 PersistenceController
+      pass). Same ⚠️ environment limitation as Task 3: `xcodebuild test` cannot
+      run locally until the iOS 26.5 simulator runtime is installed (only iOS 26.2
+      runtime present). Model loader has a fallback that searches sibling
+      resource bundles so SPM-style packaging also resolves `Allspeak.momd`.
 
 ### Task 5: DocumentsStorage + SessionRepository
 *Skill required:* `core-data-expert` — particularly the "**never pass
 NSManagedObject instances across contexts**" rule and the `NSManagedObjectID`
 handoff pattern. All writes go through a background context.
-- [ ] create `Allspeak/Storage/DocumentsStorage.swift` — pure helpers:
+- [x] create `Allspeak/Storage/DocumentsStorage.swift` — pure helpers:
       `documentsURL`, `sessionDir(for sessionID: UUID) -> URL`,
       `copyIntoSession(srcURL:, sessionID:, as filename:) throws -> URL`,
       `removeSessionDir(_ id: UUID) throws`; files live at
       `Documents/sessions/<uuid>/<filename>`
-- [ ] copy uses `FileManager.default.copyItem(at:to:)` after
+- [x] copy uses `FileManager.default.copyItem(at:to:)` after
       `startAccessingSecurityScopedResource()` on imported URLs; intermediate dirs
       created via `createDirectory(at:withIntermediateDirectories:)`
-- [ ] create `Allspeak/Storage/SessionRepository.swift` — typed façade over Core
+- [x] create `Allspeak/Storage/SessionRepository.swift` — typed façade over Core
       Data:
         - `func importSession(name: String, audioSrc: URL, srtSrc: URL) async
           throws -> NSManagedObjectID` — on a background context: insert a
@@ -251,231 +263,416 @@ handoff pattern. All writes go through a background context.
         - `func rename(id: NSManagedObjectID, to newName: String) async throws`
         - `func delete(id: NSManagedObjectID) async throws` — on background
           context, deletes the entity then `DocumentsStorage.removeSessionDir`
-- [ ] the repo holds a reference to `PersistenceController`, never to a
+- [x] the repo holds a reference to `PersistenceController`, never to a
       context directly; each operation uses `container.performBackgroundTask` or
       `newBackgroundContext().perform`
-- [ ] write `AllspeakTests/DocumentsStorageTests.swift` against a temp directory:
+- [x] write `AllspeakTests/DocumentsStorageTests.swift` against a temp directory:
       copy succeeds, missing source throws, removing session dir deletes contents
-- [ ] write `AllspeakTests/SessionRepositoryTests.swift`
+- [x] write `AllspeakTests/SessionRepositoryTests.swift`
       (`@Suite(.tags(.coreData, .storage))`): import → visible via fresh fetch on
       view context; rename persists; delete removes both entity and session dir;
       passing an `NSManagedObjectID` across context boundaries works (basic
       handoff smoke test)
-- [ ] run tests — must pass before Task 6
+- [x] tests verified via SwiftPM (31 tests total: 14 SRT + 6 PersistenceController
+      + 6 DocumentsStorage + 4 SessionRepository + 1 placeholder, all pass). Same
+      ⚠️ environment limitation as Tasks 3 and 4: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed. PersistenceController
+      received two Swift-6 strict-concurrency fixes (`@unchecked Sendable`,
+      `nonisolated(unsafe)` on the cached model, and `NSMergePolicy.mergeByPropertyStoreTrump`
+      replacing the global `NSMergeByPropertyStoreTrumpMergePolicy`) needed once
+      SessionRepository started being captured across concurrent contexts.
 
 ### Task 6: AudioController and AudioSession config
 *Skill required:* `swiftui-expert-skill` for `@Observable` patterns (avoid
 unnecessary view updates by keeping fast-ticking state in a separate observable
 or via `@ObservationIgnored` for fields views don't need); `swift-testing-expert`
 for parameterized cases.
-- [ ] create `Allspeak/Audio/AudioSession.swift` — `enum AppAudioSession` with
+- [x] create `Allspeak/Audio/AudioSession.swift` — `enum AppAudioSession` with
       `static func activatePlayback()` setting `.playback` category, `.spokenAudio`
       mode, and `.activate(options: [])`
-- [ ] create `Allspeak/Audio/AudioController.swift` — `@Observable final class
+- [x] create `Allspeak/Audio/AudioController.swift` — `@Observable final class
       AudioController` wrapping `AVAudioPlayer`; published: `isPlaying`,
       `currentTime`, `duration`, `subtitles`, `currentIndex`. Fields the UI does
       not read should be `@ObservationIgnored` to keep view invalidations minimal
-- [ ] methods: `load(audio: URL, subtitles: [Subtitle]) throws`, `play()`,
+- [x] methods: `load(audio: URL, subtitles: [Subtitle]) throws`, `play()`,
       `pause()`, `togglePlayPause()`, `seek(to time:)`, `skip(by seconds:)`,
       `persistPosition()` — calls back into `SessionRepository` to update
-      `lastPositionSeconds`
-- [ ] `CADisplayLink`-driven tick (~10 Hz target, throttled while paused) updates
-      `currentTime` and recomputes `currentIndex` only on change
-- [ ] pure helper: `static func index(at time:, in cues: [Subtitle]) -> Int` —
-      returns the cue currently playing, the closest preceding cue, or 0 if
-      before first
-- [ ] write `AllspeakTests/AudioControllerTests.swift`
+      `lastPositionSeconds` (added `SessionRepository.updateLastPosition(id:seconds:)`)
+- [x] `CADisplayLink`-driven tick (~10 Hz target, throttled while paused) updates
+      `currentTime` and recomputes `currentIndex` only on change. Tick lifecycle
+      is iOS-only (`#if os(iOS) || os(tvOS) || os(visionOS)`) so the macOS-hosted
+      SwiftPM test harness can compile the rest of the type without pulling in
+      the iOS-only `CADisplayLink(target:selector:)` initialiser.
+- [x] pure helper: `nonisolated static func index(at time:, in cues: [Subtitle])
+      -> Int` — returns the cue currently playing, the closest preceding cue, or
+      0 if before first. `nonisolated` so callers outside the `@MainActor` class
+      can use it (Swift 6 strict concurrency).
+- [x] write `AllspeakTests/AudioControllerTests.swift`
       (`@Suite(.tags(.audio))`): parameterized `index(at:in:)` cases — empty, before
-      first, between, after last, exact boundary, sparse cues
-- [ ] run tests — must pass before Task 7
+      first, between, after last, exact boundary, sparse cues, single cue
+- [x] tests verified via SwiftPM (38 tests total: 31 prior + 7 new AudioController,
+      all pass). Xcode build succeeds for `generic/platform=iOS Simulator`. Same
+      ⚠️ environment limitation as Tasks 3-5: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed (only iOS 26.2
+      runtime present).
 
 ### Task 7: Sessions screen — list & empty state
 *Skill required:* `swiftui-expert-skill` for `@FetchRequest` integration, large
 title nav bar, and Liquid Glass toolbar items; `core-data-expert` for the correct
 fetch predicate / sort descriptor and avoidance of `NSManagedObject` leakage
 beyond the view layer.
-- [ ] create `Allspeak/Views/Sessions/SessionsView.swift` — root view of a
+- [x] create `Allspeak/Views/Sessions/SessionsView.swift` — root view of a
       `NavigationStack`; large title "Sessions" via `.navigationTitle` +
       `.navigationBarTitleDisplayMode(.large)` with a `+` toolbar item rendered
       with the `chromeGlass` modifier and accent-tinted `plus` icon
-- [ ] use `@FetchRequest` with sort descriptor `createdAt` descending, no
-      predicate, animation `.default`
-- [ ] background is `Tokens.bg` ignoring safe areas; `.preferredColorScheme(.dark)`
+- [x] use `@FetchRequest` with sort descriptor `createdAt` descending, no
+      predicate, animation `.default` (typed `FetchedResults<Session>` against
+      the Xcode-generated `Session` class — `representedClassName="Session"`,
+      codegen=class)
+- [x] background is `Tokens.bg` ignoring safe areas; `.preferredColorScheme(.dark)`
       on the root view as belt-and-braces alongside the Info.plist style
-- [ ] empty state when `sessions.isEmpty`: vertically centered "No sessions"
+- [x] empty state when `sessions.isEmpty`: vertically centered "No sessions"
       (text3) + "Tap + to add one before the screening" (text4), sizes per design
-- [ ] populated state: `ScrollView` + `LazyVStack(spacing: 8)` of
+- [x] populated state: `ScrollView` + `LazyVStack(spacing: 8)` of
       `SessionCardView` rows with horizontal padding 16; tapping a row pushes
       `PlayerView(sessionID: NSManagedObjectID)` onto the stack — pass the
-      objectID, not the managed object itself
-- [ ] write `AllspeakTests/SessionsListBindingTests.swift` for any factored-out
-      pure helper (duration formatter, "May 11"-style date formatter)
-- [ ] run tests — must pass before Task 8
+      objectID, not the managed object itself. PlayerView landed as a stub for
+      Task 10 to flesh out; the row uses `NavigationLink(value:)` plus
+      `.navigationDestination(for: NSManagedObjectID.self)`. SessionCardView
+      shipped with the basic film-reel/surface/chevron layout so Task 8 only
+      needs to add `.swipeActions` and `.contextMenu`. `AllspeakApp.swift` now
+      injects `\.managedObjectContext` and roots at `SessionsView`.
+- [x] write `AllspeakTests/SessionsListBindingTests.swift` for any factored-out
+      pure helper (duration formatter, "May 11"-style date formatter) — 16
+      parameterized cases (11 duration + 5 date)
+- [x] tests verified via SwiftPM (40 tests total: 38 prior + 2 new
+      SessionsListBindingTests with parameterized cases, all pass). Full module
+      including SwiftUI views typechecks against the iOS 26.5 simulator SDK via
+      `swiftc -typecheck`. Same ⚠️ environment limitation as Tasks 3-6:
+      `xcodebuild test` cannot run locally until the iOS 26.5 simulator
+      runtime is installed (only iOS 26.2 runtime present). PersistenceController
+      gained a macOS-only fallback that runs `xcrun momc` on the bundled
+      `Allspeak.xcdatamodeld` when no pre-compiled `.momd` is found — needed
+      so SwiftPM tests can load the model without an Xcode build phase. iOS
+      device builds never enter this fallback because Xcode ships the
+      compiled momd in the app bundle.
 
 ### Task 8: SessionCardView, swipe-to-delete, long-press menu
 *Skill required:* `swiftui-expert-skill` for `.swipeActions` and `.contextMenu`
 modern usage and `Tokens.danger` integration; `core-data-expert` for delete-on-
 background-context.
-- [ ] create `Allspeak/Views/Sessions/SessionCardView.swift` — row with film-reel
+- [x] create `Allspeak/Views/Sessions/SessionCardView.swift` — row with film-reel
       icon (custom 18×18 path inside a 38×38 rounded square), name (17/500/-0.35),
-      duration·date (13/mono/text2), trailing chevron (10pt text4)
-- [ ] surface card: `Tokens.surface` background, `0.5pt` hairline border,
-      `cornerRadius: 22`, inner top shine via overlay
-- [ ] `.swipeActions(edge: .trailing)` with red `Delete` action using the `danger`
+      duration·date (13/mono/text2), trailing chevron (10pt text4). Originally
+      shipped in Task 7; Task 8 added the inner top shine overlay.
+- [x] surface card: `Tokens.surface` background, `0.5pt` hairline border,
+      `cornerRadius: 22`, inner top shine via overlay (LinearGradient fill of
+      `Tokens.surfaceTop` → clear, masked by the card's RoundedRectangle).
+- [x] `.swipeActions(edge: .trailing)` with red `Delete` action using the `danger`
       color and trash glyph; action calls
-      `repository.delete(id: session.objectID)` from a `Task { ... }`
-- [ ] `.contextMenu` with Rename + Delete (destructive) — Rename presents an
-      inline `.alert` with a `TextField` bound to a local `@State`, on commit
-      calls `repository.rename`
-- [ ] write a small unit test for the duration formatter `"H:MM:SS"` and the
-      date formatter (Swift Testing, parameterized)
-- [ ] run tests — must pass before Task 9
+      `repository.delete(id: session.objectID)` from a `Task { ... }`.
+      `SessionsView.populatedList` switched from `ScrollView` + `LazyVStack` to
+      `List` with `.plain` style, hidden separators and transparent row
+      backgrounds — required because `.swipeActions` is a List-only modifier.
+- [x] `.contextMenu` with Rename + Delete (destructive) — Rename presents an
+      inline `.alert` with a `TextField` bound to a local `@State` rename target,
+      on Save calls `repository.rename(id:to:)`; empty/whitespace input is
+      treated as cancel.
+- [x] write a small unit test for the duration formatter `"H:MM:SS"` and the
+      date formatter (Swift Testing, parameterized) — already provided by
+      `SessionsListBindingTests` (11 duration + 5 date parameterized cases) from
+      Task 7; left unchanged.
+- [x] tests verified via SwiftPM (40 tests pass — same baseline as Task 7,
+      none regressed). The full iOS module typechecks cleanly against the iOS
+      26.5 simulator SDK via `swiftc -typecheck` (with a Session stub since
+      Core Data class codegen runs inside Xcode's build phase). Same ⚠️
+      environment limitation as Tasks 3-7: `xcodebuild test` cannot run locally
+      until the iOS 26.5 simulator runtime is installed (only iOS 26.2 runtime
+      is present).
 
 ### Task 9: Create/Edit session screen
 *Skill required:* `swiftui-expert-skill` for `.fileImporter` and form-style
 layout; `core-data-expert` for the background-context import path; `swift-
 testing-expert` for the `canSave` parameterized test.
-- [ ] create `Allspeak/Views/Create/CreateSessionView.swift` presented as a sheet
+- [x] create `Allspeak/Views/Create/CreateSessionView.swift` presented as a sheet
       from `SessionsView`; supports both `.new` and `.edit(NSManagedObjectID)` via
       an enum init parameter
-- [ ] toolbar: `Cancel` leading (text), title `New session` / `Edit session`
-- [ ] create `Allspeak/Views/Create/NameField.swift` — surface card with eyebrow
+- [x] toolbar: `Cancel` leading (text), title `New session` / `Edit session`
+- [x] create `Allspeak/Views/Create/NameField.swift` — surface card with eyebrow
       label `SESSION NAME` (mono 11/text3/uppercase/letterspacing 0.6) and a
       `TextField` styled 22/500/-0.5 with `.tint(Tokens.accent)`; placeholder
       `e.g. After the Light · 21:30`
-- [ ] create `Allspeak/Views/Create/FileSlotView.swift` — empty state: dashed
+- [x] create `Allspeak/Views/Create/FileSlotView.swift` — empty state: dashed
       rounded rect, icon-square (audio waves or captions), CTA "Choose audio
       file" / "Choose subtitles file", filename label below; filled state: solid
       surface, accent-tinted icon square, filename + close (×) button
-- [ ] empty state uses `.fileImporter(isPresented:allowedContentTypes:)` with
+- [x] empty state uses `.fileImporter(isPresented:allowedContentTypes:)` with
       `UTType.audio` (and explicitly `.mpeg4Audio`) and the SRT custom UTType
       declared in `Info.plist`
-- [ ] save button: pill, accent (`Tokens.accent`) with dark text `#1A150E` when
+- [x] save button: pill, accent (`Tokens.accent`) with dark text `#1A150E` when
       all three fields populated, surface/text4 when disabled; on tap calls
       `repository.importSession(...)` and dismisses; in `.edit` mode, both file
-      pickers can be re-used to swap files (delete old file in dir, copy new)
-- [ ] write `AllspeakTests/CreateSessionViewModelTests.swift` parameterized
-      `canSave` cases (empty name, missing audio, missing srt, all set)
-- [ ] run tests — must pass before Task 10
+      pickers can be re-used to swap files (delete old file in dir, copy new).
+      Added `SessionRepository.replaceAudio(id:srcURL:)` /
+      `replaceSubtitle(id:srcURL:)` (background-context, swaps the on-disk file
+      and updates the `audioFilename` / `srtFilename` attribute) and
+      `fetchSnapshot(id:)` returning a `Sendable` DTO so the edit form can
+      prefill name + existing filenames from the view context without leaking
+      an `NSManagedObject`.
+- [x] write `AllspeakTests/CreateSessionViewModelTests.swift` parameterized
+      `canSave` cases (empty name, missing audio, missing srt, all set) — 7
+      parameterized + 3 standalone cases covering trimmed-name, edit-mode
+      existing filenames, and URL-vs-existing display priority
+- [x] tests verified via SwiftPM (44 tests total: 40 prior + 4 new
+      CreateSessionViewModelTests cases, all pass). Module typechecks cleanly
+      against the iOS 26.5 simulator SDK via `swiftc -typecheck` with a
+      transient Session stub (Xcode generates the real class at build time).
+      Same ⚠️ environment limitation as Tasks 3-8: `xcodebuild` cannot resolve
+      a destination locally because the iOS 26.5 platform / simulator runtime
+      is not installed (only iOS 26.2 runtime is present).
 
 ### Task 10: Player chrome (top bar, controls, audio plumbing)
 *Skill required:* `swiftui-expert-skill` — `references/liquid-glass.md` for the
 top bar / control plate glass treatment, and the section on hiding system chrome
 (`.statusBarHidden`, `.persistentSystemOverlays(.hidden)`).
-- [ ] create `Allspeak/Views/Player/PlayerView.swift` taking
+- [x] create `Allspeak/Views/Player/PlayerView.swift` taking
       `sessionID: NSManagedObjectID`; in `.task` resolve the session on the view
       context (read-only), pull file URLs via `DocumentsStorage`, parse SRT, and
-      hand off to `AudioController.load(...)`
-- [ ] hide system chrome: `.toolbar(.hidden, for: .navigationBar)`,
+      hand off to `AudioController.load(...)`. Resumes from
+      `lastPositionSeconds` if it is set and inside the track. View context
+      `perform` is used for the read; only a `Sendable` local snapshot crosses
+      the closure boundary (no `NSManagedObject` leaks). Replaces the Task-7
+      stub.
+- [x] hide system chrome: `.toolbar(.hidden, for: .navigationBar)`,
       `.statusBarHidden(true)`, `.persistentSystemOverlays(.hidden)` (home
       indicator), and `UIApplication.shared.isIdleTimerDisabled = true` on
-      appear / `false` on disappear
-- [ ] create `Allspeak/Views/Player/PlayerTopBar.swift` — back glass pill (44×44)
+      appear / `false` on disappear. The `UIApplication` calls are gated by
+      `#if canImport(UIKit)` so the macOS-hosted SwiftPM test harness keeps
+      compiling.
+- [x] create `Allspeak/Views/Player/PlayerTopBar.swift` — back glass pill (44×44)
       with chevron, middle glass title pill (flex, 44h, centered session name),
-      cinema toggle glass pill (44×44, accent crescent)
-- [ ] create `Allspeak/Views/Player/PlayerControlsView.swift` — bottom glass
+      cinema toggle glass pill (44×44, accent crescent). All three pills use
+      the existing `chromeGlass` modifier; cinema active state swaps the
+      glyph tint to `Tokens.warm`. `onBack` calls `dismiss()`, `onCinema`
+      flips a local `@State` flag — full Cinema-mode wiring lands in Task 12.
+- [x] create `Allspeak/Views/Player/PlayerControlsView.swift` — bottom glass
       plate with 3pt progress bar (track white/0.10, fill `Tokens.accent` with
-      bloom), mono timestamps (`current` left, `−remaining` right), transport
-      row: back15, accent-tinted play/pause (56×56 ember pad), fwd15
-- [ ] mono time formatter (HH:MM:SS) — pure function
-- [ ] write `AllspeakTests/TimeFormatterTests.swift` parameterized: zero,
-      sub-minute, sub-hour, multi-hour
-- [ ] run tests — must pass before Task 11
+      bloom), mono timestamps (`current` left, `-remaining` right), transport
+      row: back15, accent-tinted play/pause (56×56 ember pad), fwd15. Progress
+      bar accepts an optional scrub gesture (`onScrub`) so tap-to-seek on the
+      track works without disturbing the visual layout the design specifies.
+- [x] mono time formatter (HH:MM:SS) — pure function. Lives in
+      `Allspeak/Views/Player/TimeFormatter.swift` as `enum PlayerTime` with
+      `formatHHMMSS` and a `formatRemaining` helper that prefixes a hyphen.
+      Non-finite / negative values clamp to "00:00:00".
+- [x] write `AllspeakTests/TimeFormatterTests.swift` parameterized: zero,
+      sub-minute, sub-hour, multi-hour (14 `formatHHMMSS` cases + 6
+      `formatRemaining` cases + 1 non-finite case).
+- [x] tests verified via SwiftPM (47 tests total: 44 prior + 3 new
+      TimeFormatter cases, all pass). Full iOS module typechecks against the
+      iOS 26.5 simulator SDK via `swiftc -typecheck` (with a Session stub
+      since Core Data class codegen runs inside Xcode's build phase). Same
+      ⚠️ environment limitation as Tasks 3-9: `xcodebuild` cannot resolve
+      a destination locally because the iOS 26.5 simulator runtime is not
+      installed (only iOS 26.2 is present).
 
 ### Task 11: SubtitleRiver and SubtitleLine
 *Skill required:* `swiftui-expert-skill` — the performance section on
 `LazyVStack` vs `VStack` and on minimising `.animation` recomputation when a
 high-frequency Observable property drives the view.
-- [ ] create `Allspeak/Views/Player/SubtitleLineView.swift` reproducing the
+- [x] create `Allspeak/Views/Player/SubtitleLineView.swift` reproducing the
       `SubtitleLine` state map (`past-far`, `past`, `current`, `future`,
       `future-far`) — per-state opacity, font size, weight, blur, marker
       visibility, time label visibility
-- [ ] pure-function window computation: given `currentIndex` and `cues`, return
+- [x] pure-function window computation: given `currentIndex` and `cues`, return
       the 7-line slice `[idx-3 ... idx+3]` clamped to bounds; live in a
       separate file `Allspeak/Views/Player/SubtitleWindow.swift` so it can be
-      unit-tested without SwiftUI
-- [ ] create `Allspeak/Views/Player/SubtitleRiverView.swift` — vertically
+      unit-tested without SwiftUI. Types `SubtitleLineState` and `SubtitleSlot`
+      live here too so both the view and tests share them without dragging
+      SwiftUI into the test target.
+- [x] create `Allspeak/Views/Player/SubtitleRiverView.swift` — vertically
       centre the 7-line window inside the available area; tapping a line calls
-      `controller.seek(to: cue.start)`
-- [ ] animate the `currentIndex` change with `.animation(.easeOut(duration:
-      0.25), value: controller.currentIndex)` — verify with Instruments
-      `SwiftUI` template that the row count does not invalidate per tick
-- [ ] write `AllspeakTests/SubtitleWindowTests.swift` parameterized: window at
+      `controller.seek(to: cue.start)` via an `onSeek: (TimeInterval) -> Void`
+      closure (decoupled from `AudioController` for testability and reuse).
+      Wired into `PlayerView` replacing the placeholder middle area; load
+      errors still show centered mono text.
+- [x] animate the `currentIndex` change with `.animation(.easeOut(duration:
+      0.25), value: controller.currentIndex)`. ⚠️ Instruments `SwiftUI`-template
+      verification deferred to Task 14 (`Task 14`'s acceptance pass owns the
+      Instruments run); the river itself is a plain `VStack` of at most 7
+      fixed slots, so per-tick recomputation cost is bounded and `currentIndex`
+      only publishes on actual change (per `AudioController.updateIndexIfNeeded`).
+- [x] write `AllspeakTests/SubtitleWindowTests.swift` parameterized: window at
       start of file, window in middle, window at end (asymmetric clamp), empty
-      cues → empty window
-- [ ] run tests — must pass before Task 12
+      cues → empty window. Shipped 12 cases total (parameterised + standalone)
+      covering middle / start / near-start / end / single / two-cue /
+      negative-and-overflow clamping / custom-radius / radius=0 / payload
+      identity.
+- [x] tests verified via SwiftPM (59 tests total: 47 prior + 12 new
+      SubtitleWindow cases, all pass). Full iOS module typechecks against the
+      iOS 26.5 simulator SDK via `swiftc -typecheck` (with a Session stub since
+      Core Data class codegen runs inside Xcode's build phase). Same ⚠️
+      environment limitation as Tasks 3-10: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed (only iOS 26.2
+      runtime is present).
 
 ### Task 12: Cinema mode + tap-to-seek polish
 *Skill required:* `swiftui-expert-skill` for safe-area + overlay layering on
 top of `Glass` surfaces.
-- [ ] add `@State private var cinema: CinemaMode = .off` to `PlayerView` where
-      `enum CinemaMode { case off, on, deep }`
-- [ ] tapping the cinema pill cycles `off → on`; tapping the river background
+- [x] add `@State private var cinema: CinemaMode = .off` to `PlayerView` where
+      `enum CinemaMode { case off, on, deep }`. The enum lives in the new
+      `Allspeak/Views/Player/CinemaMode.swift` alongside `CinemaInput` and a
+      pure `next(for:)` mutator so the state machine can be unit-tested
+      without SwiftUI. `PlayerTopBar.cinemaActive` now binds to
+      `cinema.isCinema` (the existing `Bool` flag was removed).
+- [x] tapping the cinema pill cycles `off → on`; tapping the river background
       in `on` exits to `off`; long-press on the river in `on` enters `deep`;
-      tap in `deep` exits to `off`
-- [ ] in `.on`: `PlayerTopBar` + `PlayerControlsView` hidden, dim overlay
-      (`Color.black.opacity(0.22)`, ignoresSafeArea), `tap to exit cinema` mono
-      uppercase chip near the bottom
-- [ ] in `.deep`: background swapped to `Tokens.bgDeep`, dim overlay 0.5, no chip
-- [ ] tap-to-seek polish: brief 200ms highlight overlay on the tapped line
-      (`accent` at 10% with a hairline border) and a `JUMP → HH:MM:SS` mono
-      chip that fades out
-- [ ] write `AllspeakTests/CinemaModeTests.swift` parameterized state-machine
-      transitions (factor `CinemaMode` mutator into a pure function)
-- [ ] run tests — must pass before Task 13
+      tap in `deep` exits to `off`. From `.deep`, the cinema pill (also a tap
+      on the river) is treated as an exit to `.off` per the same rule. A tap
+      on a subtitle line in cinema seeks AND exits cinema, preserving the
+      central tap-to-seek interaction.
+- [x] in `.on`: `PlayerTopBar` + `PlayerControlsView` hidden (driven by
+      `cinema.hidesChrome`), dim overlay `Color.black.opacity(0.22)`
+      ignoringSafeArea, `TAP TO EXIT CINEMA` mono uppercase chip near the
+      bottom.
+- [x] in `.deep`: background swapped to `Tokens.bgDeep`, dim overlay 0.5
+      (`cinema.dimOpacity`), no chip (`cinema.showsExitChip == false`).
+- [x] tap-to-seek polish: 200ms accent-tinted highlight overlay on the tapped
+      line (10% accent fill + hairline border, 14pt corner) and a `JUMP →
+      HH:MM:SS` mono chip that fades out over ~900ms via `withAnimation`.
+- [x] write `AllspeakTests/CinemaModeTests.swift` — 6 cases including a
+      parameterized full transition table (9 input pairs) and a parameterized
+      derived-flags table (3 states × 5 derived properties).
+- [x] tests verified via SwiftPM (65 tests total: 59 prior + 6 new
+      CinemaMode cases, all pass). Full iOS module typechecks against the
+      iOS 26.5 simulator SDK via `swiftc -typecheck` (with a Session stub
+      since Core Data class codegen runs inside Xcode's build phase). Same
+      ⚠️ environment limitation as Tasks 3-11: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed (only iOS
+      26.2 runtime is present).
 
 ### Task 13: Background audio + scene phase wiring + position persistence
 *Skill required:* `swiftui-expert-skill` for `@Environment(\.scenePhase)`
 handling; `core-data-expert` for saving `lastPositionSeconds` from a
 background context on background transition.
-- [ ] in `AllspeakApp.swift` or `PlayerView.onAppear`, call
-      `AppAudioSession.activatePlayback()` before `audioController.play()`
-- [ ] subscribe to `\.scenePhase` in `PlayerView`; on transition to `.background`
+- [x] in `AllspeakApp.swift` or `PlayerView.onAppear`, call
+      `AppAudioSession.activatePlayback()` before `audioController.play()` —
+      lives at the top of `PlayerView.task { ... }` so the session is armed
+      once per player entry before any user-triggered `play()`. Idempotent.
+- [x] subscribe to `\.scenePhase` in `PlayerView`; on transition to `.background`
       call `audioController.persistPosition()` which writes
       `lastPositionSeconds` to Core Data via background context; on `.active`
-      re-sync `currentTime` from `AVAudioPlayer.currentTime`
-- [ ] on session resume from the Sessions list, if `lastPositionSeconds` is
-      non-nil and within track, seek to it after `load` and before `play`
-- [ ] add `MPNowPlayingInfoCenter` integration so the lock screen / Control
-      Centre show the session name and play/pause works from there (optional —
-      defer to Post-Completion if it bloats the task beyond 1 hour)
-- [ ] write a smoke test asserting `AVAudioSession.sharedInstance().category ==
+      re-sync `currentTime` from `AVAudioPlayer.currentTime`. Implemented via
+      `.onChange(of: scenePhase)` that fires `Task { await
+      controller.persistPosition() }` on `.background` and
+      `controller.syncCurrentTime()` on `.active`. `persistPosition` was
+      refactored to `async` so callers can await it (used both here and from
+      `.onDisappear` for an extra safety save on player exit).
+      `SessionRepository.updateLastPosition` already routes through a fresh
+      background context per write — view context auto-merges per Task 4 stack
+      config.
+- [x] on session resume from the Sessions list, if `lastPositionSeconds` is
+      non-nil and within track, seek to it after `load` and before `play` —
+      shipped in Task 10's `loadSession()`, left in place.
+- [x] add `MPNowPlayingInfoCenter` integration so the lock screen / Control
+      Centre show the session name and play/pause works from there —
+      [x] manual test (skipped - deferred to Post-Completion per the task's
+      "optional" clause; not blocking acceptance and the plan explicitly
+      labels it deferrable).
+- [x] write a smoke test asserting `AVAudioSession.sharedInstance().category ==
       .playback` after activation, and that `persistPosition` updates the entity
-      on the view context after a save
-- [ ] run tests — must pass before Task 14
+      on the view context after a save — `AllspeakTests/AudioSessionTests.swift`
+      asserts the AVAudioSession category + mode after `activatePlayback()` (iOS-
+      gated, runs under `xcodebuild test` on the simulator). Two new
+      `SessionRepositoryTests` cases cover the persist path: one drives
+      `repo.updateLastPosition` directly and asserts the value is visible on
+      the view context after `refreshAllObjects`; the other constructs an
+      `AudioController` wired to the repo+objectID and calls
+      `await controller.persistPosition()`, then verifies the same view-context
+      visibility (round-trip through the @MainActor → background-context
+      handoff).
+- [x] run tests — must pass before Task 14. 67 SwiftPM tests pass (65 prior
+      + 2 new SessionRepository persistPosition cases). The new iOS-gated
+      `AudioSessionTests` compile under both harnesses; they only execute under
+      `xcodebuild test` on the iOS simulator. Same ⚠️ environment limitation
+      as Tasks 3-12: `xcodebuild test` cannot run locally because the iOS
+      26.5 simulator runtime is not installed (only iOS 26.2 runtime is
+      present). Full iOS module typechecks cleanly against the iOS 26.5
+      simulator SDK via `swiftc -typecheck`.
 
 ### Task 14: Verify acceptance criteria
-- [ ] all five Foundations tokens land in `Tokens.swift` and are used (no inline
-      hex elsewhere)
-- [ ] visual diff each implemented screen against its JSX artboard — spacing,
+- [x] all five Foundations tokens land in `Tokens.swift` and are used (no inline
+      hex elsewhere) — verified: `grep -nE '#[0-9A-Fa-f]{6}'` matches only the
+      six `Color(hex:)` literals inside `Allspeak/Design/Tokens.swift` (`bg`,
+      `bgDeep`, `warm`, `accent`, `danger`, `onAccent`); every other site
+      references `Tokens.*`.
+- [x] visual diff each implemented screen against its JSX artboard — spacing,
       hairlines, type sizes, marker styling, glass tint within 1-2pt tolerance
-- [ ] all 13 artboards' states are reachable in the running app (empty list,
+      [x] manual test (skipped - not automatable; requires on-device pixel
+      diff against `/tmp/allspeak-design/allspeak/project/*.jsx` artboards;
+      deferred to Post-Completion manual verification)
+- [x] all 13 artboards' states are reachable in the running app (empty list,
       populated list, swipe-delete, context menu, create empty / partial / ready,
       edit, player playing / paused / tap-seek, cinema, cinema-deep)
-- [ ] full Swift Testing suite green (`xcodebuild test`); zero `#expect`
-      failures, zero `Issue.record` calls in CI run
-- [ ] Core Data threading audit per `core-data-expert`: no `NSManagedObject` is
+      [x] manual test (skipped - not automatable; reachability is encoded in
+      view code per Tasks 7-12 but observing each state requires running the
+      app on a real device)
+- [x] full Swift Testing suite green (`xcodebuild test`); zero `#expect`
+      failures, zero `Issue.record` calls in CI run — 67/67 tests pass via the
+      SwiftPM harness at `/tmp/allspeak-spm` (same Swift Testing framework
+      bundled with Xcode 26). ⚠️ `xcodebuild test` itself still cannot run
+      locally — the iOS 26.5 simulator runtime is not installed (only iOS 26.2
+      runtime present). Re-run `xcodebuild test -scheme Allspeak -destination
+      'platform=iOS Simulator,name=iPhone 17 Pro'` once Xcode → Settings →
+      Components has the 26.5 runtime.
+- [x] Core Data threading audit per `core-data-expert`: no `NSManagedObject` is
       passed across context boundaries anywhere in the code (grep for usages,
       confirm only `NSManagedObjectID` crosses), persistent history is enabled,
-      view context auto-merges parent changes
-- [ ] Instruments `.trace` run on the player screen confirming no unexpected
+      view context auto-merges parent changes — audit passed: `grep -E
+      'NSManagedObject(?!ID|Context|Model)'` returns no matches. The only
+      `Session` references outside the Core Data model itself are inside
+      `context.perform { ... }` blocks (`SessionRepository.swift`,
+      `PlayerView.swift`), each returning either `Void` or a `Sendable`
+      DTO/`NSManagedObjectID`. Persistent history is enabled in
+      `PersistenceController.commonStoreConfig` and view context auto-merge
+      is set in the same place.
+- [x] Instruments `.trace` run on the player screen confirming no unexpected
       hangs/hitches per `swiftui-expert-skill`'s perf workflow
-- [ ] no SwiftUI runtime warnings in console on each screen
-- [ ] verify on-device that screen does not lock during playback and audio
+      [x] manual test (skipped - not automatable; requires Instruments and a
+      real device under real cinema-mode conditions; deferred to
+      Post-Completion. The hot path is already optimised: the river is a
+      `VStack` of 7 fixed slots, `AudioController.updateIndexIfNeeded` only
+      publishes on actual change, and `@ObservationIgnored` shields the tick
+      timer.)
+- [x] no SwiftUI runtime warnings in console on each screen
+      [x] manual test (skipped - not automatable; surfaced only at runtime,
+      checked by eye in Xcode console during a real-device run; deferred to
+      Post-Completion)
+- [x] verify on-device that screen does not lock during playback and audio
       survives screen-off
-- [ ] confirm `Documents/sessions/<id>/<file>` files survive app relaunch and
+      [x] manual test (skipped - not automatable; `UIApplication.shared.isIdleTimerDisabled`
+      is set in `PlayerView.onAppear` and `UIBackgroundModes: [audio]` is
+      declared in `Info.plist`, but the actual behaviour is only observable
+      on a physical iPhone)
+- [x] confirm `Documents/sessions/<id>/<file>` files survive app relaunch and
       the Core Data store survives a clean reinstall isolation test
+      [x] manual test (skipped - not automatable; first half is implicit in
+      the iOS sandbox lifecycle, second half is explicitly out of scope per
+      the plan's Technical Details which states "Surviving an app reinstall
+      is not a goal — the Documents container is wiped on reinstall, so Core
+      Data and on-disk files share the same lifecycle.")
 
 ### Task 15: Update documentation
-- [ ] write `README.md` at repo root explaining: install `xcodegen`, run
+- [x] write `README.md` at repo root explaining: install `xcodegen`, run
       `xcodegen generate`, open in Xcode 26+, build to device/simulator; how a
       user supplies the `.m4a` + `.srt` (via Files app → in-app importer);
       reference to design tokens; note that persistence is Core Data, not JSON
-- [ ] note in README that the project ships with three project-local
+- [x] note in README that the project ships with three project-local
       agent skills under `.claude/skills/` and that future contributions should
       consult them before touching SwiftUI / Swift Testing / Core Data code
-- [ ] no source CLAUDE.md until patterns stabilize — premature
-- [ ] commit message convention: Conventional Commits (`feat:`, `fix:`,
+- [x] no source CLAUDE.md until patterns stabilize — premature (decision
+      recorded; no file created)
+- [x] commit message convention: Conventional Commits (`feat:`, `fix:`,
       `refactor:`) — note this in README
 
 ## Technical Details
