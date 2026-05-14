@@ -12,7 +12,8 @@ struct CreateSessionView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var form = CreateSessionFormState()
-    @State private var picker: ActivePicker?
+    @State private var pickerKind: ActivePicker?
+    @State private var isPickerPresented = false
     @State private var isSaving = false
     @State private var loadError: String?
 
@@ -35,14 +36,14 @@ struct CreateSessionView: View {
                         FileSlotView(
                             kind: .audio,
                             filename: form.audioDisplayName,
-                            onChoose: { picker = .audio },
+                            onChoose: { presentPicker(.audio) },
                             onClear: { form.audioURL = nil; form.existingAudioFilename = nil }
                         )
 
                         FileSlotView(
                             kind: .subtitles,
                             filename: form.srtDisplayName,
-                            onChoose: { picker = .subtitles },
+                            onChoose: { presentPicker(.subtitles) },
                             onClear: { form.srtURL = nil; form.existingSrtFilename = nil }
                         )
 
@@ -74,11 +75,8 @@ struct CreateSessionView: View {
                 }
             }
             .fileImporter(
-                isPresented: Binding(
-                    get: { picker != nil },
-                    set: { if !$0 { picker = nil } }
-                ),
-                allowedContentTypes: picker?.allowedTypes ?? [],
+                isPresented: $isPickerPresented,
+                allowedContentTypes: pickerKind?.allowedTypes ?? [],
                 allowsMultipleSelection: false
             ) { result in
                 handlePickerResult(result)
@@ -130,9 +128,14 @@ struct CreateSessionView: View {
         }
     }
 
+    private func presentPicker(_ kind: ActivePicker) {
+        pickerKind = kind
+        isPickerPresented = true
+    }
+
     private func handlePickerResult(_ result: Result<[URL], Error>) {
-        let kind = picker
-        picker = nil
+        let kind = pickerKind
+        pickerKind = nil
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }

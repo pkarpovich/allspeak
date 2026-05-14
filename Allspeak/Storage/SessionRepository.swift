@@ -107,26 +107,45 @@ final class SessionRepository: @unchecked Sendable {
             }
             return sessionID
         }
-        let newURL = try storage.copyIntoSession(srcURL: srcURL, sessionID: sessionID, as: newName)
-        let newDuration: Double? = attribute == "audioFilename" ? await Self.readDuration(at: newURL) : nil
-        let cleanup: String?
+
+        let dir = storage.sessionDir(for: sessionID)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let stagedURL = dir.appendingPathComponent("staged-\(UUID().uuidString)")
+        let scoped = srcURL.startAccessingSecurityScopedResource()
         do {
-            cleanup = try await context.perform {
+            try FileManager.default.copyItem(at: srcURL, to: stagedURL)
+        } catch {
+            if scoped { srcURL.stopAccessingSecurityScopedResource() }
+            throw error
+        }
+        if scoped { srcURL.stopAccessingSecurityScopedResource() }
+
+        let newDuration: Double? = attribute == "audioFilename" ? await Self.readDuration(at: stagedURL) : nil
+        let oldName: String?
+        do {
+            oldName = try await context.perform {
                 let object = try context.existingObject(with: id)
-                let oldName = object.value(forKey: attribute) as? String
+                let prior = object.value(forKey: attribute) as? String
                 object.setValue(newName, forKey: attribute)
                 if attribute == "audioFilename" {
                     object.setValue(newDuration, forKey: "durationSeconds")
                 }
                 try context.save()
-                return (oldName != newName) ? oldName : nil
+                return prior
             }
         } catch {
-            try? FileManager.default.removeItem(at: newURL)
+            try? FileManager.default.removeItem(at: stagedURL)
             throw error
         }
-        if let oldName = cleanup {
-            let oldURL = storage.sessionDir(for: sessionID).appendingPathComponent(oldName)
+
+        let finalURL = dir.appendingPathComponent(newName)
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            try? FileManager.default.removeItem(at: finalURL)
+        }
+        try FileManager.default.moveItem(at: stagedURL, to: finalURL)
+
+        if let oldName, oldName != newName {
+            let oldURL = dir.appendingPathComponent(oldName)
             try? FileManager.default.removeItem(at: oldURL)
         }
     }
