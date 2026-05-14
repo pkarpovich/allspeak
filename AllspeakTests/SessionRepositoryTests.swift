@@ -88,6 +88,45 @@ struct SessionRepositoryTests {
         #expect(FileManager.default.fileExists(atPath: dir.path) == false)
     }
 
+    @Test("updateLastPosition writes seconds visible on the view context (persistPosition path)")
+    func updateLastPositionPersists() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "p.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "p.srt", contents: "s")
+
+        let id = try await repo.importSession(name: "P", audioSrc: audio, srtSrc: srt)
+        try await repo.updateLastPosition(id: id, seconds: 123.5)
+
+        persistence.viewContext.refreshAllObjects()
+        let object = try persistence.viewContext.existingObject(with: id)
+        #expect(object.value(forKey: "lastPositionSeconds") as? Double == 123.5)
+
+        try await repo.updateLastPosition(id: id, seconds: 456.75)
+        persistence.viewContext.refreshAllObjects()
+        let updated = try persistence.viewContext.existingObject(with: id)
+        #expect(updated.value(forKey: "lastPositionSeconds") as? Double == 456.75)
+    }
+
+    @Test("AudioController.persistPosition writes the current time through the repository")
+    @MainActor
+    func audioControllerPersistPositionRoundTrip() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "ac.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "ac.srt", contents: "s")
+
+        let id = try await repo.importSession(name: "AC", audioSrc: audio, srtSrc: srt)
+        let controller = AudioController(repository: repo, sessionID: id)
+        await controller.persistPosition()
+
+        persistence.viewContext.refreshAllObjects()
+        let object = try persistence.viewContext.existingObject(with: id)
+        #expect(object.value(forKey: "lastPositionSeconds") as? Double == 0.0)
+    }
+
     @Test("objectID from import resolves cleanly on the view context (handoff smoke)")
     func objectIDHandoff() async throws {
         let (repo, persistence, _, root) = makeFixture()

@@ -69,12 +69,16 @@ final class AudioController {
         seek(to: player.currentTime + seconds)
     }
 
-    func persistPosition() {
+    func persistPosition() async {
         guard let repository, let sessionID else { return }
         let pos = currentTime
-        Task {
-            try? await repository.updateLastPosition(id: sessionID, seconds: pos)
-        }
+        try? await repository.updateLastPosition(id: sessionID, seconds: pos)
+    }
+
+    func syncCurrentTime() {
+        guard let player else { return }
+        currentTime = player.currentTime
+        updateIndexIfNeeded()
     }
 
     nonisolated static func index(at time: TimeInterval, in cues: [Subtitle]) -> Int {

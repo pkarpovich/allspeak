@@ -9,6 +9,7 @@ struct PlayerView: View {
 
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var controller: AudioController
     @State private var sessionName: String = ""
@@ -96,7 +97,10 @@ struct PlayerView: View {
         .toolbar(.hidden, for: .navigationBar)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-        .task { await loadSession() }
+        .task {
+            AppAudioSession.activatePlayback()
+            await loadSession()
+        }
         .onAppear {
             #if canImport(UIKit)
             UIApplication.shared.isIdleTimerDisabled = true
@@ -107,6 +111,19 @@ struct PlayerView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             #endif
             controller.pause()
+            Task { await controller.persistPosition() }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .background:
+                Task { await controller.persistPosition() }
+            case .active:
+                controller.syncCurrentTime()
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
         }
     }
 
