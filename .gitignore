@@ -5,3 +5,11 @@ xcuserdata/
 DerivedData/
 .swiftpm/
 .build/
+
+# Local signing config (CI generates its own with manual signing + pinned profile)
+Allspeak/Signing.xcconfig
+
+# Release export artifacts
+export/
+ExportOptions.plist
+

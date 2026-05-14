@@ -5,12 +5,18 @@ options:
     iOS: "26.0"
   createIntermediateGroups: true
   developmentLanguage: en
+  fileTypes:
+    icon:
+      file: true
 settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: GGG699AY79
 targets:
   Allspeak:
     type: application
@@ -18,17 +24,20 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: Allspeak
+    configFiles:
+      Debug: Allspeak/Signing.xcconfig
+      Release: Allspeak/Signing.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: Allspeak/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        CODE_SIGN_STYLE: Automatic
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         ENABLE_PREVIEWS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: Allspeak
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
     scheme:
       testTargets:
         - AllspeakTests

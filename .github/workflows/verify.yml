@@ -1,0 +1,67 @@
+name: Verify
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  XCODE_PROJECT: Allspeak.xcodeproj
+  SCHEME: Allspeak
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Stub signing config (unsigned simulator build)
+        run: |
+          cat > Allspeak/Signing.xcconfig << 'EOF'
+          CODE_SIGN_STYLE = Automatic
+          CODE_SIGN_IDENTITY =
+          EOF
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Find iPhone Simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for rt, devs in data['devices'].items():
+              if 'iOS-26' not in rt:
+                  continue
+              for d in devs:
+                  if d['isAvailable'] and 'iPhone' in d.get('name', ''):
+                      print(d['udid'])
+                      sys.exit(0)
+          ")
+          echo "SIM_UDID=$UDID" >> $GITHUB_ENV
+
+      - name: Build
+        run: |
+          xcodebuild build \
+            -project $XCODE_PROJECT \
+            -scheme $SCHEME \
+            -destination "id=$SIM_UDID" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=
+
+      - name: Test
+        run: |
+          xcodebuild test \
+            -project $XCODE_PROJECT \
+            -scheme $SCHEME \
+            -destination "id=$SIM_UDID" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=
