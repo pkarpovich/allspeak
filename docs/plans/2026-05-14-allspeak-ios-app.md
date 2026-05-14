@@ -144,23 +144,25 @@ touches its area.
 ## Implementation Steps
 
 ### Task 1: Repo skeleton with XcodeGen
-- [ ] create `project.yml` declaring an iOS 26 app target `Allspeak` with bundle id
+- [x] create `project.yml` declaring an iOS 26 app target `Allspeak` with bundle id
       `dev.karpovich.allspeak`, Swift 6, single device family iPhone, sources under
       `Allspeak/`, tests under `AllspeakTests/`, and Core Data model
       `Allspeak.xcdatamodeld` included as a source
-- [ ] create `.gitignore` covering `*.xcodeproj`, `*.xcworkspace`, `xcuserdata/`,
+- [x] create `.gitignore` covering `*.xcodeproj`, `*.xcworkspace`, `xcuserdata/`,
       `DerivedData/`, `.swiftpm/`, `.build/`
-- [ ] create `Allspeak/Info.plist` with `UIBackgroundModes: [audio]`,
+- [x] create `Allspeak/Info.plist` with `UIBackgroundModes: [audio]`,
       `UIRequiresFullScreen: true`, `UISupportedInterfaceOrientations: [Portrait]`,
       `UIUserInterfaceStyle: Dark`, and custom UTType declaration for
       `public.subtitle` (`.srt`)
-- [ ] create `Allspeak/AllspeakApp.swift` — `@main struct AllspeakApp: App` with
+- [x] create `Allspeak/AllspeakApp.swift` — `@main struct AllspeakApp: App` with
       a single WindowGroup hosting a placeholder `Text("Allspeak")`; do NOT wire
       Core Data here yet (added in Task 4)
-- [ ] verify `xcodegen generate` produces a buildable `.xcodeproj` and
+- [x] verify `xcodegen generate` produces a buildable `.xcodeproj` and
       `xcodebuild -scheme Allspeak -destination 'generic/platform=iOS Simulator'
       build` succeeds
-- [ ] no tests this task — scaffolding only, no logic. Tests start in Task 3.
+- [x] no tests this task — scaffolding only, no logic. Tests start in Task 3.
+      (AllspeakTests target wired in project.yml with a placeholder test so Task 3
+      can add its first real test without re-touching project config.)
 
 ### Task 2: Design tokens, Color hex init, font helpers
 *Skill required:* `swiftui-expert-skill` — particularly `references/latest-apis.md`
