@@ -13,7 +13,7 @@ struct PlayerView: View {
     @State private var controller: AudioController
     @State private var sessionName: String = ""
     @State private var loadError: String?
-    @State private var cinemaActive: Bool = false
+    @State private var cinema: CinemaMode = .off
 
     init(sessionID: NSManagedObjectID, repository: SessionRepository? = nil) {
         self.sessionID = sessionID
@@ -23,16 +23,20 @@ struct PlayerView: View {
 
     var body: some View {
         ZStack {
-            Tokens.bg.ignoresSafeArea()
+            (cinema.usesDeepBackground ? Tokens.bgDeep : Tokens.bg)
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                PlayerTopBar(
-                    sessionName: sessionName,
-                    cinemaActive: cinemaActive,
-                    onBack: { dismiss() },
-                    onCinema: { cinemaActive.toggle() }
-                )
-                .padding(.top, 18)
+                if !cinema.hidesChrome {
+                    PlayerTopBar(
+                        sessionName: sessionName,
+                        cinemaActive: cinema.isCinema,
+                        onBack: { dismiss() },
+                        onCinema: { applyCinema(.pill) }
+                    )
+                    .padding(.top, 18)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
                 if let loadError {
                     Spacer()
@@ -46,20 +50,47 @@ struct PlayerView: View {
                     SubtitleRiverView(
                         cues: controller.subtitles,
                         currentIndex: controller.currentIndex,
-                        onSeek: { controller.seek(to: $0) }
+                        cinema: cinema,
+                        onSeek: { controller.seek(to: $0) },
+                        onCinemaInput: { applyCinema($0) }
                     )
                 }
 
-                PlayerControlsView(
-                    currentTime: controller.currentTime,
-                    duration: controller.duration,
-                    isPlaying: controller.isPlaying,
-                    onPlayPause: { controller.togglePlayPause() },
-                    onSkipBack: { controller.skip(by: -15) },
-                    onSkipForward: { controller.skip(by: 15) },
-                    onScrub: { controller.seek(to: $0) }
-                )
-                .padding(.bottom, 28)
+                if !cinema.hidesChrome {
+                    PlayerControlsView(
+                        currentTime: controller.currentTime,
+                        duration: controller.duration,
+                        isPlaying: controller.isPlaying,
+                        onPlayPause: { controller.togglePlayPause() },
+                        onSkipBack: { controller.skip(by: -15) },
+                        onSkipForward: { controller.skip(by: 15) },
+                        onScrub: { controller.seek(to: $0) }
+                    )
+                    .padding(.bottom, 28)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+
+            if cinema.isCinema {
+                Color.black
+                    .opacity(cinema.dimOpacity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
+            if cinema.showsExitChip {
+                VStack {
+                    Spacer()
+                    Text("TAP TO EXIT CINEMA")
+                        .font(Tokens.Font.monoSmall)
+                        .tracking(1.4)
+                        .foregroundStyle(Tokens.text3)
+                        .padding(.bottom, 28)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
+                .transition(.opacity)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -76,6 +107,12 @@ struct PlayerView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             #endif
             controller.pause()
+        }
+    }
+
+    private func applyCinema(_ input: CinemaInput) {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            cinema.apply(input)
         }
     }
 

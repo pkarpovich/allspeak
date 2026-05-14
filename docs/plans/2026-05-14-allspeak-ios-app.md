@@ -519,21 +519,37 @@ high-frequency Observable property drives the view.
 ### Task 12: Cinema mode + tap-to-seek polish
 *Skill required:* `swiftui-expert-skill` for safe-area + overlay layering on
 top of `Glass` surfaces.
-- [ ] add `@State private var cinema: CinemaMode = .off` to `PlayerView` where
-      `enum CinemaMode { case off, on, deep }`
-- [ ] tapping the cinema pill cycles `off → on`; tapping the river background
+- [x] add `@State private var cinema: CinemaMode = .off` to `PlayerView` where
+      `enum CinemaMode { case off, on, deep }`. The enum lives in the new
+      `Allspeak/Views/Player/CinemaMode.swift` alongside `CinemaInput` and a
+      pure `next(for:)` mutator so the state machine can be unit-tested
+      without SwiftUI. `PlayerTopBar.cinemaActive` now binds to
+      `cinema.isCinema` (the existing `Bool` flag was removed).
+- [x] tapping the cinema pill cycles `off → on`; tapping the river background
       in `on` exits to `off`; long-press on the river in `on` enters `deep`;
-      tap in `deep` exits to `off`
-- [ ] in `.on`: `PlayerTopBar` + `PlayerControlsView` hidden, dim overlay
-      (`Color.black.opacity(0.22)`, ignoresSafeArea), `tap to exit cinema` mono
-      uppercase chip near the bottom
-- [ ] in `.deep`: background swapped to `Tokens.bgDeep`, dim overlay 0.5, no chip
-- [ ] tap-to-seek polish: brief 200ms highlight overlay on the tapped line
-      (`accent` at 10% with a hairline border) and a `JUMP → HH:MM:SS` mono
-      chip that fades out
-- [ ] write `AllspeakTests/CinemaModeTests.swift` parameterized state-machine
-      transitions (factor `CinemaMode` mutator into a pure function)
-- [ ] run tests — must pass before Task 13
+      tap in `deep` exits to `off`. From `.deep`, the cinema pill (also a tap
+      on the river) is treated as an exit to `.off` per the same rule. A tap
+      on a subtitle line in cinema seeks AND exits cinema, preserving the
+      central tap-to-seek interaction.
+- [x] in `.on`: `PlayerTopBar` + `PlayerControlsView` hidden (driven by
+      `cinema.hidesChrome`), dim overlay `Color.black.opacity(0.22)`
+      ignoringSafeArea, `TAP TO EXIT CINEMA` mono uppercase chip near the
+      bottom.
+- [x] in `.deep`: background swapped to `Tokens.bgDeep`, dim overlay 0.5
+      (`cinema.dimOpacity`), no chip (`cinema.showsExitChip == false`).
+- [x] tap-to-seek polish: 200ms accent-tinted highlight overlay on the tapped
+      line (10% accent fill + hairline border, 14pt corner) and a `JUMP →
+      HH:MM:SS` mono chip that fades out over ~900ms via `withAnimation`.
+- [x] write `AllspeakTests/CinemaModeTests.swift` — 6 cases including a
+      parameterized full transition table (9 input pairs) and a parameterized
+      derived-flags table (3 states × 5 derived properties).
+- [x] tests verified via SwiftPM (65 tests total: 59 prior + 6 new
+      CinemaMode cases, all pass). Full iOS module typechecks against the
+      iOS 26.5 simulator SDK via `swiftc -typecheck` (with a Session stub
+      since Core Data class codegen runs inside Xcode's build phase). Same
+      ⚠️ environment limitation as Tasks 3-11: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed (only iOS
+      26.2 runtime is present).
 
 ### Task 13: Background audio + scene phase wiring + position persistence
 *Skill required:* `swiftui-expert-skill` for `@Environment(\.scenePhase)`
