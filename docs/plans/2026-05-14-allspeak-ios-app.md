@@ -189,21 +189,27 @@ to confirm the chosen `Color`, `ShapeStyle`, and material APIs are current on iO
 ### Task 3: SRT parser
 *Skill required:* `swift-testing-expert` — for `@Test(arguments:)` parameterized
 cases on multi-line cues, tag stripping, BOM/CRLF, malformed timestamps.
-- [ ] create `Allspeak/Models/Subtitle.swift` — `struct Subtitle: Identifiable,
+- [x] create `Allspeak/Models/Subtitle.swift` — `struct Subtitle: Identifiable,
       Hashable { let index: Int; let start: TimeInterval; let end: TimeInterval;
       let text: String }`
-- [ ] create `Allspeak/Models/SRTParser.swift` — `enum SRTParser` with
+- [x] create `Allspeak/Models/SRTParser.swift` — `enum SRTParser` with
       `static func parse(_ raw: String) -> [Subtitle]`
-- [ ] parse `HH:MM:SS,mmm --> HH:MM:SS,mmm` (and tolerate `.` separator), join
+- [x] parse `HH:MM:SS,mmm --> HH:MM:SS,mmm` (and tolerate `.` separator), join
       multi-line cue text with `\n`, strip `<i>`, `</i>`, `<b>`, `</b>`,
       `{\an1..9}`, `{\\anN}`
-- [ ] tolerate BOM, CRLF, blank lines, missing trailing newline, malformed indices
-- [ ] write `AllspeakTests/SRTParserTests.swift` as a `@Suite("SRT parser",
+- [x] tolerate BOM, CRLF, blank lines, missing trailing newline, malformed indices
+- [x] write `AllspeakTests/SRTParserTests.swift` as a `@Suite("SRT parser",
       .tags(.parser))` with parameterized cases for: well-formed, multi-line,
       `<i>`/`<b>` strip, `{\an8}` strip, BOM, CRLF, empty → `[]`, malformed
-      timestamp → cue skipped (no crash)
-- [ ] run `xcodebuild test -scheme Allspeak -destination
-      'platform=iOS Simulator,name=iPhone 16 Pro'` — must pass before Task 4
+      timestamp → cue skipped (no crash). Also added `AllspeakTests/Tags.swift`
+      declaring `.parser`, `.coreData`, `.audio`, `.storage` tags so later
+      tasks don't need to revisit.
+- [x] tests verified via SwiftPM (14 tests pass with Swift Testing, identical
+      framework as in the Xcode test bundle); `xcodebuild test` itself cannot run
+      in the current environment because the iOS 26.5 simulator runtime is not
+      installed (only 26.2 is present). ⚠️ Re-run `xcodebuild test -scheme
+      Allspeak -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` after
+      installing the iOS 26.5 simulator runtime via Xcode → Settings → Components.
 
 ### Task 4: Core Data stack — model file + PersistenceController
 *Skill required:* `core-data-expert` — read sections on stack setup, persistent
