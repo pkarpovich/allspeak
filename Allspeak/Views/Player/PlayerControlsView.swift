@@ -9,90 +9,78 @@ struct PlayerControlsView: View {
     let onSkipForward: () -> Void
     let onScrub: ((TimeInterval) -> Void)?
 
+    @State private var dragValue: Double?
+
+    private var displayTime: TimeInterval { dragValue ?? currentTime }
+    private var sliderRange: ClosedRange<Double> { 0...max(duration, 0.001) }
+
     var body: some View {
-        VStack(spacing: 0) {
-            progressBar
-                .padding(.bottom, 12)
+        VStack(spacing: 14) {
+            scrubber
 
             HStack {
-                Text(PlayerTime.formatHHMMSS(currentTime))
+                Text(PlayerTime.formatHHMMSS(displayTime))
                 Spacer()
-                Text(PlayerTime.formatRemaining(current: currentTime, duration: duration))
+                Text(PlayerTime.formatRemaining(current: displayTime, duration: duration))
             }
             .font(Tokens.Font.monoSmall)
-            .kerning(0.4)
+            .tracking(0.4)
             .foregroundStyle(Tokens.text3)
-            .padding(.bottom, 14)
 
             transport
         }
-        .padding(EdgeInsets(top: 14, leading: 18, bottom: 16, trailing: 18))
+        .padding(EdgeInsets(top: 16, leading: 18, bottom: 18, trailing: 18))
         .glassEffect(.regular, in: .rect(cornerRadius: 28))
         .padding(.horizontal, 14)
     }
 
-    private var progressBar: some View {
-        GeometryReader { geo in
-            let progress = duration > 0 ? min(max(currentTime / duration, 0), 1) : 0
-            let filledWidth = geo.size.width * progress
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Color(white: 1, opacity: 0.10))
-                Rectangle()
-                    .fill(Tokens.accent)
-                    .frame(width: filledWidth)
-                    .shadow(color: Tokens.accentDim, radius: 4, x: 0, y: 0)
-                    .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+    private var scrubber: some View {
+        Slider(
+            value: Binding(
+                get: { dragValue ?? currentTime },
+                set: { dragValue = $0 }
+            ),
+            in: sliderRange
+        ) { editing in
+            if editing == false {
+                if let v = dragValue {
+                    onScrub?(v)
+                    dragValue = nil
+                }
             }
-            .contentShape(Rectangle())
-            .gesture(
-                onScrub == nil ? nil :
-                DragGesture(minimumDistance: 0)
-                    .onEnded { value in
-                        guard duration > 0, geo.size.width > 0 else { return }
-                        let frac = min(max(value.location.x / geo.size.width, 0), 1)
-                        onScrub?(duration * frac)
-                    }
-            )
         }
-        .frame(height: 3)
+        .tint(Tokens.accent)
+        .disabled(onScrub == nil || duration <= 0)
     }
 
     private var transport: some View {
         HStack {
-            transportButton(systemName: Icons.back15, size: 48, glyphSize: 26, action: onSkipBack)
+            skipButton(systemName: Icons.back15, action: onSkipBack)
                 .accessibilityLabel("Skip back 15 seconds")
             Spacer()
             Button(action: onPlayPause) {
-                ZStack {
-                    Circle()
-                        .fill(Tokens.accentDim.opacity(0.5))
-                        .overlay(Circle().strokeBorder(Tokens.accentDim, lineWidth: 0.5))
-                    Image(systemName: isPlaying ? Icons.pause : Icons.play)
-                        .font(.system(size: 24, weight: .regular))
-                        .foregroundStyle(Tokens.accent)
-                }
-                .frame(width: 56, height: 56)
+                Image(systemName: isPlaying ? Icons.pause : Icons.play)
+                    .font(.system(size: 22, weight: .semibold))
+                    .frame(width: 60, height: 60)
             }
+            .buttonStyle(.glassProminent)
+            .tint(Tokens.accent)
             .accessibilityLabel(isPlaying ? "Pause" : "Play")
             Spacer()
-            transportButton(systemName: Icons.forward15, size: 48, glyphSize: 26, action: onSkipForward)
+            skipButton(systemName: Icons.forward15, action: onSkipForward)
                 .accessibilityLabel("Skip forward 15 seconds")
         }
         .padding(.horizontal, 12)
     }
 
-    private func transportButton(
-        systemName: String,
-        size: CGFloat,
-        glyphSize: CGFloat,
-        action: @escaping () -> Void
-    ) -> some View {
+    private func skipButton(systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: glyphSize, weight: .regular))
+                .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(Tokens.text)
-                .frame(width: size, height: size)
+                .frame(width: 48, height: 48)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 }
