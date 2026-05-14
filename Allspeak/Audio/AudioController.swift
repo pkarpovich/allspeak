@@ -16,6 +16,7 @@ final class AudioController {
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var displayLink: CADisplayLink?
     @ObservationIgnored private var tickerProxy: TickerProxy?
+    @ObservationIgnored private var playerDelegateProxy: PlayerDelegateProxy?
     @ObservationIgnored private let repository: SessionRepository?
     @ObservationIgnored private let sessionID: NSManagedObjectID?
     @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
@@ -28,7 +29,12 @@ final class AudioController {
     func load(audio: URL, subtitles: [Subtitle], title: String) throws {
         let player = try AVAudioPlayer(contentsOf: audio)
         player.prepareToPlay()
+        let delegateProxy = PlayerDelegateProxy { [weak self] in
+            self?.playerDidFinish()
+        }
+        player.delegate = delegateProxy
         self.player = player
+        self.playerDelegateProxy = delegateProxy
         self.subtitles = subtitles
         self.duration = player.duration
         self.currentTime = 0
@@ -170,6 +176,15 @@ final class AudioController {
         }
     }
 
+    fileprivate func playerDidFinish() {
+        guard let player else { return }
+        currentTime = player.currentTime
+        updateIndexIfNeeded()
+        isPlaying = false
+        stopTicker()
+        publishNowPlayingTime()
+    }
+
     private func publishNowPlayingTime() {
         #if os(iOS) || os(tvOS) || os(visionOS)
         guard player != nil else { return }
@@ -196,5 +211,20 @@ private final class TickerProxy: NSObject {
 
     @objc func tick() {
         controller?.tick()
+    }
+}
+
+private final class PlayerDelegateProxy: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
+    private let onFinish: @MainActor @Sendable () -> Void
+
+    init(onFinish: @escaping @MainActor @Sendable () -> Void) {
+        self.onFinish = onFinish
+        super.init()
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
+        Task { @MainActor in
+            self.onFinish()
+        }
     }
 }
