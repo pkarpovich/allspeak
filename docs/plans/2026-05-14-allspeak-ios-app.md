@@ -394,28 +394,42 @@ background-context.
 *Skill required:* `swiftui-expert-skill` for `.fileImporter` and form-style
 layout; `core-data-expert` for the background-context import path; `swift-
 testing-expert` for the `canSave` parameterized test.
-- [ ] create `Allspeak/Views/Create/CreateSessionView.swift` presented as a sheet
+- [x] create `Allspeak/Views/Create/CreateSessionView.swift` presented as a sheet
       from `SessionsView`; supports both `.new` and `.edit(NSManagedObjectID)` via
       an enum init parameter
-- [ ] toolbar: `Cancel` leading (text), title `New session` / `Edit session`
-- [ ] create `Allspeak/Views/Create/NameField.swift` — surface card with eyebrow
+- [x] toolbar: `Cancel` leading (text), title `New session` / `Edit session`
+- [x] create `Allspeak/Views/Create/NameField.swift` — surface card with eyebrow
       label `SESSION NAME` (mono 11/text3/uppercase/letterspacing 0.6) and a
       `TextField` styled 22/500/-0.5 with `.tint(Tokens.accent)`; placeholder
       `e.g. After the Light · 21:30`
-- [ ] create `Allspeak/Views/Create/FileSlotView.swift` — empty state: dashed
+- [x] create `Allspeak/Views/Create/FileSlotView.swift` — empty state: dashed
       rounded rect, icon-square (audio waves or captions), CTA "Choose audio
       file" / "Choose subtitles file", filename label below; filled state: solid
       surface, accent-tinted icon square, filename + close (×) button
-- [ ] empty state uses `.fileImporter(isPresented:allowedContentTypes:)` with
+- [x] empty state uses `.fileImporter(isPresented:allowedContentTypes:)` with
       `UTType.audio` (and explicitly `.mpeg4Audio`) and the SRT custom UTType
       declared in `Info.plist`
-- [ ] save button: pill, accent (`Tokens.accent`) with dark text `#1A150E` when
+- [x] save button: pill, accent (`Tokens.accent`) with dark text `#1A150E` when
       all three fields populated, surface/text4 when disabled; on tap calls
       `repository.importSession(...)` and dismisses; in `.edit` mode, both file
-      pickers can be re-used to swap files (delete old file in dir, copy new)
-- [ ] write `AllspeakTests/CreateSessionViewModelTests.swift` parameterized
-      `canSave` cases (empty name, missing audio, missing srt, all set)
-- [ ] run tests — must pass before Task 10
+      pickers can be re-used to swap files (delete old file in dir, copy new).
+      Added `SessionRepository.replaceAudio(id:srcURL:)` /
+      `replaceSubtitle(id:srcURL:)` (background-context, swaps the on-disk file
+      and updates the `audioFilename` / `srtFilename` attribute) and
+      `fetchSnapshot(id:)` returning a `Sendable` DTO so the edit form can
+      prefill name + existing filenames from the view context without leaking
+      an `NSManagedObject`.
+- [x] write `AllspeakTests/CreateSessionViewModelTests.swift` parameterized
+      `canSave` cases (empty name, missing audio, missing srt, all set) — 7
+      parameterized + 3 standalone cases covering trimmed-name, edit-mode
+      existing filenames, and URL-vs-existing display priority
+- [x] tests verified via SwiftPM (44 tests total: 40 prior + 4 new
+      CreateSessionViewModelTests cases, all pass). Module typechecks cleanly
+      against the iOS 26.5 simulator SDK via `swiftc -typecheck` with a
+      transient Session stub (Xcode generates the real class at build time).
+      Same ⚠️ environment limitation as Tasks 3-8: `xcodebuild` cannot resolve
+      a destination locally because the iOS 26.5 platform / simulator runtime
+      is not installed (only iOS 26.2 runtime is present).
 
 ### Task 10: Player chrome (top bar, controls, audio plumbing)
 *Skill required:* `swiftui-expert-skill` — `references/liquid-glass.md` for the

@@ -1,0 +1,216 @@
+import CoreData
+import SwiftUI
+import UniformTypeIdentifiers
+
+enum CreateSessionMode: Hashable {
+    case new
+    case edit(NSManagedObjectID)
+}
+
+struct CreateSessionView: View {
+    let mode: CreateSessionMode
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var form = CreateSessionFormState()
+    @State private var picker: ActivePicker?
+    @State private var isSaving = false
+    @State private var loadError: String?
+
+    private let repository: SessionRepository
+
+    init(mode: CreateSessionMode, repository: SessionRepository = SessionRepository()) {
+        self.mode = mode
+        self.repository = repository
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Tokens.bg.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 14) {
+                        NameField(text: $form.name)
+
+                        FileSlotView(
+                            kind: .audio,
+                            filename: form.audioDisplayName,
+                            onChoose: { picker = .audio },
+                            onClear: { form.audioURL = nil; form.existingAudioFilename = nil }
+                        )
+
+                        FileSlotView(
+                            kind: .subtitles,
+                            filename: form.srtDisplayName,
+                            onChoose: { picker = .subtitles },
+                            onClear: { form.srtURL = nil; form.existingSrtFilename = nil }
+                        )
+
+                        if let loadError {
+                            Text(loadError)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Tokens.danger)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 120)
+                }
+
+                VStack {
+                    Spacer()
+                    saveButton
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                }
+            }
+            .navigationTitle(navigationTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(Tokens.text2)
+                }
+            }
+            .fileImporter(
+                isPresented: Binding(
+                    get: { picker != nil },
+                    set: { if !$0 { picker = nil } }
+                ),
+                allowedContentTypes: picker?.allowedTypes ?? [],
+                allowsMultipleSelection: false
+            ) { result in
+                handlePickerResult(result)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(Tokens.accent)
+        .task { await loadIfEditing() }
+    }
+
+    private var navigationTitle: String {
+        switch mode {
+        case .new: return "New session"
+        case .edit: return "Edit session"
+        }
+    }
+
+    private var saveButton: some View {
+        Button(action: save) {
+            Text(isSaving ? "Saving…" : "Save session")
+                .font(.system(size: 17, weight: .semibold))
+                .kerning(-0.2)
+                .foregroundStyle(form.canSave ? Tokens.onAccent : Tokens.text4)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(form.canSave ? Tokens.accent : Tokens.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .strokeBorder(form.canSave ? Color.clear : Tokens.hairline, lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!form.canSave || isSaving)
+        .accessibilityLabel(isSaving ? "Saving" : "Save session")
+    }
+
+    private func loadIfEditing() async {
+        guard case let .edit(id) = mode else { return }
+        do {
+            let snapshot = try await repository.fetchSnapshot(id: id)
+            form.name = snapshot.name
+            form.existingAudioFilename = snapshot.audioFilename
+            form.existingSrtFilename = snapshot.srtFilename
+        } catch {
+            loadError = "Couldn't load session: \(error.localizedDescription)"
+        }
+    }
+
+    private func handlePickerResult(_ result: Result<[URL], Error>) {
+        let kind = picker
+        picker = nil
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            switch kind {
+            case .audio:
+                form.audioURL = url
+                form.existingAudioFilename = nil
+            case .subtitles:
+                form.srtURL = url
+                form.existingSrtFilename = nil
+            case .none:
+                break
+            }
+        case .failure:
+            break
+        }
+    }
+
+    private func save() {
+        guard form.canSave, !isSaving else { return }
+        isSaving = true
+        let snapshot = form
+        let mode = self.mode
+        let repo = repository
+        Task {
+            do {
+                try await performSave(snapshot: snapshot, mode: mode, repository: repo)
+                await MainActor.run {
+                    isSaving = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    loadError = "Couldn't save: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func performSave(
+        snapshot: CreateSessionFormState,
+        mode: CreateSessionMode,
+        repository: SessionRepository
+    ) async throws {
+        switch mode {
+        case .new:
+            guard let audio = snapshot.audioURL, let srt = snapshot.srtURL else { return }
+            _ = try await repository.importSession(
+                name: snapshot.trimmedName,
+                audioSrc: audio,
+                srtSrc: srt
+            )
+        case .edit(let id):
+            try await repository.rename(id: id, to: snapshot.trimmedName)
+            if let audio = snapshot.audioURL {
+                try await repository.replaceAudio(id: id, srcURL: audio)
+            }
+            if let srt = snapshot.srtURL {
+                try await repository.replaceSubtitle(id: id, srcURL: srt)
+            }
+        }
+    }
+}
+
+private enum ActivePicker: Hashable {
+    case audio
+    case subtitles
+
+    var allowedTypes: [UTType] {
+        switch self {
+        case .audio:
+            return [.audio, .mpeg4Audio]
+        case .subtitles:
+            if let srt = UTType("public.subtitle.srt") {
+                return [srt, .plainText]
+            }
+            return [.plainText]
+        }
+    }
+}

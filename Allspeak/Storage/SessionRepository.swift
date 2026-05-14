@@ -1,6 +1,13 @@
 import CoreData
 import Foundation
 
+struct SessionSnapshot: Equatable, Sendable {
+    let id: NSManagedObjectID
+    let name: String
+    let audioFilename: String
+    let srtFilename: String
+}
+
 final class SessionRepository: @unchecked Sendable {
     private let persistence: PersistenceController
     private let storage: DocumentsStorage
@@ -47,6 +54,43 @@ final class SessionRepository: @unchecked Sendable {
         try await context.perform {
             let object = try context.existingObject(with: id)
             object.setValue(newName, forKey: "name")
+            try context.save()
+        }
+    }
+
+    func fetchSnapshot(id: NSManagedObjectID) async throws -> SessionSnapshot {
+        let context = persistence.viewContext
+        return try await context.perform {
+            let object = try context.existingObject(with: id)
+            let name = object.value(forKey: "name") as? String ?? ""
+            let audio = object.value(forKey: "audioFilename") as? String ?? ""
+            let srt = object.value(forKey: "srtFilename") as? String ?? ""
+            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt)
+        }
+    }
+
+    func replaceAudio(id: NSManagedObjectID, srcURL: URL) async throws {
+        try await replaceFile(id: id, srcURL: srcURL, attribute: "audioFilename")
+    }
+
+    func replaceSubtitle(id: NSManagedObjectID, srcURL: URL) async throws {
+        try await replaceFile(id: id, srcURL: srcURL, attribute: "srtFilename")
+    }
+
+    private func replaceFile(id: NSManagedObjectID, srcURL: URL, attribute: String) async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+        let newName = srcURL.lastPathComponent
+        try await context.perform {
+            let object = try context.existingObject(with: id)
+            guard let sessionID = object.value(forKey: "id") as? UUID else { return }
+            let oldName = object.value(forKey: attribute) as? String
+            try storage.copyIntoSession(srcURL: srcURL, sessionID: sessionID, as: newName)
+            if let oldName, oldName != newName {
+                let oldURL = storage.sessionDir(for: sessionID).appendingPathComponent(oldName)
+                try? FileManager.default.removeItem(at: oldURL)
+            }
+            object.setValue(newName, forKey: attribute)
             try context.save()
         }
     }

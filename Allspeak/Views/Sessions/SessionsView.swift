@@ -9,6 +9,7 @@ struct SessionsView: View {
 
     @State private var repository = SessionRepository()
     @State private var renameTarget: RenameTarget?
+    @State private var isPresentingCreate = false
 
     var body: some View {
         NavigationStack {
@@ -26,7 +27,7 @@ struct SessionsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        // Create flow lands in Task 9
+                        isPresentingCreate = true
                     } label: {
                         Image(systemName: Icons.plus)
                             .font(.system(size: 22, weight: .regular))
@@ -39,6 +40,9 @@ struct SessionsView: View {
             }
             .navigationDestination(for: NSManagedObjectID.self) { id in
                 PlayerView(sessionID: id)
+            }
+            .sheet(isPresented: $isPresentingCreate) {
+                CreateSessionView(mode: .new, repository: repository)
             }
             .alert(
                 "Rename session",
