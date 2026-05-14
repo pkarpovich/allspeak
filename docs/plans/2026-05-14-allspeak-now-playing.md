@@ -131,26 +131,26 @@ Reach a state where:
 ### Task 1: NowPlayingCenter wrapper (metadata + elapsed time)
 *Skill required:* `swift-testing-expert` — for `.serialized` suite
 pattern, mirroring `AudioSessionTests.swift`.
-- [ ] create `Allspeak/Audio/NowPlayingCenter.swift` — `@MainActor
+- [x] create `Allspeak/Audio/NowPlayingCenter.swift` — `@MainActor
       final class NowPlayingCenter` with `static let shared`
-- [ ] private mutable `info: [String: Any]` mirroring
+- [x] private mutable `info: [String: Any]` mirroring
       `MPNowPlayingInfoCenter.default().nowPlayingInfo`; each setter
       mutates the dict and writes back to the system center in one
       assignment to avoid losing keys
-- [ ] `func setMetadata(title: String, duration: TimeInterval)` —
+- [x] `func setMetadata(title: String, duration: TimeInterval)` —
       sets `MPMediaItemPropertyTitle` and
       `MPMediaItemPropertyPlaybackDuration`
-- [ ] `func updateTime(_ time: TimeInterval, isPlaying: Bool)` — sets
+- [x] `func updateTime(_ time: TimeInterval, isPlaying: Bool)` — sets
       `MPNowPlayingInfoPropertyElapsedPlaybackTime` and
       `MPNowPlayingInfoPropertyPlaybackRate` (1.0 or 0.0)
-- [ ] `func clear()` — sets `MPNowPlayingInfoCenter.default().nowPlayingInfo
+- [x] `func clear()` — sets `MPNowPlayingInfoCenter.default().nowPlayingInfo
       = nil` and resets local cache
-- [ ] write `AllspeakTests/NowPlayingCenterTests.swift` —
+- [x] write `AllspeakTests/NowPlayingCenterTests.swift` —
       `@Suite("NowPlayingCenter", .tags(.audio), .serialized)`:
       `setMetadata` writes the title/duration keys; `updateTime`
       writes elapsed/rate; `clear` nils everything. Each test calls
       `clear()` in a defer to reset singleton state
-- [ ] run `xcodebuild test -scheme Allspeak -destination
+- [x] run `xcodebuild test -scheme Allspeak -destination
       'platform=iOS Simulator,name=iPhone 17 Pro'` — must pass before
       Task 2
 
