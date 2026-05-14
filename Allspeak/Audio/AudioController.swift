@@ -65,7 +65,12 @@ final class AudioController {
             currentTime = 0
             updateIndexIfNeeded()
         }
-        player.play()
+        guard player.play() else {
+            isPlaying = false
+            stopTicker()
+            publishNowPlayingTime()
+            return
+        }
         isPlaying = true
         startTicker()
         publishNowPlayingTime()
