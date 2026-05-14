@@ -52,7 +52,9 @@ struct NowPlayingCenterTests {
         defer { NowPlayingCenter.shared.clear() }
 
         NowPlayingCenter.shared.configureRemoteCommands(
-            playPause: {},
+            play: {},
+            pause: {},
+            togglePlayPause: {},
             skip: { _ in },
             seek: { _ in }
         )
@@ -75,7 +77,9 @@ struct NowPlayingCenterTests {
     @Test("teardownRemoteCommands disables commands")
     func teardownRemoteCommandsDisablesCommands() {
         NowPlayingCenter.shared.configureRemoteCommands(
-            playPause: {},
+            play: {},
+            pause: {},
+            togglePlayPause: {},
             skip: { _ in },
             seek: { _ in }
         )
@@ -95,30 +99,31 @@ struct NowPlayingCenterTests {
     func configureRemoteCommandsIsIdempotent() {
         defer { NowPlayingCenter.shared.clear() }
 
-        var playPauseCalls = 0
         let configure = {
             NowPlayingCenter.shared.configureRemoteCommands(
-                playPause: { playPauseCalls += 1 },
+                play: {},
+                pause: {},
+                togglePlayPause: {},
                 skip: { _ in },
                 seek: { _ in }
             )
         }
 
         configure()
+        let countAfterFirst = NowPlayingCenter.shared.registeredTargetCount
+
         configure()
         configure()
 
-        NowPlayingCenter.shared.teardownRemoteCommands()
-
-        let center = MPRemoteCommandCenter.shared()
-        #expect(center.playCommand.isEnabled == false)
-        #expect(playPauseCalls == 0)
+        #expect(NowPlayingCenter.shared.registeredTargetCount == countAfterFirst)
     }
 
     @Test("clear tears down remote commands")
     func clearTearsDownRemoteCommands() {
         NowPlayingCenter.shared.configureRemoteCommands(
-            playPause: {},
+            play: {},
+            pause: {},
+            togglePlayPause: {},
             skip: { _ in },
             seek: { _ in }
         )
@@ -128,6 +133,7 @@ struct NowPlayingCenterTests {
         let center = MPRemoteCommandCenter.shared()
         #expect(center.playCommand.isEnabled == false)
         #expect(center.changePlaybackPositionCommand.isEnabled == false)
+        #expect(NowPlayingCenter.shared.registeredTargetCount == 0)
     }
 }
 #endif

@@ -32,21 +32,28 @@ final class NowPlayingCenter {
     }
 
     func configureRemoteCommands(
-        playPause: @escaping () -> Void,
-        skip: @escaping (TimeInterval) -> Void,
-        seek: @escaping (TimeInterval) -> Void
+        play: @escaping @Sendable () -> Void,
+        pause: @escaping @Sendable () -> Void,
+        togglePlayPause: @escaping @Sendable () -> Void,
+        skip: @escaping @Sendable (TimeInterval) -> Void,
+        seek: @escaping @Sendable (TimeInterval) -> Void
     ) {
         let center = MPRemoteCommandCenter.shared()
 
         removeAllRegisteredTargets()
 
-        let playPauseHandler: (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus = { _ in
-            playPause()
+        register(command: center.playCommand) { _ in
+            play()
             return .success
         }
-        register(command: center.playCommand, handler: playPauseHandler)
-        register(command: center.pauseCommand, handler: playPauseHandler)
-        register(command: center.togglePlayPauseCommand, handler: playPauseHandler)
+        register(command: center.pauseCommand) { _ in
+            pause()
+            return .success
+        }
+        register(command: center.togglePlayPauseCommand) { _ in
+            togglePlayPause()
+            return .success
+        }
 
         center.skipBackwardCommand.preferredIntervals = [15]
         register(command: center.skipBackwardCommand) { _ in
@@ -94,6 +101,8 @@ final class NowPlayingCenter {
     private func commit() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
+
+    var registeredTargetCount: Int { registeredTargets.count }
 
     private func register(
         command: MPRemoteCommand,

@@ -38,14 +38,20 @@ final class AudioController {
         #if os(iOS) || os(tvOS) || os(visionOS)
         NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration)
         NowPlayingCenter.shared.configureRemoteCommands(
-            playPause: { [weak self] in
-                MainActor.assumeIsolated { self?.togglePlayPause() }
+            play: { [weak self] in
+                Task { @MainActor in self?.play() }
+            },
+            pause: { [weak self] in
+                Task { @MainActor in self?.pause() }
+            },
+            togglePlayPause: { [weak self] in
+                Task { @MainActor in self?.togglePlayPause() }
             },
             skip: { [weak self] seconds in
-                MainActor.assumeIsolated { self?.skip(by: seconds) }
+                Task { @MainActor in self?.skip(by: seconds) }
             },
             seek: { [weak self] time in
-                MainActor.assumeIsolated { self?.seek(to: time) }
+                Task { @MainActor in self?.seek(to: time) }
             }
         )
         NowPlayingCenter.shared.updateTime(0, isPlaying: false)

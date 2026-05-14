@@ -53,10 +53,14 @@ struct AudioControllerNowPlayingTests {
         let controller = AudioController()
         try controller.load(audio: fixture, subtitles: [], title: "T")
         controller.play()
+
+        let afterPlay = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        #expect(afterPlay[MPNowPlayingInfoPropertyPlaybackRate] as? Double == 1.0)
+
         controller.pause()
 
-        let info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        #expect(info[MPNowPlayingInfoPropertyPlaybackRate] as? Double == 0.0)
+        let afterPause = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        #expect(afterPause[MPNowPlayingInfoPropertyPlaybackRate] as? Double == 0.0)
     }
 
     @Test("after seek, elapsed time matches the seek target")
@@ -84,12 +88,12 @@ struct AudioControllerNowPlayingTests {
 
         let controller = AudioController()
         try controller.load(audio: fixture, subtitles: [], title: "T")
-        controller.seek(to: 10)
-        controller.skip(by: -15)
+        controller.seek(to: 5)
+        controller.skip(by: 10)
 
         let info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         let elapsed = try #require(info[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? TimeInterval)
-        #expect(abs(elapsed - 0) < 0.05)
+        #expect(abs(elapsed - 15) < 0.05)
     }
 
     @Test("load registers remote command handlers")
