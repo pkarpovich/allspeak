@@ -7,13 +7,8 @@ struct SubtitleLineView: View {
 
     var body: some View {
         let style = Self.style(for: state)
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(state == .current ? Tokens.accent : Color.clear)
-                .frame(width: 3)
-                .shadow(color: state == .current ? Tokens.accent.opacity(0.45) : .clear, radius: 6)
-                .padding(.top, 6)
-                .padding(.bottom, 8)
+        HStack(alignment: .top, spacing: 14) {
+            Color.clear.frame(width: 3)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(text)
@@ -34,8 +29,18 @@ struct SubtitleLineView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 14)
+        .overlay(alignment: .leading) {
+            if state == .current {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(Tokens.accent)
+                    .frame(width: 3)
+                    .padding(.top, 6)
+                    .padding(.bottom, 8)
+                    .shadow(color: Tokens.accent.opacity(0.45), radius: 6)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     private struct Style {

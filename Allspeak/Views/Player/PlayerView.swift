@@ -27,8 +27,34 @@ struct PlayerView: View {
             (cinema.usesDeepBackground ? Tokens.bgDeep : Tokens.bg)
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                if !cinema.hidesChrome {
+            if let loadError {
+                Text(loadError)
+                    .font(Tokens.Font.mono)
+                    .foregroundStyle(Tokens.text3)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                SubtitleRiverView(
+                    cues: controller.subtitles,
+                    currentIndex: controller.currentIndex,
+                    cinema: cinema,
+                    onSeek: { controller.seek(to: $0) },
+                    onCinemaInput: { applyCinema($0) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            if cinema.isCinema {
+                Color.black
+                    .opacity(cinema.dimOpacity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
+            if !cinema.hidesChrome {
+                VStack(spacing: 0) {
                     PlayerTopBar(
                         sessionName: sessionName,
                         cinemaActive: cinema.isCinema,
@@ -36,28 +62,9 @@ struct PlayerView: View {
                         onCinema: { applyCinema(.pill) }
                     )
                     .padding(.top, 18)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
 
-                if let loadError {
-                    Spacer()
-                    Text(loadError)
-                        .font(Tokens.Font.mono)
-                        .foregroundStyle(Tokens.text3)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                    Spacer()
-                } else {
-                    SubtitleRiverView(
-                        cues: controller.subtitles,
-                        currentIndex: controller.currentIndex,
-                        cinema: cinema,
-                        onSeek: { controller.seek(to: $0) },
-                        onCinemaInput: { applyCinema($0) }
-                    )
-                }
+                    Spacer(minLength: 0)
 
-                if !cinema.hidesChrome {
                     PlayerControlsView(
                         currentTime: controller.currentTime,
                         duration: controller.duration,
@@ -68,16 +75,10 @@ struct PlayerView: View {
                         onScrub: { controller.seek(to: $0) }
                     )
                     .padding(.bottom, 28)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-            }
-
-            if cinema.isCinema {
-                Color.black
-                    .opacity(cinema.dimOpacity)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(true)
+                .transition(.opacity)
             }
 
             if cinema.showsExitChip {
