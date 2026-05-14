@@ -161,6 +161,7 @@ final class AudioController {
         if !player.isPlaying {
             isPlaying = false
             stopTicker()
+            publishNowPlayingTime()
         }
     }
 
