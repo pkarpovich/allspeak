@@ -124,9 +124,12 @@ final class SessionRepository: @unchecked Sendable {
         let newDuration: Double? = attribute == "audioFilename" ? await Self.readDuration(at: stagedURL) : nil
 
         let finalURL = dir.appendingPathComponent(newName)
+        let backupName = "backup-\(UUID().uuidString)"
+        var backupURL: URL?
         do {
             if FileManager.default.fileExists(atPath: finalURL.path) {
-                _ = try FileManager.default.replaceItemAt(finalURL, withItemAt: stagedURL)
+                _ = try FileManager.default.replaceItemAt(finalURL, withItemAt: stagedURL, backupItemName: backupName, options: [.withoutDeletingBackupItem])
+                backupURL = dir.appendingPathComponent(backupName)
             } else {
                 try FileManager.default.moveItem(at: stagedURL, to: finalURL)
             }
@@ -145,12 +148,18 @@ final class SessionRepository: @unchecked Sendable {
                 try context.save()
             }
         } catch {
-            if oldName != newName {
+            if let backupURL, FileManager.default.fileExists(atPath: backupURL.path) {
+                try? FileManager.default.removeItem(at: finalURL)
+                try? FileManager.default.moveItem(at: backupURL, to: finalURL)
+            } else {
                 try? FileManager.default.removeItem(at: finalURL)
             }
             throw error
         }
 
+        if let backupURL {
+            try? FileManager.default.removeItem(at: backupURL)
+        }
         if let oldName, oldName != newName {
             let oldURL = dir.appendingPathComponent(oldName)
             try? FileManager.default.removeItem(at: oldURL)

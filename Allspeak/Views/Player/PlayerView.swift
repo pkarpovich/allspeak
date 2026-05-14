@@ -169,6 +169,10 @@ struct PlayerView: View {
         do {
             let srtText = try readSubtitleText(at: srtURL)
             let cues = SRTParser.parse(srtText)
+            guard !cues.isEmpty else {
+                loadError = "Subtitle file has no cues — pick a valid .srt."
+                return
+            }
             try controller.load(audio: audioURL, subtitles: cues)
             if let pos = snap.lastPosition, pos > 0, pos < controller.duration {
                 controller.seek(to: pos)

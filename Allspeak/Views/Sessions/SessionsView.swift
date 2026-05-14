@@ -88,12 +88,12 @@ struct SessionsView: View {
         List {
             ForEach(sessions, id: \.objectID) { session in
                 let id = session.objectID
-                let currentName = session.name
+                let currentName = session.name ?? ""
                 NavigationLink(value: id) {
                     SessionCardView(
                         name: currentName,
                         duration: session.durationSeconds?.doubleValue,
-                        createdAt: session.createdAt
+                        createdAt: session.createdAt ?? Date()
                     )
                 }
                 .listRowBackground(Color.clear)
