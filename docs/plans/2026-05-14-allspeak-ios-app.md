@@ -435,25 +435,46 @@ testing-expert` for the `canSave` parameterized test.
 *Skill required:* `swiftui-expert-skill` — `references/liquid-glass.md` for the
 top bar / control plate glass treatment, and the section on hiding system chrome
 (`.statusBarHidden`, `.persistentSystemOverlays(.hidden)`).
-- [ ] create `Allspeak/Views/Player/PlayerView.swift` taking
+- [x] create `Allspeak/Views/Player/PlayerView.swift` taking
       `sessionID: NSManagedObjectID`; in `.task` resolve the session on the view
       context (read-only), pull file URLs via `DocumentsStorage`, parse SRT, and
-      hand off to `AudioController.load(...)`
-- [ ] hide system chrome: `.toolbar(.hidden, for: .navigationBar)`,
+      hand off to `AudioController.load(...)`. Resumes from
+      `lastPositionSeconds` if it is set and inside the track. View context
+      `perform` is used for the read; only a `Sendable` local snapshot crosses
+      the closure boundary (no `NSManagedObject` leaks). Replaces the Task-7
+      stub.
+- [x] hide system chrome: `.toolbar(.hidden, for: .navigationBar)`,
       `.statusBarHidden(true)`, `.persistentSystemOverlays(.hidden)` (home
       indicator), and `UIApplication.shared.isIdleTimerDisabled = true` on
-      appear / `false` on disappear
-- [ ] create `Allspeak/Views/Player/PlayerTopBar.swift` — back glass pill (44×44)
+      appear / `false` on disappear. The `UIApplication` calls are gated by
+      `#if canImport(UIKit)` so the macOS-hosted SwiftPM test harness keeps
+      compiling.
+- [x] create `Allspeak/Views/Player/PlayerTopBar.swift` — back glass pill (44×44)
       with chevron, middle glass title pill (flex, 44h, centered session name),
-      cinema toggle glass pill (44×44, accent crescent)
-- [ ] create `Allspeak/Views/Player/PlayerControlsView.swift` — bottom glass
+      cinema toggle glass pill (44×44, accent crescent). All three pills use
+      the existing `chromeGlass` modifier; cinema active state swaps the
+      glyph tint to `Tokens.warm`. `onBack` calls `dismiss()`, `onCinema`
+      flips a local `@State` flag — full Cinema-mode wiring lands in Task 12.
+- [x] create `Allspeak/Views/Player/PlayerControlsView.swift` — bottom glass
       plate with 3pt progress bar (track white/0.10, fill `Tokens.accent` with
-      bloom), mono timestamps (`current` left, `−remaining` right), transport
-      row: back15, accent-tinted play/pause (56×56 ember pad), fwd15
-- [ ] mono time formatter (HH:MM:SS) — pure function
-- [ ] write `AllspeakTests/TimeFormatterTests.swift` parameterized: zero,
-      sub-minute, sub-hour, multi-hour
-- [ ] run tests — must pass before Task 11
+      bloom), mono timestamps (`current` left, `-remaining` right), transport
+      row: back15, accent-tinted play/pause (56×56 ember pad), fwd15. Progress
+      bar accepts an optional scrub gesture (`onScrub`) so tap-to-seek on the
+      track works without disturbing the visual layout the design specifies.
+- [x] mono time formatter (HH:MM:SS) — pure function. Lives in
+      `Allspeak/Views/Player/TimeFormatter.swift` as `enum PlayerTime` with
+      `formatHHMMSS` and a `formatRemaining` helper that prefixes a hyphen.
+      Non-finite / negative values clamp to "00:00:00".
+- [x] write `AllspeakTests/TimeFormatterTests.swift` parameterized: zero,
+      sub-minute, sub-hour, multi-hour (14 `formatHHMMSS` cases + 6
+      `formatRemaining` cases + 1 non-finite case).
+- [x] tests verified via SwiftPM (47 tests total: 44 prior + 3 new
+      TimeFormatter cases, all pass). Full iOS module typechecks against the
+      iOS 26.5 simulator SDK via `swiftc -typecheck` (with a Session stub
+      since Core Data class codegen runs inside Xcode's build phase). Same
+      ⚠️ environment limitation as Tasks 3-9: `xcodebuild` cannot resolve
+      a destination locally because the iOS 26.5 simulator runtime is not
+      installed (only iOS 26.2 is present).
 
 ### Task 11: SubtitleRiver and SubtitleLine
 *Skill required:* `swiftui-expert-skill` — the performance section on
