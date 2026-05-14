@@ -100,12 +100,13 @@ final class SessionRepository: @unchecked Sendable {
         let context = persistence.newBackgroundContext()
         let storage = self.storage
         let newName = srcURL.lastPathComponent
-        let sessionID: UUID = try await context.perform {
+        let (sessionID, oldName): (UUID, String?) = try await context.perform {
             let object = try context.existingObject(with: id)
             guard let sessionID = object.value(forKey: "id") as? UUID else {
                 throw CocoaError(.fileNoSuchFile)
             }
-            return sessionID
+            let prior = object.value(forKey: attribute) as? String
+            return (sessionID, prior)
         }
 
         let dir = storage.sessionDir(for: sessionID)
@@ -121,28 +122,34 @@ final class SessionRepository: @unchecked Sendable {
         if scoped { srcURL.stopAccessingSecurityScopedResource() }
 
         let newDuration: Double? = attribute == "audioFilename" ? await Self.readDuration(at: stagedURL) : nil
-        let oldName: String?
+
+        let finalURL = dir.appendingPathComponent(newName)
         do {
-            oldName = try await context.perform {
-                let object = try context.existingObject(with: id)
-                let prior = object.value(forKey: attribute) as? String
-                object.setValue(newName, forKey: attribute)
-                if attribute == "audioFilename" {
-                    object.setValue(newDuration, forKey: "durationSeconds")
-                }
-                try context.save()
-                return prior
+            if FileManager.default.fileExists(atPath: finalURL.path) {
+                _ = try FileManager.default.replaceItemAt(finalURL, withItemAt: stagedURL)
+            } else {
+                try FileManager.default.moveItem(at: stagedURL, to: finalURL)
             }
         } catch {
             try? FileManager.default.removeItem(at: stagedURL)
             throw error
         }
 
-        let finalURL = dir.appendingPathComponent(newName)
-        if FileManager.default.fileExists(atPath: finalURL.path) {
-            try? FileManager.default.removeItem(at: finalURL)
+        do {
+            try await context.perform {
+                let object = try context.existingObject(with: id)
+                object.setValue(newName, forKey: attribute)
+                if attribute == "audioFilename", let newDuration {
+                    object.setValue(newDuration, forKey: "durationSeconds")
+                }
+                try context.save()
+            }
+        } catch {
+            if oldName != newName {
+                try? FileManager.default.removeItem(at: finalURL)
+            }
+            throw error
         }
-        try FileManager.default.moveItem(at: stagedURL, to: finalURL)
 
         if let oldName, oldName != newName {
             let oldURL = dir.appendingPathComponent(oldName)
