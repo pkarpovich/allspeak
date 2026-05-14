@@ -113,6 +113,9 @@ struct PlayerView: View {
             #endif
             controller.pause()
             Task { await controller.persistPosition() }
+            #if os(iOS) || os(tvOS) || os(visionOS)
+            NowPlayingCenter.shared.clear()
+            #endif
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {

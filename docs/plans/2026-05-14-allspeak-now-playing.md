@@ -214,15 +214,15 @@ state-transition checks.
 
 ### Task 4: PlayerView wiring
 *Skill required:* none specifically — straight plumbing.
-- [ ] update `PlayerView.loadSession()` to pass `snap.name` into the
+- [x] update `PlayerView.loadSession()` to pass `snap.name` into the
       new `controller.load(audio:..., subtitles:..., title:)` signature
-- [ ] in `PlayerView.onDisappear`: keep the existing
+- [x] in `PlayerView.onDisappear`: keep the existing
       `controller.pause()` and `persistPosition()`, then call
       `NowPlayingCenter.shared.clear()` so the lock-screen card
       disappears when the user leaves the player. (Keep
       `MPNowPlayingInfoCenter` populated while in the background —
       only clear when leaving the screen.)
-- [ ] no new tests this task — wiring only; covered by Task 3's
+- [x] no new tests this task — wiring only; covered by Task 3's
       integration assertions
 
 ### Task 5: Verify acceptance criteria
