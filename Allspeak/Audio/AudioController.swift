@@ -36,6 +36,11 @@ final class AudioController {
 
     func play() {
         guard let player else { return }
+        if player.currentTime >= player.duration - 0.05 {
+            player.currentTime = 0
+            currentTime = 0
+            updateIndexIfNeeded()
+        }
         player.play()
         isPlaying = true
         startTicker()

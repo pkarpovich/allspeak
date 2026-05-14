@@ -10,6 +10,7 @@ struct SessionsView: View {
     @State private var repository = SessionRepository()
     @State private var renameTarget: RenameTarget?
     @State private var isPresentingCreate = false
+    @State private var editTarget: EditTarget?
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,9 @@ struct SessionsView: View {
             .sheet(isPresented: $isPresentingCreate) {
                 CreateSessionView(mode: .new, repository: repository)
             }
+            .sheet(item: $editTarget) { target in
+                CreateSessionView(mode: .edit(target.id), repository: repository)
+            }
             .alert(
                 "Rename session",
                 isPresented: Binding(
@@ -51,13 +55,15 @@ struct SessionsView: View {
                     set: { if !$0 { renameTarget = nil } }
                 ),
                 presenting: renameTarget
-            ) { target in
+            ) { _ in
                 TextField("Name", text: Binding(
                     get: { renameTarget?.draft ?? "" },
                     set: { renameTarget?.draft = $0 }
                 ))
                 Button("Cancel", role: .cancel) { renameTarget = nil }
-                Button("Save") { commitRename(target) }
+                Button("Save") {
+                    if let live = renameTarget { commitRename(live) }
+                }
             }
         }
         .preferredColorScheme(.dark)
@@ -103,6 +109,11 @@ struct SessionsView: View {
                 }
                 .contextMenu {
                     Button {
+                        editTarget = EditTarget(id: id)
+                    } label: {
+                        Label("Edit", systemImage: Icons.pencil)
+                    }
+                    Button {
                         renameTarget = RenameTarget(id: id, draft: currentName)
                     } label: {
                         Label("Rename", systemImage: Icons.pencil)
@@ -138,4 +149,8 @@ struct SessionsView: View {
 private struct RenameTarget: Identifiable {
     let id: NSManagedObjectID
     var draft: String
+}
+
+private struct EditTarget: Identifiable {
+    let id: NSManagedObjectID
 }
