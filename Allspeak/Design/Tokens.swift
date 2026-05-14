@@ -18,12 +18,6 @@ enum Tokens {
     static let danger        = Color(hex: "#C26A5C")
     static let onAccent      = Color(hex: "#1A150E")
 
-    enum Glyph {
-        static let chrome    = Color(red: 28.0 / 255.0, green: 26.0 / 255.0, blue: 30.0 / 255.0, opacity: 0.55)
-        static let plate     = Color(red: 20.0 / 255.0, green: 18.0 / 255.0, blue: 22.0 / 255.0, opacity: 0.70)
-        static let pill      = Color(red: 36.0 / 255.0, green: 34.0 / 255.0, blue: 40.0 / 255.0, opacity: 0.60)
-    }
-
     enum Font {
         static let body              = SwiftUI.Font.system(size: 17, weight: .regular, design: .default)
         static let bodyEmphasized    = SwiftUI.Font.system(size: 17, weight: .semibold, design: .default)

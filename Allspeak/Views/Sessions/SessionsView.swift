@@ -35,7 +35,7 @@ struct SessionsView: View {
                             .foregroundStyle(Tokens.accent)
                             .frame(width: 44, height: 44)
                     }
-                    .chromeGlass(cornerRadius: 22)
+                    .glassEffect(.regular, in: .circle)
                     .accessibilityLabel("Add session")
                 }
             }
@@ -89,46 +89,44 @@ struct SessionsView: View {
             ForEach(sessions, id: \.objectID) { session in
                 let id = session.objectID
                 let currentName = session.name ?? ""
-                NavigationLink(value: id) {
-                    SessionCardView(
-                        name: currentName,
-                        duration: session.durationSeconds?.doubleValue,
-                        createdAt: session.createdAt ?? Date()
-                    )
-                }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        deleteSession(id)
-                    } label: {
-                        Label("Delete", systemImage: Icons.trash)
+                Section {
+                    NavigationLink(value: id) {
+                        SessionCardView(
+                            name: currentName,
+                            duration: session.durationSeconds?.doubleValue,
+                            createdAt: session.createdAt ?? Date()
+                        )
                     }
-                    .tint(Tokens.danger)
-                }
-                .contextMenu {
-                    Button {
-                        editTarget = EditTarget(id: id)
-                    } label: {
-                        Label("Edit", systemImage: Icons.pencil)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            deleteSession(id)
+                        } label: {
+                            Label("Delete", systemImage: Icons.trash)
+                        }
+                        .tint(Tokens.danger)
                     }
-                    Button {
-                        renameTarget = RenameTarget(id: id, draft: currentName)
-                    } label: {
-                        Label("Rename", systemImage: Icons.pencil)
-                    }
-                    Button(role: .destructive) {
-                        deleteSession(id)
-                    } label: {
-                        Label("Delete", systemImage: Icons.trash)
+                    .contextMenu {
+                        Button {
+                            editTarget = EditTarget(id: id)
+                        } label: {
+                            Label("Edit", systemImage: Icons.pencil)
+                        }
+                        Button {
+                            renameTarget = RenameTarget(id: id, draft: currentName)
+                        } label: {
+                            Label("Rename", systemImage: Icons.pencil)
+                        }
+                        Button(role: .destructive) {
+                            deleteSession(id)
+                        } label: {
+                            Label("Delete", systemImage: Icons.trash)
+                        }
                     }
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .environment(\.defaultMinListRowHeight, 0)
     }
 
     private func deleteSession(_ id: NSManagedObjectID) {

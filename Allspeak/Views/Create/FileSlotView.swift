@@ -18,7 +18,7 @@ enum FileSlotKind {
         }
     }
 
-    var emptyHint: String {
+    var hint: String {
         switch self {
         case .audio: return ".m4a"
         case .subtitles: return ".srt"
@@ -26,135 +26,48 @@ enum FileSlotKind {
     }
 }
 
-struct FileSlotView: View {
+struct FileSlotRow: View {
     let kind: FileSlotKind
     let filename: String?
     var onChoose: () -> Void
     var onClear: () -> Void
 
     var body: some View {
-        Group {
-            if let filename {
-                filledState(filename: filename)
-            } else {
-                emptyState
-            }
-        }
-        .animation(.easeOut(duration: 0.15), value: filename)
-    }
-
-    private var emptyState: some View {
         Button(action: onChoose) {
-            HStack(spacing: 14) {
-                iconSquare(tint: Tokens.text3, background: Color(white: 1, opacity: 0.03))
+            HStack(spacing: 12) {
+                Image(systemName: kind.iconSymbol)
+                    .font(.system(size: 18))
+                    .foregroundStyle(filename == nil ? Tokens.text3 : Tokens.accent)
+                    .frame(width: 28)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(kind.emptyTitle)
-                        .font(.system(size: 17, weight: .medium))
-                        .kerning(-0.3)
-                        .foregroundStyle(Tokens.text2)
-                    Text(kind.emptyHint)
-                        .font(Tokens.Font.monoSmall)
-                        .kerning(0.5)
-                        .foregroundStyle(Tokens.text4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(filename ?? kind.emptyTitle)
+                        .font(.system(size: 17))
+                        .foregroundStyle(filename == nil ? Tokens.text2 : Tokens.text)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Text(kind.hint)
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Tokens.text3)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Image(systemName: Icons.chevronRight)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Tokens.text4)
+                Spacer()
+
+                if filename != nil {
+                    Button(action: onClear) {
+                        Image(systemName: Icons.close)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Tokens.text3)
+                            .padding(8)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Remove \(kind.hint) file")
+                }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(
-                        Tokens.hairline,
-                        style: StrokeStyle(lineWidth: 0.8, dash: [4, 4])
-                    )
-            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
-    private func filledState(filename: String) -> some View {
-        HStack(spacing: 14) {
-            iconSquare(tint: Tokens.accent, background: Tokens.accentDim)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(filename)
-                    .font(.system(size: 17, weight: .medium))
-                    .kerning(-0.3)
-                    .foregroundStyle(Tokens.text)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(kind.emptyHint)
-                    .font(Tokens.Font.monoSmall)
-                    .kerning(0.5)
-                    .foregroundStyle(Tokens.text3)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(action: onClear) {
-                Image(systemName: Icons.close)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Tokens.text3)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        Circle().fill(Color(white: 1, opacity: 0.04))
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(kind.emptyHint) file")
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Tokens.surface)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        stops: [
-                            .init(color: Tokens.surfaceTop, location: 0),
-                            .init(color: .clear, location: 0.35)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .allowsHitTesting(false)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Tokens.hairline, lineWidth: 0.5)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onTapGesture(perform: onChoose)
-    }
-
-    private func iconSquare(tint: Color, background: Color) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(background)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Tokens.hairlineSoft, lineWidth: 0.5)
-                )
-                .frame(width: 38, height: 38)
-
-            Image(systemName: kind.iconSymbol)
-                .font(.system(size: 16, weight: .regular))
-                .foregroundStyle(tint)
-        }
     }
 }

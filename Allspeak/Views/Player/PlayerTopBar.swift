@@ -14,7 +14,7 @@ struct PlayerTopBar: View {
                     .foregroundStyle(Tokens.text)
                     .frame(width: 44, height: 44)
             }
-            .chromeGlass(cornerRadius: 22)
+            .glassEffect(.regular, in: .circle)
             .accessibilityLabel("Back")
 
             HStack {
@@ -28,7 +28,7 @@ struct PlayerTopBar: View {
             }
             .padding(.horizontal, 18)
             .frame(height: 44)
-            .chromeGlass(cornerRadius: 22)
+            .glassEffect(.regular, in: .capsule)
 
             Button(action: onCinema) {
                 Image(systemName: Icons.cinema)
@@ -36,7 +36,7 @@ struct PlayerTopBar: View {
                     .foregroundStyle(cinemaActive ? Tokens.warm : Tokens.accent)
                     .frame(width: 44, height: 44)
             }
-            .chromeGlass(cornerRadius: 22)
+            .glassEffect(.regular, in: .circle)
             .accessibilityLabel(cinemaActive ? "Exit cinema mode" : "Enter cinema mode")
         }
         .padding(.horizontal, 14)

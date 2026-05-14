@@ -27,7 +27,7 @@ struct PlayerControlsView: View {
             transport
         }
         .padding(EdgeInsets(top: 14, leading: 18, bottom: 16, trailing: 18))
-        .chromeGlass(cornerRadius: 28)
+        .glassEffect(.regular, in: .rect(cornerRadius: 28))
         .padding(.horizontal, 14)
     }
 

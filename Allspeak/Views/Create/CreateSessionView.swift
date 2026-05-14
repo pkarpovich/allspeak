@@ -26,52 +26,54 @@ struct CreateSessionView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Tokens.bg.ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: 14) {
-                        NameField(text: $form.name)
-
-                        FileSlotView(
-                            kind: .audio,
-                            filename: form.audioDisplayName,
-                            onChoose: { presentPicker(.audio) },
-                            onClear: { form.audioURL = nil; form.existingAudioFilename = nil }
-                        )
-
-                        FileSlotView(
-                            kind: .subtitles,
-                            filename: form.srtDisplayName,
-                            onChoose: { presentPicker(.subtitles) },
-                            onClear: { form.srtURL = nil; form.existingSrtFilename = nil }
-                        )
-
-                        if let loadError {
-                            Text(loadError)
-                                .font(.system(size: 13))
-                                .foregroundStyle(Tokens.danger)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 120)
+            Form {
+                Section {
+                    TextField("After the Light · 21:30", text: $form.name)
+                        .font(.system(size: 17))
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.done)
+                } header: {
+                    Text("Session name")
                 }
 
-                VStack {
-                    Spacer()
-                    saveButton
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
+                Section {
+                    FileSlotRow(
+                        kind: .audio,
+                        filename: form.audioDisplayName,
+                        onChoose: { presentPicker(.audio) },
+                        onClear: { form.audioURL = nil; form.existingAudioFilename = nil }
+                    )
+
+                    FileSlotRow(
+                        kind: .subtitles,
+                        filename: form.srtDisplayName,
+                        onChoose: { presentPicker(.subtitles) },
+                        onClear: { form.srtURL = nil; form.existingSrtFilename = nil }
+                    )
+                } header: {
+                    Text("Files")
+                }
+
+                if let loadError {
+                    Section {
+                        Text(loadError)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Tokens.danger)
+                    }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Tokens.bg.ignoresSafeArea())
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(Tokens.text2)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isSaving ? "Saving…" : "Save") { save() }
+                        .fontWeight(.semibold)
+                        .disabled(!form.canSave || isSaving)
                 }
             }
             .fileImporter(
@@ -92,28 +94,6 @@ struct CreateSessionView: View {
         case .new: return "New session"
         case .edit: return "Edit session"
         }
-    }
-
-    private var saveButton: some View {
-        Button(action: save) {
-            Text(isSaving ? "Saving…" : "Save session")
-                .font(.system(size: 17, weight: .semibold))
-                .kerning(-0.2)
-                .foregroundStyle(form.canSave ? Tokens.onAccent : Tokens.text4)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .fill(form.canSave ? Tokens.accent : Tokens.surface)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .strokeBorder(form.canSave ? Color.clear : Tokens.hairline, lineWidth: 0.5)
-                )
-        }
-        .buttonStyle(.plain)
-        .disabled(!form.canSave || isSaving)
-        .accessibilityLabel(isSaving ? "Saving" : "Save session")
     }
 
     private func loadIfEditing() async {
