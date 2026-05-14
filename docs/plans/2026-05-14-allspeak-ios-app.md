@@ -321,23 +321,41 @@ for parameterized cases.
 title nav bar, and Liquid Glass toolbar items; `core-data-expert` for the correct
 fetch predicate / sort descriptor and avoidance of `NSManagedObject` leakage
 beyond the view layer.
-- [ ] create `Allspeak/Views/Sessions/SessionsView.swift` — root view of a
+- [x] create `Allspeak/Views/Sessions/SessionsView.swift` — root view of a
       `NavigationStack`; large title "Sessions" via `.navigationTitle` +
       `.navigationBarTitleDisplayMode(.large)` with a `+` toolbar item rendered
       with the `chromeGlass` modifier and accent-tinted `plus` icon
-- [ ] use `@FetchRequest` with sort descriptor `createdAt` descending, no
-      predicate, animation `.default`
-- [ ] background is `Tokens.bg` ignoring safe areas; `.preferredColorScheme(.dark)`
+- [x] use `@FetchRequest` with sort descriptor `createdAt` descending, no
+      predicate, animation `.default` (typed `FetchedResults<Session>` against
+      the Xcode-generated `Session` class — `representedClassName="Session"`,
+      codegen=class)
+- [x] background is `Tokens.bg` ignoring safe areas; `.preferredColorScheme(.dark)`
       on the root view as belt-and-braces alongside the Info.plist style
-- [ ] empty state when `sessions.isEmpty`: vertically centered "No sessions"
+- [x] empty state when `sessions.isEmpty`: vertically centered "No sessions"
       (text3) + "Tap + to add one before the screening" (text4), sizes per design
-- [ ] populated state: `ScrollView` + `LazyVStack(spacing: 8)` of
+- [x] populated state: `ScrollView` + `LazyVStack(spacing: 8)` of
       `SessionCardView` rows with horizontal padding 16; tapping a row pushes
       `PlayerView(sessionID: NSManagedObjectID)` onto the stack — pass the
-      objectID, not the managed object itself
-- [ ] write `AllspeakTests/SessionsListBindingTests.swift` for any factored-out
-      pure helper (duration formatter, "May 11"-style date formatter)
-- [ ] run tests — must pass before Task 8
+      objectID, not the managed object itself. PlayerView landed as a stub for
+      Task 10 to flesh out; the row uses `NavigationLink(value:)` plus
+      `.navigationDestination(for: NSManagedObjectID.self)`. SessionCardView
+      shipped with the basic film-reel/surface/chevron layout so Task 8 only
+      needs to add `.swipeActions` and `.contextMenu`. `AllspeakApp.swift` now
+      injects `\.managedObjectContext` and roots at `SessionsView`.
+- [x] write `AllspeakTests/SessionsListBindingTests.swift` for any factored-out
+      pure helper (duration formatter, "May 11"-style date formatter) — 16
+      parameterized cases (11 duration + 5 date)
+- [x] tests verified via SwiftPM (40 tests total: 38 prior + 2 new
+      SessionsListBindingTests with parameterized cases, all pass). Full module
+      including SwiftUI views typechecks against the iOS 26.5 simulator SDK via
+      `swiftc -typecheck`. Same ⚠️ environment limitation as Tasks 3-6:
+      `xcodebuild test` cannot run locally until the iOS 26.5 simulator
+      runtime is installed (only iOS 26.2 runtime present). PersistenceController
+      gained a macOS-only fallback that runs `xcrun momc` on the bundled
+      `Allspeak.xcdatamodeld` when no pre-compiled `.momd` is found — needed
+      so SwiftPM tests can load the model without an Xcode build phase. iOS
+      device builds never enter this fallback because Xcode ships the
+      compiled momd in the app bundle.
 
 ### Task 8: SessionCardView, swipe-to-delete, long-press menu
 *Skill required:* `swiftui-expert-skill` for `.swipeActions` and `.contextMenu`

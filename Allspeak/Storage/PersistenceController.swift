@@ -74,8 +74,36 @@ final class PersistenceController: @unchecked Sendable {
                    let model = NSManagedObjectModel(contentsOf: momdURL) {
                     return model
                 }
+                if let bundle = Bundle(url: url),
+                   let modelURL = bundle.url(forResource: "Allspeak", withExtension: "xcdatamodeld"),
+                   let model = compileAndLoad(xcdatamodeld: modelURL) {
+                    return model
+                }
             }
         }
         fatalError("Failed to load Allspeak Core Data model")
     }()
+
+    private static func compileAndLoad(xcdatamodeld: URL) -> NSManagedObjectModel? {
+        #if os(macOS)
+        let temp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-momc-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["momc", xcdatamodeld.path, temp.path]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        let momd = temp.appendingPathComponent("Allspeak.momd")
+        return NSManagedObjectModel(contentsOf: momd)
+        #else
+        return nil
+        #endif
+    }
 }
