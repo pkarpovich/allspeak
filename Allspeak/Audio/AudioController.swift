@@ -16,22 +16,52 @@ final class AudioController {
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var displayLink: CADisplayLink?
     @ObservationIgnored private var tickerProxy: TickerProxy?
+    @ObservationIgnored private var playerDelegateProxy: PlayerDelegateProxy?
     @ObservationIgnored private let repository: SessionRepository?
     @ObservationIgnored private let sessionID: NSManagedObjectID?
+    @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
 
     init(repository: SessionRepository? = nil, sessionID: NSManagedObjectID? = nil) {
         self.repository = repository
         self.sessionID = sessionID
     }
 
-    func load(audio: URL, subtitles: [Subtitle]) throws {
+    func load(audio: URL, subtitles: [Subtitle], title: String) throws {
         let player = try AVAudioPlayer(contentsOf: audio)
         player.prepareToPlay()
+        let delegateProxy = PlayerDelegateProxy { [weak self] in
+            self?.playerDidFinish()
+        }
+        player.delegate = delegateProxy
         self.player = player
+        self.playerDelegateProxy = delegateProxy
         self.subtitles = subtitles
         self.duration = player.duration
         self.currentTime = 0
         self.currentIndex = Self.index(at: 0, in: subtitles)
+        self.lastNowPlayingTickSecond = -1
+
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration)
+        NowPlayingCenter.shared.configureRemoteCommands(
+            play: { [weak self] in
+                Task { @MainActor in self?.play() }
+            },
+            pause: { [weak self] in
+                Task { @MainActor in self?.pause() }
+            },
+            togglePlayPause: { [weak self] in
+                Task { @MainActor in self?.togglePlayPause() }
+            },
+            skip: { [weak self] seconds in
+                Task { @MainActor in self?.skip(by: seconds) }
+            },
+            seek: { [weak self] time in
+                Task { @MainActor in self?.seek(to: time) }
+            }
+        )
+        NowPlayingCenter.shared.updateTime(0, isPlaying: false)
+        #endif
     }
 
     func play() {
@@ -41,9 +71,15 @@ final class AudioController {
             currentTime = 0
             updateIndexIfNeeded()
         }
-        player.play()
+        guard player.play() else {
+            isPlaying = false
+            stopTicker()
+            publishNowPlayingTime()
+            return
+        }
         isPlaying = true
         startTicker()
+        publishNowPlayingTime()
     }
 
     func pause() {
@@ -54,6 +90,7 @@ final class AudioController {
         }
         isPlaying = false
         stopTicker()
+        publishNowPlayingTime()
     }
 
     func togglePlayPause() {
@@ -67,6 +104,7 @@ final class AudioController {
         player.currentTime = clamped
         currentTime = clamped
         updateIndexIfNeeded()
+        publishNowPlayingTime()
     }
 
     func skip(by seconds: TimeInterval) {
@@ -126,10 +164,32 @@ final class AudioController {
         guard let player else { return }
         currentTime = player.currentTime
         updateIndexIfNeeded()
+        let second = Int(currentTime)
+        if second != lastNowPlayingTickSecond {
+            lastNowPlayingTickSecond = second
+            publishNowPlayingTime()
+        }
         if !player.isPlaying {
             isPlaying = false
             stopTicker()
+            publishNowPlayingTime()
         }
+    }
+
+    fileprivate func playerDidFinish() {
+        guard player != nil else { return }
+        currentTime = duration
+        updateIndexIfNeeded()
+        isPlaying = false
+        stopTicker()
+        publishNowPlayingTime()
+    }
+
+    private func publishNowPlayingTime() {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        guard player != nil else { return }
+        NowPlayingCenter.shared.updateTime(currentTime, isPlaying: isPlaying)
+        #endif
     }
 
     private func updateIndexIfNeeded() {
@@ -151,5 +211,20 @@ private final class TickerProxy: NSObject {
 
     @objc func tick() {
         controller?.tick()
+    }
+}
+
+private final class PlayerDelegateProxy: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
+    private let onFinish: @MainActor @Sendable () -> Void
+
+    init(onFinish: @escaping @MainActor @Sendable () -> Void) {
+        self.onFinish = onFinish
+        super.init()
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
+        Task { @MainActor in
+            self.onFinish()
+        }
     }
 }
