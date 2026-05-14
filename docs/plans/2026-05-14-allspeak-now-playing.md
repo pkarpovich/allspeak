@@ -234,10 +234,10 @@ state-transition checks.
 - [x] clean teardown after leaving player (skipped - manual on-device verification; covered by `NowPlayingCenter.clear()` unit tests in Task 1)
 
 ### Task 6: Update documentation
-- [ ] update `README.md` Architecture section to mention Now Playing
+- [x] update `README.md` Architecture section to mention Now Playing
       integration via `MPNowPlayingInfoCenter` /
       `MPRemoteCommandCenter`
-- [ ] note in the README that the lock-screen / Control Center card
+- [x] note in the README that the lock-screen / Control Center card
       and remote command transport are powered by the same
       `AudioController` state — no separate code path
 

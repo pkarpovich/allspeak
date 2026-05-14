@@ -55,6 +55,12 @@ source location after import.
 - **Audio**: Single `AVAudioPlayer` per player session, `.playback` category,
   `.spokenAudio` mode. Background audio is permitted via the `audio` entry in
   `UIBackgroundModes`.
+- **Now Playing**: Lock-screen and Control Center integration via
+  `MPNowPlayingInfoCenter` (metadata + elapsed time) and
+  `MPRemoteCommandCenter` (play/pause, ±15s skip, scrub). The card and
+  remote-command transport (lock screen, Control Center, AirPods stem,
+  external Bluetooth remotes) are driven by the same `AudioController`
+  state — there is no separate playback path.
 - **SRT parsing**: pure Swift, parsed on demand when entering the player.
 - **Design tokens**: all colors, fonts, and glyphs live in
   `Allspeak/Design/{Tokens,Glass,Icons}.swift`. No inline hex outside
