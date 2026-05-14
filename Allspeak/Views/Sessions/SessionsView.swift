@@ -7,6 +7,9 @@ struct SessionsView: View {
         animation: .default
     ) private var sessions: FetchedResults<Session>
 
+    @State private var repository = SessionRepository()
+    @State private var renameTarget: RenameTarget?
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -37,6 +40,21 @@ struct SessionsView: View {
             .navigationDestination(for: NSManagedObjectID.self) { id in
                 PlayerView(sessionID: id)
             }
+            .alert(
+                "Rename session",
+                isPresented: Binding(
+                    get: { renameTarget != nil },
+                    set: { if !$0 { renameTarget = nil } }
+                ),
+                presenting: renameTarget
+            ) { target in
+                TextField("Name", text: Binding(
+                    get: { renameTarget?.draft ?? "" },
+                    set: { renameTarget?.draft = $0 }
+                ))
+                Button("Cancel", role: .cancel) { renameTarget = nil }
+                Button("Save") { commitRename(target) }
+            }
         }
         .preferredColorScheme(.dark)
         .tint(Tokens.accent)
@@ -57,22 +75,63 @@ struct SessionsView: View {
     }
 
     private var populatedList: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(sessions, id: \.objectID) { session in
-                    NavigationLink(value: session.objectID) {
-                        SessionCardView(
-                            name: session.name,
-                            duration: session.durationSeconds?.doubleValue,
-                            createdAt: session.createdAt
-                        )
+        List {
+            ForEach(sessions, id: \.objectID) { session in
+                let id = session.objectID
+                let currentName = session.name
+                NavigationLink(value: id) {
+                    SessionCardView(
+                        name: currentName,
+                        duration: session.durationSeconds?.doubleValue,
+                        createdAt: session.createdAt
+                    )
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        deleteSession(id)
+                    } label: {
+                        Label("Delete", systemImage: Icons.trash)
                     }
-                    .buttonStyle(.plain)
+                    .tint(Tokens.danger)
+                }
+                .contextMenu {
+                    Button {
+                        renameTarget = RenameTarget(id: id, draft: currentName)
+                    } label: {
+                        Label("Rename", systemImage: Icons.pencil)
+                    }
+                    Button(role: .destructive) {
+                        deleteSession(id)
+                    } label: {
+                        Label("Delete", systemImage: Icons.trash)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 34)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
     }
+
+    private func deleteSession(_ id: NSManagedObjectID) {
+        let repo = repository
+        Task { try? await repo.delete(id: id) }
+    }
+
+    private func commitRename(_ target: RenameTarget) {
+        let trimmed = target.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        renameTarget = nil
+        guard !trimmed.isEmpty else { return }
+        let repo = repository
+        let id = target.id
+        Task { try? await repo.rename(id: id, to: trimmed) }
+    }
+}
+
+private struct RenameTarget: Identifiable {
+    let id: NSManagedObjectID
+    var draft: String
 }

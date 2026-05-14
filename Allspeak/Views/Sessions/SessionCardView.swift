@@ -34,6 +34,20 @@ struct SessionCardView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Tokens.surface)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: Tokens.surfaceTop, location: 0),
+                            .init(color: Color.clear, location: 0.35)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .allowsHitTesting(false)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(Tokens.hairline, lineWidth: 0.5)

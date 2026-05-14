@@ -361,20 +361,34 @@ beyond the view layer.
 *Skill required:* `swiftui-expert-skill` for `.swipeActions` and `.contextMenu`
 modern usage and `Tokens.danger` integration; `core-data-expert` for delete-on-
 background-context.
-- [ ] create `Allspeak/Views/Sessions/SessionCardView.swift` — row with film-reel
+- [x] create `Allspeak/Views/Sessions/SessionCardView.swift` — row with film-reel
       icon (custom 18×18 path inside a 38×38 rounded square), name (17/500/-0.35),
-      duration·date (13/mono/text2), trailing chevron (10pt text4)
-- [ ] surface card: `Tokens.surface` background, `0.5pt` hairline border,
-      `cornerRadius: 22`, inner top shine via overlay
-- [ ] `.swipeActions(edge: .trailing)` with red `Delete` action using the `danger`
+      duration·date (13/mono/text2), trailing chevron (10pt text4). Originally
+      shipped in Task 7; Task 8 added the inner top shine overlay.
+- [x] surface card: `Tokens.surface` background, `0.5pt` hairline border,
+      `cornerRadius: 22`, inner top shine via overlay (LinearGradient fill of
+      `Tokens.surfaceTop` → clear, masked by the card's RoundedRectangle).
+- [x] `.swipeActions(edge: .trailing)` with red `Delete` action using the `danger`
       color and trash glyph; action calls
-      `repository.delete(id: session.objectID)` from a `Task { ... }`
-- [ ] `.contextMenu` with Rename + Delete (destructive) — Rename presents an
-      inline `.alert` with a `TextField` bound to a local `@State`, on commit
-      calls `repository.rename`
-- [ ] write a small unit test for the duration formatter `"H:MM:SS"` and the
-      date formatter (Swift Testing, parameterized)
-- [ ] run tests — must pass before Task 9
+      `repository.delete(id: session.objectID)` from a `Task { ... }`.
+      `SessionsView.populatedList` switched from `ScrollView` + `LazyVStack` to
+      `List` with `.plain` style, hidden separators and transparent row
+      backgrounds — required because `.swipeActions` is a List-only modifier.
+- [x] `.contextMenu` with Rename + Delete (destructive) — Rename presents an
+      inline `.alert` with a `TextField` bound to a local `@State` rename target,
+      on Save calls `repository.rename(id:to:)`; empty/whitespace input is
+      treated as cancel.
+- [x] write a small unit test for the duration formatter `"H:MM:SS"` and the
+      date formatter (Swift Testing, parameterized) — already provided by
+      `SessionsListBindingTests` (11 duration + 5 date parameterized cases) from
+      Task 7; left unchanged.
+- [x] tests verified via SwiftPM (40 tests pass — same baseline as Task 7,
+      none regressed). The full iOS module typechecks cleanly against the iOS
+      26.5 simulator SDK via `swiftc -typecheck` (with a Session stub since
+      Core Data class codegen runs inside Xcode's build phase). Same ⚠️
+      environment limitation as Tasks 3-7: `xcodebuild test` cannot run locally
+      until the iOS 26.5 simulator runtime is installed (only iOS 26.2 runtime
+      is present).
 
 ### Task 9: Create/Edit session screen
 *Skill required:* `swiftui-expert-skill` for `.fileImporter` and form-style
