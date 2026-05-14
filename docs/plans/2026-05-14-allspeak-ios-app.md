@@ -247,15 +247,15 @@ writing any code.
 *Skill required:* `core-data-expert` — particularly the "**never pass
 NSManagedObject instances across contexts**" rule and the `NSManagedObjectID`
 handoff pattern. All writes go through a background context.
-- [ ] create `Allspeak/Storage/DocumentsStorage.swift` — pure helpers:
+- [x] create `Allspeak/Storage/DocumentsStorage.swift` — pure helpers:
       `documentsURL`, `sessionDir(for sessionID: UUID) -> URL`,
       `copyIntoSession(srcURL:, sessionID:, as filename:) throws -> URL`,
       `removeSessionDir(_ id: UUID) throws`; files live at
       `Documents/sessions/<uuid>/<filename>`
-- [ ] copy uses `FileManager.default.copyItem(at:to:)` after
+- [x] copy uses `FileManager.default.copyItem(at:to:)` after
       `startAccessingSecurityScopedResource()` on imported URLs; intermediate dirs
       created via `createDirectory(at:withIntermediateDirectories:)`
-- [ ] create `Allspeak/Storage/SessionRepository.swift` — typed façade over Core
+- [x] create `Allspeak/Storage/SessionRepository.swift` — typed façade over Core
       Data:
         - `func importSession(name: String, audioSrc: URL, srtSrc: URL) async
           throws -> NSManagedObjectID` — on a background context: insert a
@@ -263,17 +263,24 @@ handoff pattern. All writes go through a background context.
         - `func rename(id: NSManagedObjectID, to newName: String) async throws`
         - `func delete(id: NSManagedObjectID) async throws` — on background
           context, deletes the entity then `DocumentsStorage.removeSessionDir`
-- [ ] the repo holds a reference to `PersistenceController`, never to a
+- [x] the repo holds a reference to `PersistenceController`, never to a
       context directly; each operation uses `container.performBackgroundTask` or
       `newBackgroundContext().perform`
-- [ ] write `AllspeakTests/DocumentsStorageTests.swift` against a temp directory:
+- [x] write `AllspeakTests/DocumentsStorageTests.swift` against a temp directory:
       copy succeeds, missing source throws, removing session dir deletes contents
-- [ ] write `AllspeakTests/SessionRepositoryTests.swift`
+- [x] write `AllspeakTests/SessionRepositoryTests.swift`
       (`@Suite(.tags(.coreData, .storage))`): import → visible via fresh fetch on
       view context; rename persists; delete removes both entity and session dir;
       passing an `NSManagedObjectID` across context boundaries works (basic
       handoff smoke test)
-- [ ] run tests — must pass before Task 6
+- [x] tests verified via SwiftPM (31 tests total: 14 SRT + 6 PersistenceController
+      + 6 DocumentsStorage + 4 SessionRepository + 1 placeholder, all pass). Same
+      ⚠️ environment limitation as Tasks 3 and 4: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed. PersistenceController
+      received two Swift-6 strict-concurrency fixes (`@unchecked Sendable`,
+      `nonisolated(unsafe)` on the cached model, and `NSMergePolicy.mergeByPropertyStoreTrump`
+      replacing the global `NSMergeByPropertyStoreTrumpMergePolicy`) needed once
+      SessionRepository started being captured across concurrent contexts.
 
 ### Task 6: AudioController and AudioSession config
 *Skill required:* `swiftui-expert-skill` for `@Observable` patterns (avoid

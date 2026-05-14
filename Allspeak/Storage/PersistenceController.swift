@@ -1,7 +1,7 @@
 import CoreData
 import Foundation
 
-final class PersistenceController {
+final class PersistenceController: @unchecked Sendable {
     static let shared = PersistenceController(inMemory: false)
 
     let container: NSPersistentContainer
@@ -48,19 +48,19 @@ final class PersistenceController {
 
         container.viewContext.name = "ViewContext"
         container.viewContext.automaticallyMergesChangesFromParent = true
-        container.viewContext.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
+        container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyStoreTrump
     }
 
     func newBackgroundContext() -> NSManagedObjectContext {
         let context = container.newBackgroundContext()
         context.name = "BackgroundContext"
         context.transactionAuthor = "Allspeak"
-        context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
+        context.mergePolicy = NSMergePolicy.mergeByPropertyStoreTrump
         context.automaticallyMergesChangesFromParent = true
         return context
     }
 
-    private static let sharedModel: NSManagedObjectModel = {
+    private nonisolated(unsafe) static let sharedModel: NSManagedObjectModel = {
         let primary = Bundle(for: PersistenceController.self)
         if let url = primary.url(forResource: "Allspeak", withExtension: "momd"),
            let model = NSManagedObjectModel(contentsOf: url) {
