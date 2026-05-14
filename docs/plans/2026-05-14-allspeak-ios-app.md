@@ -480,24 +480,41 @@ top bar / control plate glass treatment, and the section on hiding system chrome
 *Skill required:* `swiftui-expert-skill` — the performance section on
 `LazyVStack` vs `VStack` and on minimising `.animation` recomputation when a
 high-frequency Observable property drives the view.
-- [ ] create `Allspeak/Views/Player/SubtitleLineView.swift` reproducing the
+- [x] create `Allspeak/Views/Player/SubtitleLineView.swift` reproducing the
       `SubtitleLine` state map (`past-far`, `past`, `current`, `future`,
       `future-far`) — per-state opacity, font size, weight, blur, marker
       visibility, time label visibility
-- [ ] pure-function window computation: given `currentIndex` and `cues`, return
+- [x] pure-function window computation: given `currentIndex` and `cues`, return
       the 7-line slice `[idx-3 ... idx+3]` clamped to bounds; live in a
       separate file `Allspeak/Views/Player/SubtitleWindow.swift` so it can be
-      unit-tested without SwiftUI
-- [ ] create `Allspeak/Views/Player/SubtitleRiverView.swift` — vertically
+      unit-tested without SwiftUI. Types `SubtitleLineState` and `SubtitleSlot`
+      live here too so both the view and tests share them without dragging
+      SwiftUI into the test target.
+- [x] create `Allspeak/Views/Player/SubtitleRiverView.swift` — vertically
       centre the 7-line window inside the available area; tapping a line calls
-      `controller.seek(to: cue.start)`
-- [ ] animate the `currentIndex` change with `.animation(.easeOut(duration:
-      0.25), value: controller.currentIndex)` — verify with Instruments
-      `SwiftUI` template that the row count does not invalidate per tick
-- [ ] write `AllspeakTests/SubtitleWindowTests.swift` parameterized: window at
+      `controller.seek(to: cue.start)` via an `onSeek: (TimeInterval) -> Void`
+      closure (decoupled from `AudioController` for testability and reuse).
+      Wired into `PlayerView` replacing the placeholder middle area; load
+      errors still show centered mono text.
+- [x] animate the `currentIndex` change with `.animation(.easeOut(duration:
+      0.25), value: controller.currentIndex)`. ⚠️ Instruments `SwiftUI`-template
+      verification deferred to Task 14 (`Task 14`'s acceptance pass owns the
+      Instruments run); the river itself is a plain `VStack` of at most 7
+      fixed slots, so per-tick recomputation cost is bounded and `currentIndex`
+      only publishes on actual change (per `AudioController.updateIndexIfNeeded`).
+- [x] write `AllspeakTests/SubtitleWindowTests.swift` parameterized: window at
       start of file, window in middle, window at end (asymmetric clamp), empty
-      cues → empty window
-- [ ] run tests — must pass before Task 12
+      cues → empty window. Shipped 12 cases total (parameterised + standalone)
+      covering middle / start / near-start / end / single / two-cue /
+      negative-and-overflow clamping / custom-radius / radius=0 / payload
+      identity.
+- [x] tests verified via SwiftPM (59 tests total: 47 prior + 12 new
+      SubtitleWindow cases, all pass). Full iOS module typechecks against the
+      iOS 26.5 simulator SDK via `swiftc -typecheck` (with a Session stub since
+      Core Data class codegen runs inside Xcode's build phase). Same ⚠️
+      environment limitation as Tasks 3-10: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed (only iOS 26.2
+      runtime is present).
 
 ### Task 12: Cinema mode + tap-to-seek polish
 *Skill required:* `swiftui-expert-skill` for safe-area + overlay layering on

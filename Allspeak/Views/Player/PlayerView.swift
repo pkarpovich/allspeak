@@ -34,17 +34,21 @@ struct PlayerView: View {
                 )
                 .padding(.top, 18)
 
-                Spacer()
-
                 if let loadError {
+                    Spacer()
                     Text(loadError)
                         .font(Tokens.Font.mono)
                         .foregroundStyle(Tokens.text3)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
+                    Spacer()
+                } else {
+                    SubtitleRiverView(
+                        cues: controller.subtitles,
+                        currentIndex: controller.currentIndex,
+                        onSeek: { controller.seek(to: $0) }
+                    )
                 }
-
-                Spacer()
 
                 PlayerControlsView(
                     currentTime: controller.currentTime,
