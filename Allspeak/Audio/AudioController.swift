@@ -18,13 +18,14 @@ final class AudioController {
     @ObservationIgnored private var tickerProxy: TickerProxy?
     @ObservationIgnored private let repository: SessionRepository?
     @ObservationIgnored private let sessionID: NSManagedObjectID?
+    @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
 
     init(repository: SessionRepository? = nil, sessionID: NSManagedObjectID? = nil) {
         self.repository = repository
         self.sessionID = sessionID
     }
 
-    func load(audio: URL, subtitles: [Subtitle]) throws {
+    func load(audio: URL, subtitles: [Subtitle], title: String) throws {
         let player = try AVAudioPlayer(contentsOf: audio)
         player.prepareToPlay()
         self.player = player
@@ -32,6 +33,23 @@ final class AudioController {
         self.duration = player.duration
         self.currentTime = 0
         self.currentIndex = Self.index(at: 0, in: subtitles)
+        self.lastNowPlayingTickSecond = -1
+
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration)
+        NowPlayingCenter.shared.configureRemoteCommands(
+            playPause: { [weak self] in
+                MainActor.assumeIsolated { self?.togglePlayPause() }
+            },
+            skip: { [weak self] seconds in
+                MainActor.assumeIsolated { self?.skip(by: seconds) }
+            },
+            seek: { [weak self] time in
+                MainActor.assumeIsolated { self?.seek(to: time) }
+            }
+        )
+        NowPlayingCenter.shared.updateTime(0, isPlaying: false)
+        #endif
     }
 
     func play() {
@@ -44,6 +62,7 @@ final class AudioController {
         player.play()
         isPlaying = true
         startTicker()
+        publishNowPlayingTime()
     }
 
     func pause() {
@@ -54,6 +73,7 @@ final class AudioController {
         }
         isPlaying = false
         stopTicker()
+        publishNowPlayingTime()
     }
 
     func togglePlayPause() {
@@ -67,6 +87,7 @@ final class AudioController {
         player.currentTime = clamped
         currentTime = clamped
         updateIndexIfNeeded()
+        publishNowPlayingTime()
     }
 
     func skip(by seconds: TimeInterval) {
@@ -126,10 +147,22 @@ final class AudioController {
         guard let player else { return }
         currentTime = player.currentTime
         updateIndexIfNeeded()
+        let second = Int(currentTime)
+        if second != lastNowPlayingTickSecond {
+            lastNowPlayingTickSecond = second
+            publishNowPlayingTime()
+        }
         if !player.isPlaying {
             isPlaying = false
             stopTicker()
         }
+    }
+
+    private func publishNowPlayingTime() {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        guard player != nil else { return }
+        NowPlayingCenter.shared.updateTime(currentTime, isPlaying: isPlaying)
+        #endif
     }
 
     private func updateIndexIfNeeded() {

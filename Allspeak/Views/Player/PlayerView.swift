@@ -174,7 +174,7 @@ struct PlayerView: View {
                 loadError = "Subtitle file has no cues — pick a valid .srt."
                 return
             }
-            try controller.load(audio: audioURL, subtitles: cues)
+            try controller.load(audio: audioURL, subtitles: cues, title: snap.name)
             if let pos = snap.lastPosition, pos > 0, pos < controller.duration {
                 controller.seek(to: pos)
             }

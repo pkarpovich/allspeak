@@ -182,35 +182,35 @@ suite.
 ### Task 3: AudioController integration
 *Skill required:* `swift-testing-expert` for the parameterized
 state-transition checks.
-- [ ] extend `AudioController.load(audio:subtitles:)` →
+- [x] extend `AudioController.load(audio:subtitles:)` →
       `load(audio:subtitles:title:)`; `title` is `String` (no
       default — Player view always passes the session name)
-- [ ] in `load(...)`: after `prepareToPlay`, call
+- [x] in `load(...)`: after `prepareToPlay`, call
       `NowPlayingCenter.shared.setMetadata(title: title, duration:
       player.duration)`, then `configureRemoteCommands` with closures
       that route to `self.togglePlayPause()`, `self.skip(by:)`,
       `self.seek(to:)`
-- [ ] in `play()`: after `player.play()`, call
+- [x] in `play()`: after `player.play()`, call
       `NowPlayingCenter.shared.updateTime(currentTime, isPlaying: true)`
-- [ ] in `pause()`: after `player.pause()`, call
+- [x] in `pause()`: after `player.pause()`, call
       `NowPlayingCenter.shared.updateTime(currentTime, isPlaying:
       false)`
-- [ ] in `seek(to:)` / `skip(by:)`: after the seek, call
+- [x] in `seek(to:)` / `skip(by:)`: after the seek, call
       `NowPlayingCenter.shared.updateTime(currentTime, isPlaying:
       isPlaying)`
-- [ ] in the CADisplayLink tick: piggyback a once-per-second update
+- [x] in the CADisplayLink tick: piggyback a once-per-second update
       via a tick counter (or check elapsed since last update) so the
       lock screen stays in sync if the OS hasn't extrapolated
       accurately — opt-in; if `playbackRate` extrapolation proves
       smooth in manual testing, this can be removed
-- [ ] write `AllspeakTests/AudioControllerNowPlayingTests.swift`
+- [x] write `AllspeakTests/AudioControllerNowPlayingTests.swift`
       (`@Suite("AudioController + Now Playing", .tags(.audio),
       .serialized)`): use a fixture `.m4a` (small generated file in
       the test bundle, or fail-soft if not present) — assert that
       after `load`, `MPNowPlayingInfoCenter.default().nowPlayingInfo`
       contains the title; after `play`, rate is 1.0; after `pause`,
       rate is 0.0; after `seek(to: 5)`, elapsed is 5
-- [ ] run tests — must pass before Task 4
+- [x] run tests — must pass before Task 4
 
 ### Task 4: PlayerView wiring
 *Skill required:* none specifically — straight plumbing.
