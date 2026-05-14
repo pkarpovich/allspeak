@@ -287,26 +287,34 @@ handoff pattern. All writes go through a background context.
 unnecessary view updates by keeping fast-ticking state in a separate observable
 or via `@ObservationIgnored` for fields views don't need); `swift-testing-expert`
 for parameterized cases.
-- [ ] create `Allspeak/Audio/AudioSession.swift` — `enum AppAudioSession` with
+- [x] create `Allspeak/Audio/AudioSession.swift` — `enum AppAudioSession` with
       `static func activatePlayback()` setting `.playback` category, `.spokenAudio`
       mode, and `.activate(options: [])`
-- [ ] create `Allspeak/Audio/AudioController.swift` — `@Observable final class
+- [x] create `Allspeak/Audio/AudioController.swift` — `@Observable final class
       AudioController` wrapping `AVAudioPlayer`; published: `isPlaying`,
       `currentTime`, `duration`, `subtitles`, `currentIndex`. Fields the UI does
       not read should be `@ObservationIgnored` to keep view invalidations minimal
-- [ ] methods: `load(audio: URL, subtitles: [Subtitle]) throws`, `play()`,
+- [x] methods: `load(audio: URL, subtitles: [Subtitle]) throws`, `play()`,
       `pause()`, `togglePlayPause()`, `seek(to time:)`, `skip(by seconds:)`,
       `persistPosition()` — calls back into `SessionRepository` to update
-      `lastPositionSeconds`
-- [ ] `CADisplayLink`-driven tick (~10 Hz target, throttled while paused) updates
-      `currentTime` and recomputes `currentIndex` only on change
-- [ ] pure helper: `static func index(at time:, in cues: [Subtitle]) -> Int` —
-      returns the cue currently playing, the closest preceding cue, or 0 if
-      before first
-- [ ] write `AllspeakTests/AudioControllerTests.swift`
+      `lastPositionSeconds` (added `SessionRepository.updateLastPosition(id:seconds:)`)
+- [x] `CADisplayLink`-driven tick (~10 Hz target, throttled while paused) updates
+      `currentTime` and recomputes `currentIndex` only on change. Tick lifecycle
+      is iOS-only (`#if os(iOS) || os(tvOS) || os(visionOS)`) so the macOS-hosted
+      SwiftPM test harness can compile the rest of the type without pulling in
+      the iOS-only `CADisplayLink(target:selector:)` initialiser.
+- [x] pure helper: `nonisolated static func index(at time:, in cues: [Subtitle])
+      -> Int` — returns the cue currently playing, the closest preceding cue, or
+      0 if before first. `nonisolated` so callers outside the `@MainActor` class
+      can use it (Swift 6 strict concurrency).
+- [x] write `AllspeakTests/AudioControllerTests.swift`
       (`@Suite(.tags(.audio))`): parameterized `index(at:in:)` cases — empty, before
-      first, between, after last, exact boundary, sparse cues
-- [ ] run tests — must pass before Task 7
+      first, between, after last, exact boundary, sparse cues, single cue
+- [x] tests verified via SwiftPM (38 tests total: 31 prior + 7 new AudioController,
+      all pass). Xcode build succeeds for `generic/platform=iOS Simulator`. Same
+      ⚠️ environment limitation as Tasks 3-5: `xcodebuild test` cannot run
+      locally until the iOS 26.5 simulator runtime is installed (only iOS 26.2
+      runtime present).
 
 ### Task 7: Sessions screen — list & empty state
 *Skill required:* `swiftui-expert-skill` for `@FetchRequest` integration, large

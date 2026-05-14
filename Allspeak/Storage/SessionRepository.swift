@@ -51,6 +51,15 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func updateLastPosition(id: NSManagedObjectID, seconds: Double) async throws {
+        let context = persistence.newBackgroundContext()
+        try await context.perform {
+            let object = try context.existingObject(with: id)
+            object.setValue(seconds, forKey: "lastPositionSeconds")
+            try context.save()
+        }
+    }
+
     func delete(id: NSManagedObjectID) async throws {
         let context = persistence.newBackgroundContext()
         let storage = self.storage
