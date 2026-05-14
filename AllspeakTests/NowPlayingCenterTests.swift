@@ -46,5 +46,88 @@ struct NowPlayingCenterTests {
 
         #expect(MPNowPlayingInfoCenter.default().nowPlayingInfo == nil)
     }
+
+    @Test("configureRemoteCommands enables the expected MPRemoteCommandCenter commands")
+    func configureRemoteCommandsEnablesCommands() {
+        defer { NowPlayingCenter.shared.clear() }
+
+        NowPlayingCenter.shared.configureRemoteCommands(
+            playPause: {},
+            skip: { _ in },
+            seek: { _ in }
+        )
+
+        let center = MPRemoteCommandCenter.shared()
+        #expect(center.playCommand.isEnabled)
+        #expect(center.pauseCommand.isEnabled)
+        #expect(center.togglePlayPauseCommand.isEnabled)
+        #expect(center.skipBackwardCommand.isEnabled)
+        #expect(center.skipForwardCommand.isEnabled)
+        #expect(center.changePlaybackPositionCommand.isEnabled)
+
+        #expect(center.skipBackwardCommand.preferredIntervals == [15])
+        #expect(center.skipForwardCommand.preferredIntervals == [15])
+
+        #expect(center.nextTrackCommand.isEnabled == false)
+        #expect(center.previousTrackCommand.isEnabled == false)
+    }
+
+    @Test("teardownRemoteCommands disables commands")
+    func teardownRemoteCommandsDisablesCommands() {
+        NowPlayingCenter.shared.configureRemoteCommands(
+            playPause: {},
+            skip: { _ in },
+            seek: { _ in }
+        )
+
+        NowPlayingCenter.shared.teardownRemoteCommands()
+
+        let center = MPRemoteCommandCenter.shared()
+        #expect(center.playCommand.isEnabled == false)
+        #expect(center.pauseCommand.isEnabled == false)
+        #expect(center.togglePlayPauseCommand.isEnabled == false)
+        #expect(center.skipBackwardCommand.isEnabled == false)
+        #expect(center.skipForwardCommand.isEnabled == false)
+        #expect(center.changePlaybackPositionCommand.isEnabled == false)
+    }
+
+    @Test("configureRemoteCommands is idempotent — repeated calls do not duplicate targets")
+    func configureRemoteCommandsIsIdempotent() {
+        defer { NowPlayingCenter.shared.clear() }
+
+        var playPauseCalls = 0
+        let configure = {
+            NowPlayingCenter.shared.configureRemoteCommands(
+                playPause: { playPauseCalls += 1 },
+                skip: { _ in },
+                seek: { _ in }
+            )
+        }
+
+        configure()
+        configure()
+        configure()
+
+        NowPlayingCenter.shared.teardownRemoteCommands()
+
+        let center = MPRemoteCommandCenter.shared()
+        #expect(center.playCommand.isEnabled == false)
+        #expect(playPauseCalls == 0)
+    }
+
+    @Test("clear tears down remote commands")
+    func clearTearsDownRemoteCommands() {
+        NowPlayingCenter.shared.configureRemoteCommands(
+            playPause: {},
+            skip: { _ in },
+            seek: { _ in }
+        )
+
+        NowPlayingCenter.shared.clear()
+
+        let center = MPRemoteCommandCenter.shared()
+        #expect(center.playCommand.isEnabled == false)
+        #expect(center.changePlaybackPositionCommand.isEnabled == false)
+    }
 }
 #endif

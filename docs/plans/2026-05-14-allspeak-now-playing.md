@@ -157,27 +157,27 @@ pattern, mirroring `AudioSessionTests.swift`.
 ### Task 2: Remote command registration on NowPlayingCenter
 *Skill required:* `swift-testing-expert` for the integration-style
 suite.
-- [ ] extend `NowPlayingCenter` with `func configureRemoteCommands(
+- [x] extend `NowPlayingCenter` with `func configureRemoteCommands(
       playPause: @escaping () -> Void, skip: @escaping (TimeInterval) ->
       Void, seek: @escaping (TimeInterval) -> Void)` — accepts three
       closures (play/pause toggle, skip-by, seek-to)
-- [ ] enable and register handlers on `MPRemoteCommandCenter.shared()`:
+- [x] enable and register handlers on `MPRemoteCommandCenter.shared()`:
       `playCommand`, `pauseCommand`, `togglePlayPauseCommand` →
       `playPause`; `skipBackwardCommand` (preferredIntervals = [15]) and
       `skipForwardCommand` (preferredIntervals = [15]) → `skip(±15)`;
       `changePlaybackPositionCommand` → `seek(event.positionTime)`
       where event is `MPChangePlaybackPositionCommandEvent`
-- [ ] handlers return `.success` on success; idempotent if called
+- [x] handlers return `.success` on success; idempotent if called
       multiple times (remove prior targets before adding new ones)
-- [ ] `func teardownRemoteCommands()` — disables commands and removes
+- [x] `func teardownRemoteCommands()` — disables commands and removes
       all targets (used on `clear()` and on app teardown)
-- [ ] extend the test suite: after `configureRemoteCommands(...)`,
+- [x] extend the test suite: after `configureRemoteCommands(...)`,
       `MPRemoteCommandCenter.shared().playCommand.isEnabled == true` for
       each enabled command; firing a command (via the standard
       remote-command-event mechanism, e.g. invoking the registered
       handler via reflection-free wrapper if exposed, otherwise just
       verifying isEnabled state)
-- [ ] run tests — must pass before Task 3
+- [x] run tests — must pass before Task 3
 
 ### Task 3: AudioController integration
 *Skill required:* `swift-testing-expert` for the parameterized
