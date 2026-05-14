@@ -177,8 +177,8 @@ final class AudioController {
     }
 
     fileprivate func playerDidFinish() {
-        guard let player else { return }
-        currentTime = player.currentTime
+        guard player != nil else { return }
+        currentTime = duration
         updateIndexIfNeeded()
         isPlaying = false
         stopTicker()
