@@ -168,23 +168,23 @@ touches its area.
 *Skill required:* `swiftui-expert-skill` — particularly `references/latest-apis.md`
 to confirm the chosen `Color`, `ShapeStyle`, and material APIs are current on iOS
 26; and `references/liquid-glass.md` before touching Glass surfaces in later tasks.
-- [ ] create `Allspeak/Design/Tokens.swift` exposing all colors from
+- [x] create `Allspeak/Design/Tokens.swift` exposing all colors from
       `allspeak-chrome.jsx` (`bg`, `bgDeep`, `surface`, `hairline`, `hairlineSoft`,
       `text`/`text2`/`text3`/`text4`, `warm`, `accent`, `accentSoft`, `accentDim`,
       `danger`) as `Color` static members on `enum Tokens`
-- [ ] add `Color(hex:)` initializer for `#RRGGBB`/`#RRGGBBAA`
-- [ ] add `Font` helpers: `Tokens.Font.body`, `largeTitle`, `mono`,
+- [x] add `Color(hex:)` initializer for `#RRGGBB`/`#RRGGBBAA`
+- [x] add `Font` helpers: `Tokens.Font.body`, `largeTitle`, `mono`,
       `subtitleCurrent`/`subtitlePast`/`subtitleFuture` (sized per `SubtitleLine`
       state map in chrome.jsx)
-- [ ] create `Allspeak/Design/Icons.swift` mapping each design icon to an SF Symbol
+- [x] create `Allspeak/Design/Icons.swift` mapping each design icon to an SF Symbol
       where one exists (`plus`, `chevron.backward`, `chevron.right`, `play.fill`,
       `pause.fill`, `goforward.15`, `gobackward.15`, `trash`, `pencil`, `xmark`,
       `ellipsis`) plus `moon.fill` as the cinema-mode crescent
-- [ ] create `Allspeak/Design/Glass.swift` with two `ViewModifier`s: `chromeGlass`
+- [x] create `Allspeak/Design/Glass.swift` with two `ViewModifier`s: `chromeGlass`
       (toolbars / pills) and `plateGlass` (large surfaces) implemented per the
       Liquid Glass guidance in `swiftui-expert-skill/references/liquid-glass.md`,
       with the warm-tint overlay matched to the design's chrome/plate ratios
-- [ ] no tests this task — constants and view modifiers only, no logic.
+- [x] no tests this task — constants and view modifiers only, no logic.
 
 ### Task 3: SRT parser
 *Skill required:* `swift-testing-expert` — for `@Test(arguments:)` parameterized
