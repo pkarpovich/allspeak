@@ -109,9 +109,9 @@ struct SessionRepositoryTests {
         #expect(updated.value(forKey: "lastPositionSeconds") as? Double == 456.75)
     }
 
-    @Test("AudioController.persistPosition writes the current time through the repository")
+    @Test("AudioController.persistPosition is a no-op when no audio has been loaded")
     @MainActor
-    func audioControllerPersistPositionRoundTrip() async throws {
+    func audioControllerPersistPositionNoOpWithoutPlayer() async throws {
         let (repo, persistence, _, root) = makeFixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
@@ -119,12 +119,14 @@ struct SessionRepositoryTests {
         let srt = try writeSourceFile(in: srcDir, name: "ac.srt", contents: "s")
 
         let id = try await repo.importSession(name: "AC", audioSrc: audio, srtSrc: srt)
+        try await repo.updateLastPosition(id: id, seconds: 42.0)
+
         let controller = AudioController(repository: repo, sessionID: id)
         await controller.persistPosition()
 
         persistence.viewContext.refreshAllObjects()
         let object = try persistence.viewContext.existingObject(with: id)
-        #expect(object.value(forKey: "lastPositionSeconds") as? Double == 0.0)
+        #expect(object.value(forKey: "lastPositionSeconds") as? Double == 42.0)
     }
 
     @Test("objectID from import resolves cleanly on the view context (handoff smoke)")

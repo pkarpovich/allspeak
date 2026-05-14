@@ -167,7 +167,7 @@ struct PlayerView: View {
         let srtURL = dir.appendingPathComponent(snap.srtFilename)
 
         do {
-            let srtText = try String(contentsOf: srtURL, encoding: .utf8)
+            let srtText = try readSubtitleText(at: srtURL)
             let cues = SRTParser.parse(srtText)
             try controller.load(audio: audioURL, subtitles: cues)
             if let pos = snap.lastPosition, pos > 0, pos < controller.duration {
@@ -176,5 +176,18 @@ struct PlayerView: View {
         } catch {
             loadError = "Couldn't open audio or subtitles."
         }
+    }
+
+    private func readSubtitleText(at url: URL) throws -> String {
+        if let utf8 = try? String(contentsOf: url, encoding: .utf8) {
+            return utf8
+        }
+        for encoding: String.Encoding in [.windowsCP1252, .windowsCP1251, .isoLatin1] {
+            if let text = try? String(contentsOf: url, encoding: encoding) {
+                return text
+            }
+        }
+        var usedEncoding: String.Encoding = .utf8
+        return try String(contentsOf: url, usedEncoding: &usedEncoding)
     }
 }

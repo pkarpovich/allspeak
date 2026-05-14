@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreData
 import Foundation
 
@@ -23,13 +24,16 @@ final class SessionRepository: @unchecked Sendable {
         let srtName = srtSrc.lastPathComponent
         let createdAt = Date()
 
+        let audioDest: URL
         do {
-            try storage.copyIntoSession(srcURL: audioSrc, sessionID: id, as: audioName)
+            audioDest = try storage.copyIntoSession(srcURL: audioSrc, sessionID: id, as: audioName)
             try storage.copyIntoSession(srcURL: srtSrc, sessionID: id, as: srtName)
         } catch {
             try? storage.removeSessionDir(id)
             throw error
         }
+
+        let durationSeconds = await Self.readDuration(at: audioDest)
 
         let context = persistence.newBackgroundContext()
         do {
@@ -40,12 +44,24 @@ final class SessionRepository: @unchecked Sendable {
                 session.setValue(audioName, forKey: "audioFilename")
                 session.setValue(srtName, forKey: "srtFilename")
                 session.setValue(createdAt, forKey: "createdAt")
+                session.setValue(durationSeconds, forKey: "durationSeconds")
                 try context.save()
                 return session.objectID
             }
         } catch {
             try? storage.removeSessionDir(id)
             throw error
+        }
+    }
+
+    private static func readDuration(at url: URL) async -> Double {
+        let asset = AVURLAsset(url: url)
+        do {
+            let cm = try await asset.load(.duration)
+            let seconds = CMTimeGetSeconds(cm)
+            return seconds.isFinite && seconds >= 0 ? seconds : 0
+        } catch {
+            return 0
         }
     }
 
@@ -81,17 +97,21 @@ final class SessionRepository: @unchecked Sendable {
         let context = persistence.newBackgroundContext()
         let storage = self.storage
         let newName = srcURL.lastPathComponent
-        try await context.perform {
+        let cleanup: (UUID, String)? = try await context.perform {
             let object = try context.existingObject(with: id)
-            guard let sessionID = object.value(forKey: "id") as? UUID else { return }
+            guard let sessionID = object.value(forKey: "id") as? UUID else { return nil }
             let oldName = object.value(forKey: attribute) as? String
             try storage.copyIntoSession(srcURL: srcURL, sessionID: sessionID, as: newName)
-            if let oldName, oldName != newName {
-                let oldURL = storage.sessionDir(for: sessionID).appendingPathComponent(oldName)
-                try? FileManager.default.removeItem(at: oldURL)
-            }
             object.setValue(newName, forKey: attribute)
             try context.save()
+            if let oldName, oldName != newName {
+                return (sessionID, oldName)
+            }
+            return nil
+        }
+        if let (sessionID, oldName) = cleanup {
+            let oldURL = storage.sessionDir(for: sessionID).appendingPathComponent(oldName)
+            try? FileManager.default.removeItem(at: oldURL)
         }
     }
 

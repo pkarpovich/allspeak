@@ -70,7 +70,7 @@ final class AudioController {
     }
 
     func persistPosition() async {
-        guard let repository, let sessionID else { return }
+        guard player != nil, let repository, let sessionID else { return }
         let pos = currentTime
         try? await repository.updateLastPosition(id: sessionID, seconds: pos)
     }
