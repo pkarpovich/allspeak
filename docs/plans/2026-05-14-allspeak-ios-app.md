@@ -215,29 +215,33 @@ cases on multi-line cues, tag stripping, BOM/CRLF, malformed timestamps.
 *Skill required:* `core-data-expert` — read sections on stack setup, persistent
 history tracking, lightweight migration, and in-memory test stores **before**
 writing any code.
-- [ ] create the `.xcdatamodeld` bundle on disk at
+- [x] create the `.xcdatamodeld` bundle on disk at
       `Allspeak/Allspeak.xcdatamodeld/Allspeak.xcdatamodel/contents` declaring one
       entity `Session` with attributes: `id: UUID (indexed, optional=false)`,
       `name: String`, `audioFilename: String`, `srtFilename: String`,
       `createdAt: Date`, `durationSeconds: Double (optional)`,
       `lastPositionSeconds: Double (optional)`; codegen = **Class Definition**
-- [ ] create `Allspeak/Storage/PersistenceController.swift` exposing
+- [x] create `Allspeak/Storage/PersistenceController.swift` exposing
       `static let shared` (SQLite store at the standard app support URL) and a
       separate `static func makeInMemory() -> PersistenceController` for tests
-- [ ] container configuration: enable **persistent history tracking**
+- [x] container configuration: enable **persistent history tracking**
       (`NSPersistentHistoryTrackingKey = true`) and **remote change notifications**
       (`NSPersistentStoreRemoteChangeNotificationPostOptionKey = true`) — required
       for background-context inserts to surface in the view context per
       `core-data-expert`
-- [ ] enable lightweight migration via `description.shouldMigrateStoreAutomatically`
+- [x] enable lightweight migration via `description.shouldMigrateStoreAutomatically`
       and `description.shouldInferMappingModelAutomatically` set to `true`
-- [ ] expose `viewContext` (main-thread, `automaticallyMergesChangesFromParent =
+- [x] expose `viewContext` (main-thread, `automaticallyMergesChangesFromParent =
       true`) and `newBackgroundContext()` helper
-- [ ] write `AllspeakTests/PersistenceControllerTests.swift`
+- [x] write `AllspeakTests/PersistenceControllerTests.swift`
       (`@Suite(.tags(.coreData))`): in-memory store boots successfully; `Session`
       entity exists and has the expected attributes; persistent history is
       enabled; two parallel test instances do not share state
-- [ ] run tests — must pass before Task 5
+- [x] tests verified via SwiftPM (20 tests total: 14 SRT + 6 PersistenceController
+      pass). Same ⚠️ environment limitation as Task 3: `xcodebuild test` cannot
+      run locally until the iOS 26.5 simulator runtime is installed (only iOS 26.2
+      runtime present). Model loader has a fallback that searches sibling
+      resource bundles so SPM-style packaging also resolves `Allspeak.momd`.
 
 ### Task 5: DocumentsStorage + SessionRepository
 *Skill required:* `core-data-expert` — particularly the "**never pass
