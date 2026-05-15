@@ -55,8 +55,8 @@ struct PlayerControlsView: View {
 
     private var transport: some View {
         HStack {
-            skipButton(systemName: Icons.back15, action: onSkipBack)
-                .accessibilityLabel("Skip back 15 seconds")
+            skipButton(systemName: Icons.skipBack, action: onSkipBack)
+                .accessibilityLabel("Skip back half a second")
             Spacer()
             Button(action: onPlayPause) {
                 Image(systemName: isPlaying ? Icons.pause : Icons.play)
@@ -67,8 +67,8 @@ struct PlayerControlsView: View {
             .tint(Tokens.accent)
             .accessibilityLabel(isPlaying ? "Pause" : "Play")
             Spacer()
-            skipButton(systemName: Icons.forward15, action: onSkipForward)
-                .accessibilityLabel("Skip forward 15 seconds")
+            skipButton(systemName: Icons.skipForward, action: onSkipForward)
+                .accessibilityLabel("Skip forward half a second")
         }
         .padding(.horizontal, 12)
     }
