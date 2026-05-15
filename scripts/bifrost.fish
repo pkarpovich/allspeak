@@ -129,7 +129,7 @@ if set -q _flag_clean_voice
 
     set -l sepdir (mktemp -d -t bifrost-demucs)
     echo "→ separating vocals via demucs htdemucs_ft (5-15 min on Apple Silicon)"
-    uvx --from demucs demucs -n htdemucs_ft --two-stems vocals -o $sepdir $audio_out
+    uvx --from demucs --with torchcodec demucs -n htdemucs_ft --two-stems vocals -o $sepdir $audio_out
     or begin
         echo "demucs failed" >&2
         rm -rf $sepdir
