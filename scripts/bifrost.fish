@@ -13,7 +13,7 @@
 #   bifrost.fish -c FILE.mkv              # clean voice via demucs (htdemucs_ft)
 #
 # Deps: ffmpeg, ffprobe, jq.
-# Optional (-c): demucs  (pipx install demucs)
+# Optional (-c): uv  (brew install uv) — auto-installs demucs on first run
 
 argparse 'l/list' 'a/audio=' 's/subs=' 'o/outdir=' 'c/clean-voice' 'h/help' -- $argv
 or exit 1
@@ -122,14 +122,14 @@ or begin
 end
 
 if set -q _flag_clean_voice
-    if not command -q demucs
-        echo "missing dependency for -c: demucs  (pipx install demucs)" >&2
+    if not command -q uv
+        echo "missing dependency for -c: uv  (brew install uv)" >&2
         exit 1
     end
 
     set -l sepdir (mktemp -d -t bifrost-demucs)
     echo "→ separating vocals via demucs htdemucs_ft (5-15 min on Apple Silicon)"
-    demucs -n htdemucs_ft --two-stems vocals -o $sepdir $audio_out
+    uvx --from demucs demucs -n htdemucs_ft --two-stems vocals -o $sepdir $audio_out
     or begin
         echo "demucs failed" >&2
         rm -rf $sepdir
