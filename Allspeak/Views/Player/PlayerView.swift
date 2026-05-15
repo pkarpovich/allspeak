@@ -70,8 +70,8 @@ struct PlayerView: View {
                         duration: controller.duration,
                         isPlaying: controller.isPlaying,
                         onPlayPause: { controller.togglePlayPause() },
-                        onSkipBack: { controller.skip(by: -15) },
-                        onSkipForward: { controller.skip(by: 15) },
+                        onSkipBack: { controller.skip(by: -0.5) },
+                        onSkipForward: { controller.skip(by: 0.5) },
                         onScrub: { controller.seek(to: $0) }
                     )
                     .padding(.bottom, 28)
