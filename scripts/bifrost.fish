@@ -10,14 +10,16 @@
 #   bifrost.fish -l FILE.mkv              # list streams only, do not extract
 #   bifrost.fish -a 4 -s 10 FILE.mkv      # pick stream indices manually
 #   bifrost.fish -o ~/out FILE.mkv        # output directory (default: cwd)
+#   bifrost.fish -c FILE.mkv              # clean voice via demucs (htdemucs_ft)
 #
 # Deps: ffmpeg, ffprobe, jq.
+# Optional (-c): demucs  (pipx install demucs)
 
-argparse 'l/list' 'a/audio=' 's/subs=' 'o/outdir=' 'h/help' -- $argv
+argparse 'l/list' 'a/audio=' 's/subs=' 'o/outdir=' 'c/clean-voice' 'h/help' -- $argv
 or exit 1
 
 if set -q _flag_help; or test (count $argv) -ne 1
-    echo "usage: bifrost.fish [-l] [-a N] [-s N] [-o DIR] FILE.mkv"
+    echo "usage: bifrost.fish [-l] [-a N] [-s N] [-o DIR] [-c] FILE.mkv"
     exit 1
 end
 
@@ -117,6 +119,40 @@ ffmpeg -hide_banner -loglevel warning -stats -y -i $src \
 or begin
     echo "ffmpeg audio extraction failed" >&2
     exit 1
+end
+
+if set -q _flag_clean_voice
+    if not command -q demucs
+        echo "missing dependency for -c: demucs  (pipx install demucs)" >&2
+        exit 1
+    end
+
+    set -l sepdir (mktemp -d -t bifrost-demucs)
+    echo "→ separating vocals via demucs htdemucs_ft (5-15 min on Apple Silicon)"
+    demucs -n htdemucs_ft --two-stems vocals -o $sepdir $audio_out
+    or begin
+        echo "demucs failed" >&2
+        rm -rf $sepdir
+        exit 1
+    end
+
+    set -l vocals_wav $sepdir/htdemucs_ft/$basename.$audio_lang/vocals.wav
+    if not test -f $vocals_wav
+        echo "demucs did not produce $vocals_wav" >&2
+        rm -rf $sepdir
+        exit 1
+    end
+
+    echo "→ re-encoding vocals → mono AAC 96k → $audio_out"
+    ffmpeg -hide_banner -loglevel warning -y -i $vocals_wav \
+        -c:a aac -b:a 96k -ac 1 -movflags +faststart $audio_out
+    or begin
+        echo "ffmpeg vocals encode failed" >&2
+        rm -rf $sepdir
+        exit 1
+    end
+
+    rm -rf $sepdir
 end
 
 echo "→ subs  #$subs_idx ($subs_lang) → $subs_out"
