@@ -53,8 +53,9 @@ final class WatchSessionHost: NSObject {
     func sendCueBundle(_ bundle: CueBundle) {
         guard let session, session.activationState == .activated else { return }
         guard let data = try? bundle.compressed() else { return }
+        let unique = UUID().uuidString.prefix(8)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "cuebundle-\(bundle.sessionID.uuidString)-\(bundle.revision).gz"
+            "cuebundle-\(bundle.sessionID.uuidString)-\(bundle.revision)-\(unique).gz"
         )
         do {
             try data.write(to: url, options: .atomic)

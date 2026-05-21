@@ -159,6 +159,32 @@ struct WatchSessionClientTests {
         #expect(secondClient.cues == Self.cues)
     }
 
+    @Test("handleReceivedFile rejects bundle for a different session than current metadata")
+    func receiveFileRejectsMismatchedSession() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let activeMeta = SessionMetadata(
+            sessionID: activeID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try activeMeta.toPropertyList())
+
+        let staleBundle = CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues)
+        let compressed = try staleBundle.compressed()
+
+        client.handleReceivedFile(data: compressed, metadata: [:])
+
+        #expect(client.cues == [])
+        #expect(client.metadata?.sessionID == activeID)
+    }
+
     @Test("handleReceivedFile ignores garbage payload but completes")
     func receiveGarbageFileIsSafe() async throws {
         let (client, _, dir) = try makeClient()

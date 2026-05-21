@@ -125,16 +125,22 @@ final class WatchSessionClient: NSObject {
     }
 
     func handleReceivedFile(at url: URL, metadata fileMetadata: [String: Any]) {
-        guard let data = try? Data(contentsOf: url) else {
+        let data = try? Data(contentsOf: url)
+        handleReceivedFile(data: data, metadata: fileMetadata)
+    }
+
+    func handleReceivedFile(data: Data?, metadata fileMetadata: [String: Any]) {
+        _ = fileMetadata
+        guard let data, let bundle = try? CueBundle(compressed: data) else {
             completePendingBackgroundTasks()
             return
         }
-        guard let bundle = try? CueBundle(compressed: data) else {
+        try? cache?.save(bundle)
+        if let current = metadata, current.sessionID != bundle.sessionID {
             completePendingBackgroundTasks()
             return
         }
         self.cues = bundle.cues
-        try? cache?.save(bundle)
         if let current = metadata,
            current.sessionID == bundle.sessionID,
            current.revision != bundle.revision {
@@ -148,7 +154,6 @@ final class WatchSessionClient: NSObject {
                 currentTime: current.currentTime
             )
         }
-        _ = fileMetadata
         completePendingBackgroundTasks()
     }
 
@@ -208,10 +213,11 @@ extension WatchSessionClient: WCSessionDelegate {
     }
 
     nonisolated func session(_: WCSession, didReceive file: WCSessionFile) {
-        let url = file.fileURL
+        let data = try? Data(contentsOf: file.fileURL)
+        let bridge = SendableData(value: data)
         let meta = SendableDictionary(value: file.metadata ?? [:])
         Task { @MainActor in
-            self.handleReceivedFile(at: url, metadata: meta.value)
+            self.handleReceivedFile(data: bridge.value, metadata: meta.value)
         }
     }
 
@@ -228,4 +234,8 @@ extension WatchSessionClient: WCSessionDelegate {
 
 private struct SendableDictionary: @unchecked Sendable {
     let value: [String: Any]
+}
+
+private struct SendableData: @unchecked Sendable {
+    let value: Data?
 }
