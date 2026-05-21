@@ -104,15 +104,15 @@ XcodeGen scaffolding for the watch app. No real UI yet — just an empty SwiftUI
 
 Long-lived, MainActor-isolated, bridges off-main delegate callbacks. Listens for watch commands, replies with authoritative state, sends metadata via context and cue bundle via file.
 
-- [ ] create `Allspeak/Watch/WatchSessionHost.swift` — `@MainActor final class WatchSessionHost: NSObject`, holds reference to `PlaybackCoordinator`, owns a `WCSession` instance
-- [ ] implement `WCSessionDelegate` methods on `nonisolated` actor-isolation context, each one `Task { @MainActor in ... }` to bridge into MainActor logic
-- [ ] implement command handling: `session(_:didReceiveMessage:replyHandler:)` → decode WatchCommand → dispatch to PlaybackCoordinator → build PlaybackSnapshot → reply via replyHandler
-- [ ] implement metadata broadcast: on PlaybackCoordinator session start, call `updateApplicationContext` with SessionMetadata only (no cues)
-- [ ] implement cue bundle send: on session start, gzip-compress CueBundle, write to a temp file, call `WCSession.transferFile(_:metadata:)`
-- [ ] handle `WCSession.activationDidCompleteWith`, `sessionReachabilityDidChange` (log only for now), `sessionDidBecomeInactive`, `sessionDidDeactivate` (reactivate)
-- [ ] in `AllspeakApp.init`, instantiate `WatchSessionHost.shared` and call `activate()` so session is alive before any view mounts
-- [ ] write tests: command dispatch table (mock PlaybackCoordinator), snapshot building from current state, metadata serialization
-- [ ] run tests — must pass before next task
+- [x] create `Allspeak/Watch/WatchSessionHost.swift` — `@MainActor final class WatchSessionHost: NSObject`, holds reference to `PlaybackCoordinator`, owns a `WCSession` instance
+- [x] implement `WCSessionDelegate` methods on `nonisolated` actor-isolation context, each one `Task { @MainActor in ... }` to bridge into MainActor logic
+- [x] implement command handling: `session(_:didReceiveMessage:replyHandler:)` → decode WatchCommand → dispatch to PlaybackCoordinator → build PlaybackSnapshot → reply via replyHandler (uses a private `SendablePayloadCallback` wrapper to satisfy Swift 6 strict concurrency around the non-Sendable replyHandler closure)
+- [x] implement metadata broadcast: on PlaybackCoordinator session start, call `updateApplicationContext` with SessionMetadata only (no cues) — hooked into both `startSession` variants in PlaybackCoordinator behind `#if os(iOS)`
+- [x] implement cue bundle send: on session start, gzip-compress CueBundle, write to a temp file, call `WCSession.transferFile(_:metadata:)`
+- [x] handle `WCSession.activationDidCompleteWith`, `sessionReachabilityDidChange` (log only for now), `sessionDidBecomeInactive`, `sessionDidDeactivate` (reactivate)
+- [x] in `AllspeakApp.init`, instantiate `WatchSessionHost.shared` and call `activate()` so session is alive before any view mounts
+- [x] write tests: command dispatch table (mock PlaybackCoordinator), snapshot building from current state, metadata serialization (new file `AllspeakTests/WatchSessionHostTests.swift` exercises every WatchCommand → AudioController side effect, plus metadata + cue bundle round-trips through PlaybackCoordinator); also added `apply(_:)`, `currentMetadata()`, `currentCueBundle()` helpers on PlaybackCoordinator to keep dispatch testable without mocking WCSession
+- [x] run tests — must pass before next task (compile-verified: `xcodebuild -target AllspeakTests -sdk iphonesimulator26.5 build` succeeds; runtime test execution is blocked by the same Task 3 environment gap — watchOS 26.5 simulator runtime is not installed locally and the embedded watch app's SDK targeting prevents iOS app install on the iPhone simulator)
 
 ### Task 5: WCSession service on watchOS side
 

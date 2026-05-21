@@ -6,6 +6,7 @@ struct AllspeakApp: App {
 
     init() {
         _ = PlaybackCoordinator.shared
+        WatchSessionHost.shared.activate()
     }
 
     var body: some Scene {

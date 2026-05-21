@@ -84,6 +84,9 @@ final class PlaybackCoordinator {
         self.sessionUUID = snap.uuid
         self.sessionTitle = snap.name
         self.revision += 1
+        #if os(iOS)
+        WatchSessionHost.shared.broadcastCurrentSession()
+        #endif
     }
 
     func startSession(
@@ -107,6 +110,9 @@ final class PlaybackCoordinator {
         self.sessionUUID = sessionUUID
         self.sessionTitle = title
         self.revision += 1
+        #if os(iOS)
+        WatchSessionHost.shared.broadcastCurrentSession()
+        #endif
     }
 
     func endSession() {
@@ -135,6 +141,40 @@ final class PlaybackCoordinator {
             isPlaying: controller.isPlaying,
             serverDate: Date()
         )
+    }
+
+    func currentMetadata() -> SessionMetadata? {
+        guard let controller, let sessionUUID else { return nil }
+        return SessionMetadata(
+            sessionID: sessionUUID,
+            revision: revision,
+            title: sessionTitle,
+            duration: controller.duration,
+            cueCount: controller.subtitles.count,
+            isPlaying: controller.isPlaying,
+            currentTime: controller.currentTime
+        )
+    }
+
+    func currentCueBundle() -> CueBundle? {
+        guard let controller, let sessionUUID else { return nil }
+        return CueBundle(sessionID: sessionUUID, revision: revision, cues: controller.subtitles)
+    }
+
+    func apply(_ command: WatchCommand) {
+        guard let controller else { return }
+        switch command {
+        case .play:
+            controller.play()
+        case .pause:
+            controller.pause()
+        case .togglePlayPause:
+            controller.togglePlayPause()
+        case .skip(let seconds):
+            controller.skip(by: seconds)
+        case .seek(let time):
+            controller.seek(to: time)
+        }
     }
 
     private static func readSubtitleText(at url: URL) throws -> String {
