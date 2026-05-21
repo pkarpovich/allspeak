@@ -618,7 +618,7 @@ struct WatchSessionClientTests {
             duration: 60,
             currentIndex: 0,
             isPlaying: true,
-            serverDate: Date()
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
         )
         client.handleReceivedSnapshot(try snapshot.toPropertyList())
         #expect(client.lastSnapshot == snapshot)
