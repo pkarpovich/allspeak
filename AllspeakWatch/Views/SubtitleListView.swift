@@ -21,7 +21,7 @@ struct SubtitleListView: View {
     }
 
     private var placeholder: some View {
-        Text("No subtitles")
+        Text(client.metadata == nil ? "No subtitles" : "Loading subtitles…")
             .font(Tokens.Font.placeholder)
             .foregroundStyle(Tokens.text2)
             .multilineTextAlignment(.center)
