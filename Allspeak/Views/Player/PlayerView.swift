@@ -112,7 +112,6 @@ struct PlayerView: View {
             #if canImport(UIKit)
             UIApplication.shared.isIdleTimerDisabled = false
             #endif
-            PlaybackCoordinator.shared.endSession()
             controller = nil
         }
         .onChange(of: scenePhase) { _, newPhase in

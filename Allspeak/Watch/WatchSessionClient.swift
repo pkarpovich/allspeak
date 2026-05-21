@@ -126,6 +126,7 @@ final class WatchSessionClient: NSObject {
 
     func handleReceivedSnapshot(_ payload: [String: Any]) {
         guard let snapshot = try? PlaybackSnapshot(propertyList: payload) else { return }
+        if snapshot.sessionID == PlaybackSnapshot.empty.sessionID { return }
         if let current = metadata {
             if current.sessionID != snapshot.sessionID { return }
             if snapshot.revision != current.revision { return }
@@ -204,6 +205,7 @@ final class WatchSessionClient: NSObject {
     #if os(watchOS)
     func register(backgroundTask: WKWatchConnectivityRefreshBackgroundTask) {
         pendingBackgroundTasks.append(backgroundTask)
+        completePendingBackgroundTasksIfSettled()
     }
     #endif
 
@@ -213,6 +215,16 @@ final class WatchSessionClient: NSObject {
             task.setTaskCompletedWithSnapshot(false)
         }
         pendingBackgroundTasks.removeAll()
+        #endif
+    }
+
+    private func completePendingBackgroundTasksIfSettled() {
+        #if os(watchOS)
+        guard let session,
+              session.activationState == .activated,
+              !session.hasContentPending
+        else { return }
+        completePendingBackgroundTasks()
         #endif
     }
 
@@ -260,6 +272,7 @@ extension WatchSessionClient: WCSessionDelegate {
         let bridge = SendableDictionary(value: applicationContext)
         Task { @MainActor in
             self.handleReceivedApplicationContext(bridge.value)
+            self.completePendingBackgroundTasksIfSettled()
         }
     }
 

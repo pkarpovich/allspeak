@@ -882,6 +882,15 @@ struct WatchSessionClientTests {
         #expect(client.lastSnapshot == nil)
     }
 
+    @Test("handleReceivedSnapshot rejects the empty sentinel snapshot")
+    func receiveSnapshotRejectsEmptySentinel() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.handleReceivedSnapshot(try PlaybackSnapshot.empty.toPropertyList())
+        #expect(client.lastSnapshot == nil)
+    }
+
     @Test("stale cache hit returns nil for mismatched session ID")
     func staleCacheMissOnDifferentSession() async throws {
         let (_, _, dir) = try makeClient()

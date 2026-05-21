@@ -123,6 +123,10 @@ final class WatchSessionHost: NSObject {
 }
 
 extension WatchSessionHost: WCSessionDelegate {
+    nonisolated func session(_: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error _: Error?) {
+        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+    }
+
     nonisolated func session(
         _: WCSession,
         activationDidCompleteWith state: WCSessionActivationState,
