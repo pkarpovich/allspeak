@@ -15,16 +15,6 @@ struct ContentView: View {
             SubtitleListView()
                 .tag(Page.subtitleList)
         }
-        .modifier(VerticalPageTabStyle())
-    }
-}
-
-private struct VerticalPageTabStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        #if os(watchOS)
-        content.tabViewStyle(.verticalPage)
-        #else
-        content
-        #endif
+        .tabViewStyle(.page)
     }
 }
