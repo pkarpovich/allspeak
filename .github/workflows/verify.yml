@@ -19,9 +19,14 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Stub signing config (unsigned simulator build)
+      - name: Stub signing configs (unsigned simulator build)
         run: |
           cat > Allspeak/Signing.xcconfig << 'EOF'
+          CODE_SIGN_STYLE = Automatic
+          CODE_SIGN_IDENTITY =
+          EOF
+
+          cat > AllspeakWatch/Signing.xcconfig << 'EOF'
           CODE_SIGN_STYLE = Automatic
           CODE_SIGN_IDENTITY =
           EOF

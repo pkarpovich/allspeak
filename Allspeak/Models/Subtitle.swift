@@ -1,6 +1,6 @@
 import Foundation
 
-struct Subtitle: Identifiable, Hashable {
+struct Subtitle: Identifiable, Hashable, Codable {
     let index: Int
     let start: TimeInterval
     let end: TimeInterval

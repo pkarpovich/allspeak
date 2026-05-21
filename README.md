@@ -44,6 +44,44 @@ The picked files are copied into the app's Documents container at
 `Documents/sessions/<uuid>/<filename>` and are independent of the original
 source location after import.
 
+## Apple Watch remote
+
+Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
+resync subtitles in a cinema without taking the iPhone out of your pocket.
+The watch is a thin remote: it sends commands (play/pause, skip ±0.5s,
+seek-to-cue) to the iPhone, which remains the audio host.
+
+### Pairing
+
+1. Pair the Apple Watch with the test iPhone via the iOS `Watch` app
+   (Settings → Watch).
+2. Install both builds — the watch app installs automatically alongside the
+   iPhone app once the bundle reaches the device (TestFlight, Xcode, or
+   ad-hoc).
+3. Foreground both apps at least once after install. WatchConnectivity
+   requires both peers to have been launched by the user before delivery
+   starts working.
+4. Open a session on the iPhone. The watch will receive the session
+   metadata via `updateApplicationContext` and the full cue bundle via
+   `transferFile` (gzipped JSON, cached on-watch for restart resilience).
+
+### Usage
+
+- **Page 1** (default): big current subtitle line, with play/pause and
+  ±0.5s skip buttons sized for blind tapping through a sleeve.
+- **Page 2** (swipe up): scrollable list of all cues with the current line
+  highlighted; tap any line to seek the iPhone audio to that timestamp.
+- Rapid ±0.5 taps coalesce inside a 250ms window so five quick taps send
+  a single `skip(+2.5)` command rather than five round-trips.
+- Between authoritative snapshots from the iPhone, the watch interpolates
+  the displayed position locally (`currentTime + (now - serverDate)` while
+  playing) so the UI never feels frozen.
+
+The five commands round-tripped over WatchConnectivity are: `play`,
+`pause`, `togglePlayPause`, `skip(seconds:)`, `seek(time:)`. The wire
+contract lives in `Allspeak/Watch/WireProtocol.swift` — see the header
+comment there for the protocol summary.
+
 ## Architecture
 
 - **UI**: SwiftUI, dark-only, single device family (iPhone, portrait).
