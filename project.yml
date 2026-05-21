@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: dev.karpovich
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "26.0"
   createIntermediateGroups: true
   developmentLanguage: en
   fileTypes:
@@ -24,6 +25,9 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: Allspeak
+    dependencies:
+      - target: AllspeakWatch
+        embed: true
     configFiles:
       Debug: Allspeak/Signing.xcconfig
       Release: Allspeak/Signing.xcconfig
@@ -55,3 +59,23 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak.tests
         CODE_SIGNING_ALLOWED: NO
         GENERATE_INFOPLIST_FILE: YES
+  AllspeakWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: AllspeakWatch
+      - path: Allspeak/Models/Subtitle.swift
+      - path: Allspeak/Watch/WireProtocol.swift
+      - path: Allspeak/Watch/PlaybackSnapshot.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        INFOPLIST_FILE: AllspeakWatch/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        WATCHOS_DEPLOYMENT_TARGET: "26.0"
+        ENABLE_PREVIEWS: YES
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
+        SDKROOT: watchos
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO

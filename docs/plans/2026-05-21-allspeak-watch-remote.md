@@ -92,13 +92,13 @@ Codable types for both sides of WatchConnectivity, plus property-list dictionary
 
 XcodeGen scaffolding for the watch app. No real UI yet — just an empty SwiftUI scene that builds and installs as a paired companion.
 
-- [ ] add `AllspeakWatch` target to `project.yml`: type `watch2.app`, platform `watchOS`, deploymentTarget `11.0` (or whatever pairs cleanly with iOS 26), `WKCompanionAppBundleIdentifier=dev.karpovich.allspeak`, bundle id `dev.karpovich.allspeak.watchkitapp`
-- [ ] add `WireProtocol.swift` to both targets (shared file membership)
-- [ ] create `AllspeakWatch/` directory with `AllspeakWatchApp.swift` (`@main` SwiftUI App), `ContentView.swift` (placeholder "Allspeak Watch")
-- [ ] create `AllspeakWatch/Info.plist` with `WKWatchOnly=NO`, `WKCompanionAppBundleIdentifier`, `WKApplication=YES`
-- [ ] run `xcodegen generate` and `xcodebuild -scheme AllspeakWatch build` for the watch simulator
-- [ ] no tests this task (pure project structure)
-- [ ] manual: confirm both targets build cleanly side-by-side
+- [x] add `AllspeakWatch` target to `project.yml`: type `application`, platform `watchOS`, deploymentTarget `26.0` (single-target watchOS app pairs with iOS 26 via unified versioning; older `watch2.app` two-target layout is obsolete), `WKCompanionAppBundleIdentifier=dev.karpovich.allspeak`, bundle id `dev.karpovich.allspeak.watchkitapp`
+- [x] add `WireProtocol.swift` to both targets (shared file membership) — also extracted `PlaybackSnapshot` into `Allspeak/Watch/PlaybackSnapshot.swift` so the wire types compile on watchOS without dragging CoreData; `Subtitle.swift` shared via explicit source path
+- [x] create `AllspeakWatch/` directory with `AllspeakWatchApp.swift` (`@main` SwiftUI App), `ContentView.swift` (placeholder "Allspeak Watch")
+- [x] create `AllspeakWatch/Info.plist` with `WKWatchOnly=NO`, `WKCompanionAppBundleIdentifier`, `WKApplication=YES`
+- [x] run `xcodegen generate` and `xcodebuild` for the watch simulator (verified via `xcodebuild -project Allspeak.xcodeproj -target AllspeakWatch -sdk watchsimulator26.5 build` — `** BUILD SUCCEEDED **`; `-scheme AllspeakWatch` route requires watchOS 26.5 simulator runtime which is not installed locally, hence the -target/-sdk form)
+- [x] no tests this task (pure project structure)
+- [x] manual: confirm both targets build cleanly side-by-side (iOS build with embedded watch app via `xcodebuild -project Allspeak.xcodeproj -target Allspeak -sdk iphonesimulator26.5 build` succeeded; watch bundle embedded at `Allspeak.app/Watch/AllspeakWatch.app`)
 
 ### Task 4: WCSession service on iOS side
 

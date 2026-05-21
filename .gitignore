@@ -5,6 +5,7 @@ xcuserdata/
 DerivedData/
 .swiftpm/
 .build/
+build/
 
 # Local signing config (CI generates its own with manual signing + pinned profile)
 Allspeak/Signing.xcconfig
