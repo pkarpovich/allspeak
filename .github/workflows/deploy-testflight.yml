@@ -23,11 +23,12 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Install certificate and provisioning profile
+      - name: Install certificate and provisioning profiles
         env:
           CERTIFICATE_P12: ${{ secrets.CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
           PROFILE_IOS: ${{ secrets.PROVISIONING_PROFILE_IOS }}
+          PROFILE_WATCHOS: ${{ secrets.PROVISIONING_PROFILE_WATCHOS }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -54,12 +55,25 @@ jobs:
             ~/Library/MobileDevice/Provisioning\ Profiles/$UUID_IOS.mobileprovision
           echo "UUID_IOS=$UUID_IOS" >> $GITHUB_ENV
 
-      - name: Write manual-signing xcconfig
+          echo "$PROFILE_WATCHOS" | base64 --decode > $RUNNER_TEMP/watchos.mobileprovision
+          UUID_WATCHOS=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin \
+            <<< "$(security cms -D -i $RUNNER_TEMP/watchos.mobileprovision)")
+          cp $RUNNER_TEMP/watchos.mobileprovision \
+            ~/Library/MobileDevice/Provisioning\ Profiles/$UUID_WATCHOS.mobileprovision
+          echo "UUID_WATCHOS=$UUID_WATCHOS" >> $GITHUB_ENV
+
+      - name: Write manual-signing xcconfigs
         run: |
           cat > Allspeak/Signing.xcconfig << EOF
           CODE_SIGN_STYLE = Manual
           CODE_SIGN_IDENTITY = Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER = $UUID_IOS
+          EOF
+
+          cat > AllspeakWatch/Signing.xcconfig << EOF
+          CODE_SIGN_STYLE = Manual
+          CODE_SIGN_IDENTITY = Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER = $UUID_WATCHOS
           EOF
 
       - name: Generate Xcode project
@@ -102,6 +116,8 @@ jobs:
             <dict>
               <key>$BUNDLE_ID</key>
               <string>$UUID_IOS</string>
+              <key>$BUNDLE_ID.watchkitapp</key>
+              <string>$UUID_WATCHOS</string>
             </dict>
           </dict>
           </plist>
