@@ -242,6 +242,32 @@ struct WatchSessionHostTests {
         }
         #expect(sends.isEmpty)
     }
+
+    @Test("broadcastSnapshot empty-session calls do not consume the rate-limit slot")
+    func broadcastSnapshotEmptyDoesNotConsumeSlot() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+
+        var sends: [[String: Any]] = []
+        let start = Date(timeIntervalSinceReferenceDate: 10_000)
+        host.broadcastSnapshot(now: start, isReachable: true) { payload in
+            sends.append(payload)
+        }
+        #expect(sends.isEmpty)
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+        try coordinator.startSession(sessionUUID: UUID(), title: "After", audio: audio, subtitles: Self.cues)
+
+        host.broadcastSnapshot(now: start.addingTimeInterval(0.1), isReachable: true) { payload in
+            sends.append(payload)
+        }
+        #expect(sends.count == 1)
+    }
 }
 
 #endif

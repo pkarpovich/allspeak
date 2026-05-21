@@ -124,9 +124,15 @@ final class WatchSessionClient: NSObject {
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
+        let previousSessionID = self.metadata?.sessionID
         self.metadata = meta
+        if previousSessionID != meta.sessionID {
+            self.lastSnapshot = nil
+        }
         if let cache, let bundle = cache.load(sessionID: meta.sessionID, revision: meta.revision) {
             self.cues = bundle.cues
+        } else if previousSessionID != meta.sessionID {
+            self.cues = []
         }
     }
 

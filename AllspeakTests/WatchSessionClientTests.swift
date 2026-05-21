@@ -214,6 +214,91 @@ struct WatchSessionClientTests {
         #expect(cache.load(sessionID: staleID, revision: 1) == nil)
     }
 
+    @Test("handleReceivedApplicationContext clears cues and snapshot when sessionID changes with cache miss")
+    func receiveApplicationContextClearsOnSessionChange() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionA = UUID()
+        let metaA = SessionMetadata(
+            sessionID: sessionA,
+            revision: 1,
+            title: "A",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: true,
+            currentTime: 5
+        )
+        client.handleReceivedApplicationContext(try metaA.toPropertyList())
+        let bundleA = CueBundle(sessionID: sessionA, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundleA.compressed(), metadata: [:])
+
+        let snapshotA = PlaybackSnapshot(
+            sessionID: sessionA,
+            revision: 1,
+            currentTime: 5,
+            duration: 60,
+            currentIndex: 1,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        sender.nextReply = try snapshotA.toPropertyList()
+        client.send(.play)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(client.cues == Self.cues)
+        #expect(client.lastSnapshot != nil)
+
+        let metaB = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "B",
+            duration: 120,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaB.toPropertyList())
+
+        #expect(client.cues == [])
+        #expect(client.lastSnapshot == nil)
+        #expect(client.metadata?.sessionID == metaB.sessionID)
+    }
+
+    @Test("handleReceivedApplicationContext keeps existing cues when sessionID unchanged and cache misses")
+    func receiveApplicationContextKeepsCuesOnRevisionBump() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let metaR1 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Stable",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR1.toPropertyList())
+        let bundleR1 = CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundleR1.compressed(), metadata: [:])
+        #expect(client.cues == Self.cues)
+
+        let metaR2 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 2,
+            title: "Stable",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
+
+        #expect(client.cues == Self.cues)
+        #expect(client.metadata?.revision == 2)
+    }
+
     @Test("handleReceivedApplicationContext sessionEnded clears state")
     func receiveSessionEndedClearsState() async throws {
         let (client, _, dir) = try makeClient()

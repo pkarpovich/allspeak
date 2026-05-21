@@ -92,16 +92,10 @@ final class WatchSessionHost: NSObject {
         isReachable: Bool,
         send: ([String: Any]) -> Void
     ) {
-        guard broadcastGate.requestBroadcast(now: now, isReachable: isReachable) else { return }
         let snapshot = coordinator.currentSnapshot()
-        if snapshot == PlaybackSnapshot.empty {
-            broadcastGate.completeBroadcast()
-            return
-        }
-        guard let payload = try? snapshot.toPropertyList() else {
-            broadcastGate.completeBroadcast()
-            return
-        }
+        guard snapshot != PlaybackSnapshot.empty else { return }
+        guard let payload = try? snapshot.toPropertyList() else { return }
+        guard broadcastGate.requestBroadcast(now: now, isReachable: isReachable) else { return }
         send(payload)
         broadcastGate.completeBroadcast()
     }
