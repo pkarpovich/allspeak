@@ -128,6 +128,17 @@ enum WirePayloadKind: String {
     case command
     case snapshot
     case metadata
+    case sessionEnded
+}
+
+enum SessionEndedSignal {
+    static func propertyList() -> [String: Any] {
+        [WirePayloadKey.kind: WirePayloadKind.sessionEnded.rawValue]
+    }
+
+    static func isSessionEnded(_ context: [String: Any]) -> Bool {
+        (context[WirePayloadKey.kind] as? String) == WirePayloadKind.sessionEnded.rawValue
+    }
 }
 
 enum WireCodingError: Error {

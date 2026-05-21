@@ -50,6 +50,11 @@ final class WatchSessionHost: NSObject {
         try? session.updateApplicationContext(payload)
     }
 
+    func broadcastSessionEnded() {
+        guard let session, session.activationState == .activated else { return }
+        try? session.updateApplicationContext(SessionEndedSignal.propertyList())
+    }
+
     func sendCueBundle(_ bundle: CueBundle) {
         guard let session, session.activationState == .activated else { return }
         guard let data = try? bundle.compressed() else { return }
@@ -117,7 +122,17 @@ extension WatchSessionHost: WCSessionDelegate {
         }
     }
 
-    nonisolated func sessionReachabilityDidChange(_: WCSession) {}
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        let reachable = session.isReachable
+        Task { @MainActor in
+            guard reachable else { return }
+            if let metadata = self.coordinator.currentMetadata() {
+                self.broadcast(metadata: metadata)
+            } else {
+                self.broadcastSessionEnded()
+            }
+        }
+    }
 
     nonisolated func session(
         _: WCSession,

@@ -117,6 +117,12 @@ final class WatchSessionClient: NSObject {
     }
 
     func handleReceivedApplicationContext(_ context: [String: Any]) {
+        if SessionEndedSignal.isSessionEnded(context) {
+            self.metadata = nil
+            self.cues = []
+            self.lastSnapshot = nil
+            return
+        }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
         self.metadata = meta
         if let cache, let bundle = cache.load(sessionID: meta.sessionID, revision: meta.revision) {
@@ -135,11 +141,11 @@ final class WatchSessionClient: NSObject {
             completePendingBackgroundTasks()
             return
         }
-        try? cache?.save(bundle)
         if let current = metadata, current.sessionID != bundle.sessionID {
             completePendingBackgroundTasks()
             return
         }
+        try? cache?.save(bundle)
         self.cues = bundle.cues
         if let current = metadata,
            current.sessionID == bundle.sessionID,

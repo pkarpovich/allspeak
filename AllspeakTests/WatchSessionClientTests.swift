@@ -185,6 +185,63 @@ struct WatchSessionClientTests {
         #expect(client.metadata?.sessionID == activeID)
     }
 
+    @Test("handleReceivedFile mismatched bundle does not pollute or evict active cache")
+    func receiveFileMismatchedSessionLeavesCacheIntact() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let cache = try CueCache(baseURL: dir)
+        let activeBundle = CueBundle(sessionID: activeID, revision: 1, cues: Self.cues)
+        try cache.save(activeBundle)
+
+        let activeMeta = SessionMetadata(
+            sessionID: activeID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try activeMeta.toPropertyList())
+
+        let staleID = UUID()
+        let staleBundle = CueBundle(sessionID: staleID, revision: 1, cues: [])
+        client.handleReceivedFile(data: try staleBundle.compressed(), metadata: [:])
+
+        #expect(cache.load(sessionID: activeID, revision: 1) == activeBundle)
+        #expect(cache.load(sessionID: staleID, revision: 1) == nil)
+    }
+
+    @Test("handleReceivedApplicationContext sessionEnded clears state")
+    func receiveSessionEndedClearsState() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let activeMeta = SessionMetadata(
+            sessionID: activeID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: true,
+            currentTime: 5
+        )
+        client.handleReceivedApplicationContext(try activeMeta.toPropertyList())
+        let bundle = CueBundle(sessionID: activeID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundle.compressed(), metadata: [:])
+        #expect(client.metadata != nil)
+        #expect(client.cues == Self.cues)
+
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+
+        #expect(client.metadata == nil)
+        #expect(client.cues == [])
+        #expect(client.lastSnapshot == nil)
+    }
+
     @Test("handleReceivedFile ignores garbage payload but completes")
     func receiveGarbageFileIsSafe() async throws {
         let (client, _, dir) = try makeClient()

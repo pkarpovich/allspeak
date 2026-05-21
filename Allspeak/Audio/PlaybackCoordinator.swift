@@ -135,6 +135,9 @@ final class PlaybackCoordinator {
         self.sessionID = nil
         self.sessionUUID = nil
         self.sessionTitle = ""
+        #if os(iOS)
+        WatchSessionHost.shared.broadcastSessionEnded()
+        #endif
     }
 
     func currentSnapshot() -> PlaybackSnapshot {
