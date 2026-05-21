@@ -11,15 +11,17 @@
 #   bifrost.fish -a 4 -s 10 FILE.mkv      # pick stream indices manually
 #   bifrost.fish -o ~/out FILE.mkv        # output directory (default: cwd)
 #   bifrost.fish -c FILE.mkv              # clean voice via demucs (htdemucs_ft)
+#   bifrost.fish -n FILE.mkv              # loudnorm to -14 LUFS (cinema-friendly)
+#   bifrost.fish --no-subs FILE.mkv       # skip subtitle extraction (telecine etc.)
 #
 # Deps: ffmpeg, ffprobe, jq.
 # Optional (-c): uv  (brew install uv) — auto-installs demucs on first run
 
-argparse 'l/list' 'a/audio=' 's/subs=' 'o/outdir=' 'c/clean-voice' 'h/help' -- $argv
+argparse 'l/list' 'a/audio=' 's/subs=' 'o/outdir=' 'c/clean-voice' 'n/normalize' 'no-subs' 'h/help' -- $argv
 or exit 1
 
 if set -q _flag_help; or test (count $argv) -ne 1
-    echo "usage: bifrost.fish [-l] [-a N] [-s N] [-o DIR] [-c] FILE.mkv"
+    echo "usage: bifrost.fish [-l] [-a N] [-s N] [-o DIR] [-c] [-n] [--no-subs] FILE.mkv"
     exit 1
 end
 
@@ -80,25 +82,33 @@ if test -z "$audio_idx"
     set audio_idx (echo $probe | jq -r \
         '[.streams[] | select(.codec_type=="audio" and (.tags.language // "")=="eng")] | .[0].index // empty')
     if test -z "$audio_idx"
-        echo "no English audio found, pass -a N to pick manually" >&2
-        exit 1
+        set audio_idx (echo $probe | jq -r \
+            '[.streams[] | select(.codec_type=="audio")] | .[0].index // empty')
+        if test -z "$audio_idx"
+            echo "no audio stream found" >&2
+            exit 1
+        end
+        echo "no English audio; falling back to first audio stream (#$audio_idx)"
     end
 end
 
-if test -z "$subs_idx"
+if not set -q _flag_no_subs; and test -z "$subs_idx"
     set subs_idx (echo $probe | jq -r \
         '[.streams[] | select(.codec_type=="subtitle"
             and (.tags.language // "")=="eng"
             and (.disposition.hearing_impaired // 0)==0
             and (.disposition.forced // 0)==0)] | .[0].index // empty')
     if test -z "$subs_idx"
-        echo "no English non-SDH non-forced subtitle found, pass -s N to pick manually" >&2
+        echo "no English non-SDH non-forced subtitle found, pass -s N or --no-subs" >&2
         exit 1
     end
 end
 
 set -l audio_lang (echo $probe | jq -r ".streams[] | select(.index==$audio_idx) | (.tags.language // \"und\")")
-set -l subs_lang (echo $probe | jq -r ".streams[] | select(.index==$subs_idx) | (.tags.language // \"und\")")
+set -l subs_lang
+if not set -q _flag_no_subs
+    set subs_lang (echo $probe | jq -r ".streams[] | select(.index==$subs_idx) | (.tags.language // \"und\")")
+end
 
 set -l outdir
 if set -q _flag_outdir
@@ -110,7 +120,10 @@ mkdir -p $outdir
 
 set -l basename (basename $src .mkv)
 set -l audio_out $outdir/$basename.$audio_lang.m4a
-set -l subs_out  $outdir/$basename.$subs_lang.srt
+set -l subs_out
+if not set -q _flag_no_subs
+    set subs_out $outdir/$basename.$subs_lang.srt
+end
 
 echo "→ audio #$audio_idx ($audio_lang) → $audio_out"
 ffmpeg -hide_banner -loglevel warning -stats -y -i $src \
@@ -155,15 +168,60 @@ if set -q _flag_clean_voice
     rm -rf $sepdir
 end
 
-echo "→ subs  #$subs_idx ($subs_lang) → $subs_out"
-ffmpeg -hide_banner -loglevel warning -y -i $src \
-    -map 0:$subs_idx -c:s srt $subs_out
-or begin
-    echo "ffmpeg subs extraction failed" >&2
-    exit 1
+if set -q _flag_normalize
+    echo "→ measuring loudness (loudnorm pass 1)"
+    set -l measure_log (mktemp -t bifrost-loudnorm)
+    ffmpeg -hide_banner -nostats -y -i $audio_out \
+        -af "loudnorm=I=-14:LRA=11:TP=-1.5:print_format=json" \
+        -f null - 2> $measure_log
+    or begin
+        echo "loudnorm measurement failed" >&2
+        rm -f $measure_log
+        exit 1
+    end
+
+    set -l measured (awk '/^\{/,/^\}/' $measure_log | jq -r '"\(.input_i) \(.input_lra) \(.input_tp) \(.input_thresh)"')
+    rm -f $measure_log
+
+    set -l in_i (echo $measured | awk '{print $1}')
+    set -l in_lra (echo $measured | awk '{print $2}')
+    set -l in_tp (echo $measured | awk '{print $3}')
+    set -l in_thresh (echo $measured | awk '{print $4}')
+
+    if test -z "$in_i"; or test "$in_i" = "null"
+        echo "could not parse loudnorm measurement" >&2
+        exit 1
+    end
+
+    echo "  measured: I=$in_i LRA=$in_lra TP=$in_tp"
+    echo "→ normalizing to -14 LUFS (loudnorm pass 2)"
+
+    set -l norm_tmp $audio_out.norm.m4a
+    ffmpeg -hide_banner -loglevel warning -stats -y -i $audio_out \
+        -af "loudnorm=I=-14:LRA=11:TP=-1.5:measured_I=$in_i:measured_LRA=$in_lra:measured_TP=$in_tp:measured_thresh=$in_thresh:linear=true" \
+        -c:a aac -b:a 128k -movflags +faststart $norm_tmp
+    or begin
+        echo "loudnorm apply failed" >&2
+        rm -f $norm_tmp
+        exit 1
+    end
+
+    mv $norm_tmp $audio_out
+end
+
+if not set -q _flag_no_subs
+    echo "→ subs  #$subs_idx ($subs_lang) → $subs_out"
+    ffmpeg -hide_banner -loglevel warning -y -i $src \
+        -map 0:$subs_idx -c:s srt $subs_out
+    or begin
+        echo "ffmpeg subs extraction failed" >&2
+        exit 1
+    end
 end
 
 echo
 echo "done."
 echo "  audio: $audio_out"
-echo "  subs:  $subs_out"
+if not set -q _flag_no_subs
+    echo "  subs:  $subs_out"
+end
