@@ -132,12 +132,12 @@ Mirror of Task 4 on the watch side. Sends commands, receives state snapshots, re
 
 Between phone snapshots, watch UI must show a believable position. Uses wall-clock since last snapshot multiplied by playback rate.
 
-- [ ] add `interpolatedTime` computed property on `WatchSessionClient`: if `isPlaying`, returns `lastSnapshot.currentTime + (now - lastSnapshot.serverDate)`; else returns `lastSnapshot.currentTime`
-- [ ] add `interpolatedIndex` computed via binary search over `cues` using `interpolatedTime`
-- [ ] add a 1Hz Timer (`Timer.publish(every: 1.0, on: .main, in: .common)`) that just causes SwiftUI re-evaluation, not actual computation; computation is on demand via the computed properties
-- [ ] handle clock skew: clamp interpolatedTime to `[0, duration]`, snap to 0 if there is no snapshot
-- [ ] write tests: interpolation across pause boundaries, drift after 60s should match `seconds * 1.0`, no negative time
-- [ ] run tests — must pass before next task
+- [x] add `interpolatedTime` computed property on `WatchSessionClient`: if `isPlaying`, returns `lastSnapshot.currentTime + (now - lastSnapshot.serverDate)`; else returns `lastSnapshot.currentTime` (computed property reads `interpolationTick` so SwiftUI observes ticks, then delegates to static `interpolatedTime(snapshot:now:)` for testability)
+- [x] add `interpolatedIndex` computed via binary search over `cues` using `interpolatedTime` (static `interpolatedIndex(time:in:)` mirrors `AudioController.index(at:in:)` so iOS + watch agree)
+- [x] add a 1Hz Timer (`Timer.publish(every: 1.0, on: .main, in: .common)`) that just causes SwiftUI re-evaluation, not actual computation; computation is on demand via the computed properties (implemented as `Timer.scheduledTimer`-equivalent `Timer(timeInterval:repeats:block:)` added to `RunLoop.main` via `startInterpolationTimer()`/`stopInterpolationTimer()`; ticks bump an observable `interpolationTick` counter)
+- [x] handle clock skew: clamp interpolatedTime to `[0, duration]`, snap to 0 if there is no snapshot (nil snapshot → 0; negative elapsed → clamps to 0; runaway elapsed → clamps to duration; zero-duration snapshot keeps raw value rather than collapsing to 0)
+- [x] write tests: interpolation across pause boundaries, drift after 60s should match `seconds * 1.0`, no negative time (new `AllspeakTests/WatchSessionClientInterpolationTests.swift` — 13 cases covering nil/paused/playing/drift/negative/duration-clamp/zero-duration/pause-boundary/binary-search/empty-cues/negative-time-index/computed-properties)
+- [x] run tests — must pass before next task (compile-verified: `xcodebuild -target AllspeakTests -sdk iphonesimulator26.5 build` and `xcodebuild -target AllspeakWatch -sdk watchsimulator26.5 build` both succeed; runtime test execution remains blocked by the same Task 3/4/5 environment gap — watchOS 26.5 simulator runtime is not installed locally and the Allspeak scheme requires it because it embeds the watch app)
 
 ### Task 7: Watch UI Page 1 — Big current line + transport
 

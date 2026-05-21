@@ -14,10 +14,12 @@ final class WatchSessionClient: NSObject {
     var cues: [Subtitle] = []
     var lastSnapshot: PlaybackSnapshot?
     var isConnected: Bool = false
+    var interpolationTick: UInt64 = 0
 
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
+    @ObservationIgnored private var interpolationTimer: Timer?
     #if os(watchOS)
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
@@ -41,6 +43,56 @@ final class WatchSessionClient: NSObject {
         session.activate()
         self.session = session
         self.isConnected = session.isReachable
+    }
+
+    var interpolatedTime: TimeInterval {
+        _ = interpolationTick
+        return Self.interpolatedTime(snapshot: lastSnapshot, now: Date())
+    }
+
+    var interpolatedIndex: Int {
+        Self.interpolatedIndex(time: interpolatedTime, in: cues)
+    }
+
+    static func interpolatedTime(snapshot: PlaybackSnapshot?, now: Date) -> TimeInterval {
+        guard let snapshot else { return 0 }
+        let raw: TimeInterval = snapshot.isPlaying
+            ? snapshot.currentTime + now.timeIntervalSince(snapshot.serverDate)
+            : snapshot.currentTime
+        let upper = snapshot.duration > 0 ? snapshot.duration : raw
+        return min(max(raw, 0), upper)
+    }
+
+    static func interpolatedIndex(time: TimeInterval, in cues: [Subtitle]) -> Int {
+        guard !cues.isEmpty else { return 0 }
+        if time < cues[0].start { return 0 }
+        var lo = 0
+        var hi = cues.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if cues[mid].start <= time {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+        return lo
+    }
+
+    func startInterpolationTimer() {
+        guard interpolationTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.interpolationTick &+= 1
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        interpolationTimer = timer
+    }
+
+    func stopInterpolationTimer() {
+        interpolationTimer?.invalidate()
+        interpolationTimer = nil
     }
 
     func loadCachedCues() {
