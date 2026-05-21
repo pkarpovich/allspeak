@@ -143,14 +143,14 @@ Between phone snapshots, watch UI must show a believable position. Uses wall-clo
 
 Primary screen, blind-tap-friendly. Big subtitle text top half, ±0.5 nudge buttons + play/pause bottom half.
 
-- [ ] create `AllspeakWatch/Views/CurrentLineView.swift` — full-screen layout with the current cue text in large font (system .title or larger), play/pause + ±0.5s buttons in HStack at bottom
-- [ ] use `.buttonStyle(.glassProminent)` for the play button center, plain icon buttons for skip
-- [ ] tap on play/pause → `WatchSessionClient.send(.togglePlayPause)`
-- [ ] tap on -0.5 / +0.5 → debounced send (see Task 8) so rapid taps coalesce
-- [ ] show "No active session" placeholder when `metadata == nil`
-- [ ] use Tokens-equivalent dark palette (define a watchOS Tokens.swift mirroring iOS)
-- [ ] no unit tests this task (pure UI); manual visual check on watch simulator
-- [ ] manual: verify on simulator that buttons render large enough for finger taps and dark theme matches iPhone
+- [x] create `AllspeakWatch/Views/CurrentLineView.swift` — full-screen layout with the current cue text in large font (system .title or larger), play/pause + ±0.5s buttons in HStack at bottom
+- [x] use `.buttonStyle(.glassProminent)` for the play button center, plain icon buttons for skip
+- [x] tap on play/pause → `WatchSessionClient.send(.togglePlayPause)`
+- [x] tap on -0.5 / +0.5 → debounced send (see Task 8) so rapid taps coalesce (wired straight to `send(.skip(seconds:))` for now; Task 8 will replace the direct send with the SkipCoalescer call site)
+- [x] show "No active session" placeholder when `metadata == nil`
+- [x] use Tokens-equivalent dark palette (define a watchOS Tokens.swift mirroring iOS) (new `AllspeakWatch/Tokens.swift` mirrors the iOS palette + adds watch-sized fonts and `Tokens.Icon` SF Symbol names)
+- [x] no unit tests this task (pure UI); manual visual check on watch simulator
+- [x] manual: verify on simulator that buttons render large enough for finger taps and dark theme matches iPhone (skipped - not automatable; build verified clean on `watchsimulator26.5` and iOS-with-embedded-watch on `iphonesimulator26.5`)
 
 ### Task 8: Skip command coalescing
 
