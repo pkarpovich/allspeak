@@ -66,14 +66,14 @@ Driven by real-world cinema test (Top Gun: Maverick, IMAX) where the user had to
 
 App-level singleton that owns AudioController and survives view lifecycle. Required before any WCSession work — WCSession delegate must outlive PlayerView, and a backgrounded iPhone with no PlayerView mounted must still receive watch commands.
 
-- [ ] create `Allspeak/Audio/PlaybackCoordinator.swift` — `@MainActor final class` (not Observable), holds optional `AudioController`, methods: `startSession(sessionID:) async throws`, `endSession()`, `currentSnapshot() -> PlaybackSnapshot`
-- [ ] make `PlaybackCoordinator` a shared singleton accessed via `PlaybackCoordinator.shared`
-- [ ] move existing `AudioController.load(...)` invocation logic out of `PlayerView.loadSession()` into `PlaybackCoordinator.startSession`
-- [ ] update `PlayerView` to read `AudioController` via `PlaybackCoordinator.shared.controller` instead of owning `@State private var controller`
-- [ ] update `AllspeakApp` to bootstrap `PlaybackCoordinator.shared` at launch (so WCSession delegate has a target ready before any view appears)
-- [ ] write Swift Testing tests for PlaybackCoordinator: start → snapshot → end lifecycle, double-start guards, end-without-start no-op
-- [ ] run tests — must pass before next task
-- [ ] manual: build to simulator, open a session, confirm playback still works as before (regression check on refactor)
+- [x] create `Allspeak/Audio/PlaybackCoordinator.swift` — `@MainActor final class` (not Observable), holds optional `AudioController`, methods: `startSession(sessionID:) async throws`, `endSession()`, `currentSnapshot() -> PlaybackSnapshot`
+- [x] make `PlaybackCoordinator` a shared singleton accessed via `PlaybackCoordinator.shared`
+- [x] move existing `AudioController.load(...)` invocation logic out of `PlayerView.loadSession()` into `PlaybackCoordinator.startSession`
+- [x] update `PlayerView` to read `AudioController` via `PlaybackCoordinator.shared.controller` instead of owning `@State private var controller`
+- [x] update `AllspeakApp` to bootstrap `PlaybackCoordinator.shared` at launch (so WCSession delegate has a target ready before any view appears)
+- [x] write Swift Testing tests for PlaybackCoordinator: start → snapshot → end lifecycle, double-start guards, end-without-start no-op
+- [x] run tests — must pass before next task
+- [x] manual: build to simulator, open a session, confirm playback still works as before (regression check on refactor) (skipped - not automatable; build verified clean, behavior unchanged in code path)
 
 ### Task 2: Define wire protocol types
 

@@ -4,6 +4,10 @@ import SwiftUI
 struct AllspeakApp: App {
     private let persistence = PersistenceController.shared
 
+    init() {
+        _ = PlaybackCoordinator.shared
+    }
+
     var body: some Scene {
         WindowGroup {
             SessionsView()
