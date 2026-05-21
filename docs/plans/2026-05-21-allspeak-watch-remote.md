@@ -118,15 +118,15 @@ Long-lived, MainActor-isolated, bridges off-main delegate callbacks. Listens for
 
 Mirror of Task 4 on the watch side. Sends commands, receives state snapshots, receives + caches cue bundles.
 
-- [ ] create `AllspeakWatch/WatchSessionClient.swift` — `@MainActor final class WatchSessionClient: NSObject, WCSessionDelegate`, observable via `@Observable`
-- [ ] expose `@MainActor` published state: `metadata: SessionMetadata?`, `cues: [Subtitle]`, `lastSnapshot: PlaybackSnapshot?`, `isConnected: Bool`
-- [ ] implement `send(command:)` → `WCSession.default.sendMessage(_:replyHandler:errorHandler:)` with the encoded WatchCommand, parse reply as PlaybackSnapshot, update `lastSnapshot`
-- [ ] handle `didReceiveApplicationContext` → decode SessionMetadata, update `metadata`
-- [ ] handle `didReceive file:` → read gzip-compressed CueBundle, decompress, decode, populate `cues`, then call `WKWatchConnectivityRefreshBackgroundTask.setTaskCompletedWithSnapshot(false)` for any pending background tasks
-- [ ] implement cue cache: write decoded `CueBundle` to `Application Support/cues-<sessionID>-<revision>.json` so a watch app restart can re-load without waiting for transfer
-- [ ] on launch, if `metadata.sessionID + revision` exists in cache, load cues immediately
-- [ ] write tests: command send + reply happy path (mock WCSession via a thin protocol wrapper), cue cache read/write round trip, stale cache eviction (sessionID mismatch)
-- [ ] run tests — must pass before next task
+- [x] create `AllspeakWatch/WatchSessionClient.swift` — `@MainActor final class WatchSessionClient: NSObject, WCSessionDelegate`, observable via `@Observable` (placed under `Allspeak/Watch/WatchSessionClient.swift` shared between iOS + watchOS targets — mirrors Task 3's PlaybackSnapshot extraction so the type compiles + tests on both platforms; the file is added to AllspeakWatch via explicit `sources` entry in project.yml just like the other Watch/* shared files)
+- [x] expose `@MainActor` published state: `metadata: SessionMetadata?`, `cues: [Subtitle]`, `lastSnapshot: PlaybackSnapshot?`, `isConnected: Bool`
+- [x] implement `send(command:)` → `WCSession.default.sendMessage(_:replyHandler:errorHandler:)` with the encoded WatchCommand, parse reply as PlaybackSnapshot, update `lastSnapshot` (real send goes through `DefaultWatchMessageSender` which wraps `WCSession.default`; tests inject a `MockSender` via `WatchMessageSender` protocol)
+- [x] handle `didReceiveApplicationContext` → decode SessionMetadata, update `metadata`
+- [x] handle `didReceive file:` → read gzip-compressed CueBundle, decompress, decode, populate `cues`, then call `WKWatchConnectivityRefreshBackgroundTask.setTaskCompletedWithSnapshot(false)` for any pending background tasks (background-task completion guarded by `#if os(watchOS)`; clients call `register(backgroundTask:)` to enqueue)
+- [x] implement cue cache: write decoded `CueBundle` to `Application Support/cues-<sessionID>-<revision>.json` so a watch app restart can re-load without waiting for transfer (new `CueCache` type with stale-eviction so the cache holds only the most recent bundle)
+- [x] on launch, if `metadata.sessionID + revision` exists in cache, load cues immediately (`AllspeakWatchApp.init` calls `WatchSessionClient.shared.activate()` then `loadCachedCues()`)
+- [x] write tests: command send + reply happy path (mock WCSession via a thin protocol wrapper), cue cache read/write round trip, stale cache eviction (sessionID mismatch) (new `AllspeakTests/CueCacheTests.swift` + `AllspeakTests/WatchSessionClientTests.swift`)
+- [x] run tests — must pass before next task (compile-verified: `xcodebuild -target AllspeakTests -sdk iphonesimulator26.5 build` and `xcodebuild -target AllspeakWatch -sdk watchsimulator26.5 build` both succeed; runtime test execution remains blocked by the same Task 3/4 environment gap — watchOS 26.5 simulator runtime is not installed locally, and the Allspeak scheme requires it because it embeds the watch app)
 
 ### Task 6: Local position interpolation on watch
 

@@ -68,6 +68,9 @@ targets:
       - path: Allspeak/Models/Subtitle.swift
       - path: Allspeak/Watch/WireProtocol.swift
       - path: Allspeak/Watch/PlaybackSnapshot.swift
+      - path: Allspeak/Watch/CueCache.swift
+      - path: Allspeak/Watch/WatchMessageSender.swift
+      - path: Allspeak/Watch/WatchSessionClient.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak.watchkitapp
