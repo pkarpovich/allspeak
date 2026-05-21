@@ -182,6 +182,66 @@ struct WatchSessionHostTests {
         host.broadcastCurrentSession()
         #expect(host.isActivated == false)
     }
+
+    @Test("broadcastSnapshot sends a snapshot payload when reachable and gate allows")
+    func broadcastSnapshotSendsWhenReachable() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+        var sends: [[String: Any]] = []
+        host.broadcastSnapshot(now: Date(), isReachable: true) { payload in
+            sends.append(payload)
+        }
+        #expect(sends.count == 1)
+        let decoded = try PlaybackSnapshot(propertyList: sends[0])
+        #expect(decoded.sessionID == coordinator.sessionUUID)
+    }
+
+    @Test("broadcastSnapshot does nothing when isReachable is false")
+    func broadcastSnapshotSkipsWhenUnreachable() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+        var sends: [[String: Any]] = []
+        host.broadcastSnapshot(now: Date(), isReachable: false) { payload in
+            sends.append(payload)
+        }
+        #expect(sends.isEmpty)
+    }
+
+    @Test("broadcastSnapshot rate-limits 5 rapid calls down to a single send")
+    func broadcastSnapshotRateLimits() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+        var sends: [[String: Any]] = []
+        let start = Date(timeIntervalSinceReferenceDate: 2_000)
+        for i in 0..<5 {
+            let now = start.addingTimeInterval(Double(i) * 0.1)
+            host.broadcastSnapshot(now: now, isReachable: true) { payload in
+                sends.append(payload)
+            }
+        }
+        #expect(sends.count == 1)
+    }
+
+    @Test("broadcastSnapshot without active session is a no-op")
+    func broadcastSnapshotNoSession() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+        var sends: [[String: Any]] = []
+        host.broadcastSnapshot(now: Date(), isReachable: true) { payload in
+            sends.append(payload)
+        }
+        #expect(sends.isEmpty)
+    }
 }
 
 #endif

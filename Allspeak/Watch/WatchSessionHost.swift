@@ -7,10 +7,15 @@ final class WatchSessionHost: NSObject {
     static let shared = WatchSessionHost()
 
     private let coordinator: PlaybackCoordinator
+    private let broadcastGate: SnapshotBroadcastGate
     private var session: WCSession?
 
-    init(coordinator: PlaybackCoordinator = .shared) {
+    init(
+        coordinator: PlaybackCoordinator = .shared,
+        broadcastGate: SnapshotBroadcastGate = SnapshotBroadcastGate()
+    ) {
         self.coordinator = coordinator
+        self.broadcastGate = broadcastGate
         super.init()
     }
 
@@ -66,6 +71,33 @@ final class WatchSessionHost: NSObject {
     func dispatch(_ command: WatchCommand) -> PlaybackSnapshot {
         coordinator.apply(command)
         return coordinator.currentSnapshot()
+    }
+
+    func broadcastSnapshot() {
+        let reachable = session?.isReachable ?? false
+        broadcastSnapshot(now: Date(), isReachable: reachable) { [weak self] payload in
+            guard let session = self?.session, session.activationState == .activated else { return }
+            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+        }
+    }
+
+    func broadcastSnapshot(
+        now: Date,
+        isReachable: Bool,
+        send: ([String: Any]) -> Void
+    ) {
+        guard broadcastGate.requestBroadcast(now: now, isReachable: isReachable) else { return }
+        let snapshot = coordinator.currentSnapshot()
+        if snapshot == PlaybackSnapshot.empty {
+            broadcastGate.completeBroadcast()
+            return
+        }
+        guard let payload = try? snapshot.toPropertyList() else {
+            broadcastGate.completeBroadcast()
+            return
+        }
+        send(payload)
+        broadcastGate.completeBroadcast()
     }
 }
 

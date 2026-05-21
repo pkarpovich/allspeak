@@ -20,6 +20,7 @@ final class AudioController {
     @ObservationIgnored private let repository: SessionRepository?
     @ObservationIgnored private let sessionID: NSManagedObjectID?
     @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
+    @ObservationIgnored var onTick: (@MainActor () -> Void)?
 
     init(repository: SessionRepository? = nil, sessionID: NSManagedObjectID? = nil) {
         self.repository = repository
@@ -174,6 +175,7 @@ final class AudioController {
             stopTicker()
             publishNowPlayingTime()
         }
+        onTick?()
     }
 
     fileprivate func playerDidFinish() {

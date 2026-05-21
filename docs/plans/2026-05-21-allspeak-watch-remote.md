@@ -177,12 +177,12 @@ Secondary screen accessed via TabView swipe. Scrollable list of all cues with cu
 
 Best-effort 1Hz snapshot phone → watch while playback is active and watch is reachable. Backup signal in case the user opens the watch app mid-session.
 
-- [ ] in `PlaybackCoordinator`, on each tick where `isPlaying == true`, call `WatchSessionHost.shared.broadcastSnapshot()` at most once per second
-- [ ] `WatchSessionHost.broadcastSnapshot()`: if `WCSession.default.isReachable`, send via `sendMessage(_:replyHandler:nil, errorHandler: nil)` with a snapshot payload (no reply expected, fire-and-forget)
-- [ ] coalesce: if a broadcast is already in flight (track via single in-flight flag), skip the new one
-- [ ] if `isReachable == false`, skip entirely (don't queue, don't try transferUserInfo)
-- [ ] write tests: rate limiting (5 calls in 1 sec → 1 send), reachable-false skip, in-flight skip
-- [ ] run tests — must pass before next task
+- [x] in `PlaybackCoordinator`, on each tick where `isPlaying == true`, call `WatchSessionHost.shared.broadcastSnapshot()` at most once per second (hooked via a new `AudioController.onTick` closure set by PlaybackCoordinator in both startSession variants; rate limit owned by `SnapshotBroadcastGate` with a 1.0s minimum interval)
+- [x] `WatchSessionHost.broadcastSnapshot()`: if `WCSession.default.isReachable`, send via `sendMessage(_:replyHandler:nil, errorHandler: nil)` with a snapshot payload (no reply expected, fire-and-forget) (production path reads `session.isReachable` and dispatches `sendMessage(_:replyHandler:nil, errorHandler:nil)`; testable overload `broadcastSnapshot(now:isReachable:send:)` feeds the same gate so tests can inject time + reachability + sender)
+- [x] coalesce: if a broadcast is already in flight (track via single in-flight flag), skip the new one (`SnapshotBroadcastGate.isInFlight` flips true on `requestBroadcast` and back on `completeBroadcast`; the gate test verifies a second request during in-flight is rejected even when the time window has elapsed)
+- [x] if `isReachable == false`, skip entirely (don't queue, don't try transferUserInfo) (gate's `requestBroadcast(now:isReachable:)` short-circuits when `isReachable==false`, leaving `lastBroadcastAt` untouched so it doesn't poison the next window)
+- [x] write tests: rate limiting (5 calls in 1 sec → 1 send), reachable-false skip, in-flight skip (new `AllspeakTests/SnapshotBroadcastGateTests.swift` covers gate behavior directly + new tests in `AllspeakTests/WatchSessionHostTests.swift` exercise the host's `broadcastSnapshot(now:isReachable:send:)` overload for the same three scenarios plus an extra "no session" no-op case)
+- [x] run tests — must pass before next task (compile-verified: `xcodebuild -project Allspeak.xcodeproj -target AllspeakTests -sdk iphonesimulator26.5 build` and `xcodebuild -project Allspeak.xcodeproj -target AllspeakWatch -sdk watchsimulator26.5 build` both succeed; runtime test execution remains blocked by the same Task 3/4/5/6/8 environment gap — watchOS 26.5 simulator runtime is not installed locally and the Allspeak scheme requires it because it embeds the watch app)
 
 ### Task 11: Verify acceptance criteria
 
