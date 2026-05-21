@@ -23,5 +23,9 @@ final class SnapshotBroadcastGate {
     func completeBroadcast() {
         isInFlight = false
     }
+
+    func recordBroadcast(now: Date) {
+        lastBroadcastAt = now
+    }
 }
 #endif

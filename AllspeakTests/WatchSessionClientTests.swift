@@ -143,7 +143,19 @@ struct WatchSessionClientTests {
         let (client, _, dir) = try makeClient()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        let bundle = CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues)
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let bundle = CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues)
         let compressed = try bundle.compressed()
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("incoming-\(UUID().uuidString).gz")
@@ -155,6 +167,17 @@ struct WatchSessionClientTests {
         #expect(client.cues == Self.cues)
 
         let secondClient = WatchSessionClient(sender: MockSender(), cache: try CueCache(baseURL: dir))
+        let restartMeta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Restart",
+            duration: 1,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        secondClient.handleReceivedApplicationContext(try restartMeta.toPropertyList())
+        secondClient.cues = []
         secondClient.loadCachedCues()
         #expect(secondClient.cues == Self.cues)
     }
@@ -264,8 +287,8 @@ struct WatchSessionClientTests {
         #expect(client.metadata?.sessionID == metaB.sessionID)
     }
 
-    @Test("handleReceivedApplicationContext keeps existing cues when sessionID unchanged and cache misses")
-    func receiveApplicationContextKeepsCuesOnRevisionBump() async throws {
+    @Test("handleReceivedApplicationContext clears cues on revision bump when cache misses")
+    func receiveApplicationContextClearsCuesOnRevisionBumpCacheMiss() async throws {
         let (client, _, dir) = try makeClient()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -295,8 +318,144 @@ struct WatchSessionClientTests {
         )
         client.handleReceivedApplicationContext(try metaR2.toPropertyList())
 
-        #expect(client.cues == Self.cues)
+        #expect(client.cues == [])
         #expect(client.metadata?.revision == 2)
+    }
+
+    @Test("handleReceivedApplicationContext loads cached cues on revision bump when cache hits")
+    func receiveApplicationContextLoadsCachedCuesOnRevisionBump() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let metaR1 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Stable",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR1.toPropertyList())
+        let bundleR1 = CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundleR1.compressed(), metadata: [:])
+
+        let r2Cues: [Subtitle] = [
+            Subtitle(index: 1, start: 0, end: 1, text: "r2-first"),
+            Subtitle(index: 2, start: 1, end: 2, text: "r2-second"),
+        ]
+        let bundleR2 = CueBundle(sessionID: sessionID, revision: 2, cues: r2Cues)
+        client.handleReceivedFile(data: try bundleR2.compressed(), metadata: [:])
+
+        let metaR2 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 2,
+            title: "Stable",
+            duration: 60,
+            cueCount: r2Cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
+
+        #expect(client.cues == r2Cues)
+        #expect(client.metadata?.revision == 2)
+    }
+
+    @Test("handleReceivedApplicationContext clears lastSnapshot on revision bump for same session")
+    func receiveApplicationContextClearsSnapshotOnRevisionBump() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let metaR1 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Stable",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: true,
+            currentTime: 5
+        )
+        client.handleReceivedApplicationContext(try metaR1.toPropertyList())
+        let snapshotR1 = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 5,
+            duration: 60,
+            currentIndex: 1,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        sender.nextReply = try snapshotR1.toPropertyList()
+        client.send(.play)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(client.lastSnapshot != nil)
+
+        let metaR2 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 2,
+            title: "Stable",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
+
+        #expect(client.lastSnapshot == nil)
+        #expect(client.metadata?.revision == 2)
+    }
+
+    @Test("handleReceivedFile defers bundle when metadata not yet arrived but caches for later hydration")
+    func receiveFileDefersWhenMetadataNil() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let bundle = CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundle.compressed(), metadata: [:])
+
+        #expect(client.cues == [])
+        #expect(client.metadata == nil)
+
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Out of order",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        #expect(client.cues == Self.cues)
+    }
+
+    @Test("handleReceivedFile rejects queued bundle after sessionEnded")
+    func receiveFileRejectsAfterSessionEnded() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let activeMeta = SessionMetadata(
+            sessionID: activeID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: true,
+            currentTime: 5
+        )
+        client.handleReceivedApplicationContext(try activeMeta.toPropertyList())
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+        #expect(client.metadata == nil)
+
+        let lateBundle = CueBundle(sessionID: activeID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try lateBundle.compressed(), metadata: [:])
+
+        #expect(client.cues == [])
     }
 
     @Test("handleReceivedApplicationContext sessionEnded clears state")
@@ -341,15 +500,27 @@ struct WatchSessionClientTests {
         #expect(client.cues == [])
     }
 
-    @Test("loadCachedCues populates cues when cache has data")
+    @Test("loadCachedCues populates cues when metadata matches cached bundle")
     func loadCachedCuesHappyPath() async throws {
         let (client, _, dir) = try makeClient()
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let cache = try CueCache(baseURL: dir)
-        try cache.save(CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues))
+        let sessionID = UUID()
+        try cache.save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
 
         let warmClient = WatchSessionClient(sender: MockSender(), cache: cache)
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Warm",
+            duration: 1,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        warmClient.handleReceivedApplicationContext(try meta.toPropertyList())
+        warmClient.cues = []
         warmClient.loadCachedCues()
         #expect(warmClient.cues == Self.cues)
         _ = client
@@ -362,6 +533,353 @@ struct WatchSessionClientTests {
 
         client.loadCachedCues()
         #expect(client.cues == [])
+    }
+
+    @Test("loadCachedCues ignores stale cache when metadata does not match")
+    func loadCachedCuesIgnoresStaleSession() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let cache = try CueCache(baseURL: dir)
+        try cache.save(CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues))
+
+        let warmClient = WatchSessionClient(sender: MockSender(), cache: cache)
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "Different",
+            duration: 1,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        warmClient.handleReceivedApplicationContext(try meta.toPropertyList())
+        warmClient.loadCachedCues()
+        #expect(warmClient.cues == [])
+        _ = client
+    }
+
+    @Test("loadCachedCues does not resurrect cues after sessionEnded")
+    func loadCachedCuesAfterSessionEnded() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let cache = try CueCache(baseURL: dir)
+        try cache.save(CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues))
+
+        let warmClient = WatchSessionClient(sender: MockSender(), cache: cache)
+        warmClient.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+        warmClient.loadCachedCues()
+        #expect(warmClient.cues == [])
+        _ = client
+    }
+
+    @Test("handleReceivedSnapshot stores snapshot when sessionID matches metadata")
+    func receiveSnapshotStoresWhenSessionMatches() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let snapshot = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 12.5,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        client.handleReceivedSnapshot(try snapshot.toPropertyList())
+        #expect(client.lastSnapshot == snapshot)
+        #expect(client.metadata?.isPlaying == true)
+        #expect(abs((client.metadata?.currentTime ?? 0) - 12.5) < 0.01)
+    }
+
+    @Test("handleReceivedSnapshot stores snapshot when metadata is absent")
+    func receiveSnapshotStoresWhenMetadataNil() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let snapshot = PlaybackSnapshot(
+            sessionID: UUID(),
+            revision: 1,
+            currentTime: 1,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        client.handleReceivedSnapshot(try snapshot.toPropertyList())
+        #expect(client.lastSnapshot == snapshot)
+    }
+
+    @Test("handleReceivedSnapshot ignores snapshots for a different sessionID than current metadata")
+    func receiveSnapshotIgnoresMismatchedSession() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let meta = SessionMetadata(
+            sessionID: activeID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let stale = PlaybackSnapshot(
+            sessionID: UUID(),
+            revision: 1,
+            currentTime: 5,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        client.handleReceivedSnapshot(try stale.toPropertyList())
+        #expect(client.lastSnapshot == nil)
+    }
+
+    @Test("handleReceivedSnapshot rejects stale-revision snapshot for same session")
+    func receiveSnapshotRejectsStaleRevision() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let metaR2 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 2,
+            title: "Active",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
+
+        let staleR1 = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 42,
+            duration: 60,
+            currentIndex: 1,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        client.handleReceivedSnapshot(try staleR1.toPropertyList())
+
+        #expect(client.lastSnapshot == nil)
+        #expect(client.metadata?.revision == 2)
+        #expect(client.metadata?.currentTime == 0)
+        #expect(client.metadata?.isPlaying == false)
+    }
+
+    @Test("handleReceivedSnapshot rejects higher-revision snapshot for same session")
+    func receiveSnapshotRejectsHigherRevision() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let metaR1 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR1.toPropertyList())
+        let bundleR1 = CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundleR1.compressed(), metadata: [:])
+        #expect(client.cues == Self.cues)
+
+        let aheadR2 = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 2,
+            currentTime: 42,
+            duration: 60,
+            currentIndex: 1,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        client.handleReceivedSnapshot(try aheadR2.toPropertyList())
+
+        #expect(client.lastSnapshot == nil)
+        #expect(client.metadata?.revision == 1)
+        #expect(client.cues == Self.cues)
+    }
+
+    @Test("send reply rejects stale-revision snapshot for same session")
+    func sendReplyRejectsStaleRevision() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let metaR2 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 2,
+            title: "Active",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
+
+        let staleR1 = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 42,
+            duration: 60,
+            currentIndex: 1,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        sender.nextReply = try staleR1.toPropertyList()
+        client.send(.play)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(client.lastSnapshot == nil)
+        #expect(client.metadata?.revision == 2)
+    }
+
+    @Test("handleReceivedFile rejects stale-revision bundle for same session")
+    func receiveFileRejectsStaleRevision() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let metaR2 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 2,
+            title: "Active",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
+        let bundleR2 = CueBundle(sessionID: sessionID, revision: 2, cues: Self.cues)
+        client.handleReceivedFile(data: try bundleR2.compressed(), metadata: [:])
+        #expect(client.cues == Self.cues)
+        #expect(client.metadata?.revision == 2)
+
+        let staleR1 = CueBundle(sessionID: sessionID, revision: 1, cues: [])
+        client.handleReceivedFile(data: try staleR1.compressed(), metadata: [:])
+
+        #expect(client.cues == Self.cues)
+        #expect(client.metadata?.revision == 2)
+    }
+
+    @Test("handleReceivedSnapshot rejects older serverDate at same revision")
+    func receiveSnapshotRejectsStaleServerDate() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let newer = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 30,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+        let older = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 5,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: false,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        client.handleReceivedSnapshot(try newer.toPropertyList())
+        client.handleReceivedSnapshot(try older.toPropertyList())
+
+        #expect(client.lastSnapshot == newer)
+        #expect(client.metadata?.isPlaying == true)
+        #expect(client.metadata?.currentTime == 30)
+    }
+
+    @Test("handleReceivedSnapshot accepts equal serverDate at same revision")
+    func receiveSnapshotAcceptsEqualServerDate() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Active",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 5,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: date
+        )
+        let second = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 5,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: false,
+            serverDate: date
+        )
+
+        client.handleReceivedSnapshot(try first.toPropertyList())
+        client.handleReceivedSnapshot(try second.toPropertyList())
+
+        #expect(client.lastSnapshot == second)
+    }
+
+    @Test("handleReceivedSnapshot ignores invalid payloads")
+    func receiveSnapshotIgnoresInvalid() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.handleReceivedSnapshot(["nonsense": "value"])
+        #expect(client.lastSnapshot == nil)
     }
 
     @Test("stale cache hit returns nil for mismatched session ID")

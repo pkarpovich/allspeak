@@ -79,6 +79,7 @@ final class PlaybackCoordinator {
             controller.seek(to: pos)
         }
         controller.onTick = { [weak self] in self?.handleControllerTick() }
+        controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
 
         self.controller = controller
         self.sessionID = sessionID
@@ -107,6 +108,7 @@ final class PlaybackCoordinator {
             throw StartError.loadFailed
         }
         controller.onTick = { [weak self] in self?.handleControllerTick() }
+        controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
         self.controller = controller
         self.sessionID = nil
         self.sessionUUID = sessionUUID
@@ -121,6 +123,13 @@ final class PlaybackCoordinator {
         guard let controller, controller.isPlaying else { return }
         #if os(iOS)
         WatchSessionHost.shared.broadcastSnapshot()
+        #endif
+    }
+
+    private func handleControllerStateChange() {
+        guard controller != nil else { return }
+        #if os(iOS)
+        WatchSessionHost.shared.forceBroadcastSnapshot()
         #endif
     }
 

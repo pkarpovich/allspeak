@@ -99,14 +99,40 @@ final class WatchSessionHost: NSObject {
         send(payload)
         broadcastGate.completeBroadcast()
     }
+
+    func forceBroadcastSnapshot() {
+        let reachable = session?.isReachable ?? false
+        forceBroadcastSnapshot(now: Date(), isReachable: reachable) { [weak self] payload in
+            guard let session = self?.session, session.activationState == .activated else { return }
+            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+        }
+    }
+
+    func forceBroadcastSnapshot(
+        now: Date,
+        isReachable: Bool,
+        send: ([String: Any]) -> Void
+    ) {
+        guard isReachable else { return }
+        let snapshot = coordinator.currentSnapshot()
+        guard snapshot != PlaybackSnapshot.empty else { return }
+        guard let payload = try? snapshot.toPropertyList() else { return }
+        send(payload)
+        broadcastGate.recordBroadcast(now: now)
+    }
 }
 
 extension WatchSessionHost: WCSessionDelegate {
     nonisolated func session(
         _: WCSession,
-        activationDidCompleteWith _: WCSessionActivationState,
+        activationDidCompleteWith state: WCSessionActivationState,
         error _: Error?
-    ) {}
+    ) {
+        guard state == .activated else { return }
+        Task { @MainActor in
+            self.broadcastCurrentSession()
+        }
+    }
 
     nonisolated func sessionDidBecomeInactive(_: WCSession) {}
 

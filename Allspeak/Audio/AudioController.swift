@@ -21,6 +21,7 @@ final class AudioController {
     @ObservationIgnored private let sessionID: NSManagedObjectID?
     @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
     @ObservationIgnored var onTick: (@MainActor () -> Void)?
+    @ObservationIgnored var onStateChange: (@MainActor () -> Void)?
 
     init(repository: SessionRepository? = nil, sessionID: NSManagedObjectID? = nil) {
         self.repository = repository
@@ -76,11 +77,13 @@ final class AudioController {
             isPlaying = false
             stopTicker()
             publishNowPlayingTime()
+            onStateChange?()
             return
         }
         isPlaying = true
         startTicker()
         publishNowPlayingTime()
+        onStateChange?()
     }
 
     func pause() {
@@ -92,6 +95,7 @@ final class AudioController {
         isPlaying = false
         stopTicker()
         publishNowPlayingTime()
+        onStateChange?()
     }
 
     func togglePlayPause() {
@@ -106,6 +110,7 @@ final class AudioController {
         currentTime = clamped
         updateIndexIfNeeded()
         publishNowPlayingTime()
+        onStateChange?()
     }
 
     func skip(by seconds: TimeInterval) {
@@ -185,6 +190,7 @@ final class AudioController {
         isPlaying = false
         stopTicker()
         publishNowPlayingTime()
+        onStateChange?()
     }
 
     private func publishNowPlayingTime() {

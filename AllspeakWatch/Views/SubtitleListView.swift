@@ -53,7 +53,7 @@ struct SubtitleListView: View {
     }
 
     private func row(for cue: Subtitle) -> some View {
-        let isCurrent = cue.index == currentIndex
+        let isCurrent = cue.index == currentCue?.index
         return HStack(alignment: .center, spacing: 8) {
             Rectangle()
                 .fill(isCurrent ? Tokens.accent : Color.clear)
@@ -77,6 +77,10 @@ struct SubtitleListView: View {
 
     private var currentIndex: Int {
         client.interpolatedIndex
+    }
+
+    private var currentCue: Subtitle? {
+        client.cues.indices.contains(currentIndex) ? client.cues[currentIndex] : nil
     }
 
     private func handleTap(_ cue: Subtitle) {

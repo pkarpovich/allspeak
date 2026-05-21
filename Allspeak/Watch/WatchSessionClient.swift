@@ -43,10 +43,18 @@ final class WatchSessionClient: NSObject {
         session.activate()
         self.session = session
         self.isConnected = session.isReachable
+        let stored = session.receivedApplicationContext
+        if !stored.isEmpty {
+            handleReceivedApplicationContext(stored)
+        }
     }
 
     var interpolatedTime: TimeInterval {
         _ = interpolationTick
+        if lastSnapshot == nil, let metadata {
+            let upper = metadata.duration > 0 ? metadata.duration : metadata.currentTime
+            return min(max(metadata.currentTime, 0), upper)
+        }
         return Self.interpolatedTime(snapshot: lastSnapshot, now: Date())
     }
 
@@ -96,7 +104,10 @@ final class WatchSessionClient: NSObject {
     }
 
     func loadCachedCues() {
-        guard let cache, let bundle = cache.latest() else { return }
+        guard let cache,
+              let metadata,
+              let bundle = cache.load(sessionID: metadata.sessionID, revision: metadata.revision)
+        else { return }
         self.cues = bundle.cues
     }
 
@@ -106,14 +117,26 @@ final class WatchSessionClient: NSObject {
             let bridge = SendableDictionary(value: reply)
             Task { @MainActor in
                 guard let self else { return }
-                if let snapshot = try? PlaybackSnapshot(propertyList: bridge.value) {
-                    self.lastSnapshot = snapshot
-                    self.applySnapshotToMetadata(snapshot)
-                }
+                self.handleReceivedSnapshot(bridge.value)
             }
         }
         let errorHandler: @Sendable (Error) -> Void = { _ in }
         sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
+    }
+
+    func handleReceivedSnapshot(_ payload: [String: Any]) {
+        guard let snapshot = try? PlaybackSnapshot(propertyList: payload) else { return }
+        if let current = metadata {
+            if current.sessionID != snapshot.sessionID { return }
+            if snapshot.revision != current.revision { return }
+        }
+        if let last = lastSnapshot,
+           snapshot.sessionID == last.sessionID,
+           snapshot.serverDate < last.serverDate {
+            return
+        }
+        self.lastSnapshot = snapshot
+        applySnapshotToMetadata(snapshot)
     }
 
     func handleReceivedApplicationContext(_ context: [String: Any]) {
@@ -124,14 +147,16 @@ final class WatchSessionClient: NSObject {
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
-        let previousSessionID = self.metadata?.sessionID
+        let previous = self.metadata
         self.metadata = meta
-        if previousSessionID != meta.sessionID {
+        let sessionChanged = previous?.sessionID != meta.sessionID
+        let revisionChanged = previous?.sessionID == meta.sessionID && previous?.revision != meta.revision
+        if sessionChanged || revisionChanged {
             self.lastSnapshot = nil
         }
         if let cache, let bundle = cache.load(sessionID: meta.sessionID, revision: meta.revision) {
             self.cues = bundle.cues
-        } else if previousSessionID != meta.sessionID {
+        } else if sessionChanged || revisionChanged {
             self.cues = []
         }
     }
@@ -147,24 +172,31 @@ final class WatchSessionClient: NSObject {
             completePendingBackgroundTasks()
             return
         }
-        if let current = metadata, current.sessionID != bundle.sessionID {
-            completePendingBackgroundTasks()
-            return
+        if let current = metadata {
+            if current.sessionID != bundle.sessionID {
+                completePendingBackgroundTasks()
+                return
+            }
+            if bundle.revision < current.revision {
+                completePendingBackgroundTasks()
+                return
+            }
         }
         try? cache?.save(bundle)
-        self.cues = bundle.cues
-        if let current = metadata,
-           current.sessionID == bundle.sessionID,
-           current.revision != bundle.revision {
-            self.metadata = SessionMetadata(
-                sessionID: current.sessionID,
-                revision: bundle.revision,
-                title: current.title,
-                duration: current.duration,
-                cueCount: bundle.cues.count,
-                isPlaying: current.isPlaying,
-                currentTime: current.currentTime
-            )
+        if let current = metadata, current.sessionID == bundle.sessionID {
+            self.cues = bundle.cues
+            if current.revision < bundle.revision {
+                self.metadata = SessionMetadata(
+                    sessionID: current.sessionID,
+                    revision: bundle.revision,
+                    title: current.title,
+                    duration: current.duration,
+                    cueCount: bundle.cues.count,
+                    isPlaying: current.isPlaying,
+                    currentTime: current.currentTime
+                )
+                self.lastSnapshot = nil
+            }
         }
         completePendingBackgroundTasks()
     }
@@ -214,6 +246,13 @@ extension WatchSessionClient: WCSessionDelegate {
         let reachable = session.isReachable
         Task { @MainActor in
             self.isConnected = reachable
+        }
+    }
+
+    nonisolated func session(_: WCSession, didReceiveMessage message: [String: Any]) {
+        let bridge = SendableDictionary(value: message)
+        Task { @MainActor in
+            self.handleReceivedSnapshot(bridge.value)
         }
     }
 

@@ -144,6 +144,54 @@ struct WatchSessionClientInterpolationTests {
         #expect(client.interpolatedIndex == 2)
     }
 
+    @Test("computed interpolatedTime falls back to metadata when no snapshot")
+    func computedInterpolatedTimeFallsBackToMetadata() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        client.metadata = SessionMetadata(
+            sessionID: Self.sessionID,
+            revision: 1,
+            title: "t",
+            duration: 600,
+            cueCount: 5,
+            isPlaying: false,
+            currentTime: 42
+        )
+        #expect(client.interpolatedTime == 42)
+        client.cues = Self.cues
+        #expect(client.interpolatedIndex == 4)
+    }
+
+    @Test("metadata fallback clamps to duration upper bound")
+    func metadataFallbackClampsToDuration() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        client.metadata = SessionMetadata(
+            sessionID: Self.sessionID,
+            revision: 1,
+            title: "t",
+            duration: 100,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 9999
+        )
+        #expect(client.interpolatedTime == 100)
+    }
+
+    @Test("snapshot takes precedence over metadata fallback")
+    func snapshotPrecedesMetadataFallback() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        client.metadata = SessionMetadata(
+            sessionID: Self.sessionID,
+            revision: 1,
+            title: "t",
+            duration: 600,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 42
+        )
+        client.lastSnapshot = Self.snapshot(currentTime: 99, isPlaying: false)
+        #expect(client.interpolatedTime == 99)
+    }
+
     final class NoopSender: WatchMessageSender, @unchecked Sendable {
         var isReachable: Bool { true }
         func send(

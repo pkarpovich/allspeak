@@ -243,6 +243,64 @@ struct WatchSessionHostTests {
         #expect(sends.isEmpty)
     }
 
+    @Test("forceBroadcastSnapshot sends even when the periodic gate window has not elapsed")
+    func forceBroadcastBypassesRateLimit() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+        var sends: [[String: Any]] = []
+        let t0 = Date(timeIntervalSinceReferenceDate: 5_000)
+        host.broadcastSnapshot(now: t0, isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+
+        host.broadcastSnapshot(now: t0.addingTimeInterval(0.1), isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+
+        host.forceBroadcastSnapshot(now: t0.addingTimeInterval(0.2), isReachable: true) { sends.append($0) }
+        #expect(sends.count == 2)
+    }
+
+    @Test("forceBroadcastSnapshot skips when not reachable")
+    func forceBroadcastRespectsReachability() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+        var sends: [[String: Any]] = []
+        host.forceBroadcastSnapshot(now: Date(), isReachable: false) { sends.append($0) }
+        #expect(sends.isEmpty)
+    }
+
+    @Test("forceBroadcastSnapshot is a no-op without an active session")
+    func forceBroadcastNoSession() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+        var sends: [[String: Any]] = []
+        host.forceBroadcastSnapshot(now: Date(), isReachable: true) { sends.append($0) }
+        #expect(sends.isEmpty)
+    }
+
+    @Test("forceBroadcastSnapshot updates the gate so subsequent rate-limited calls back off")
+    func forceBroadcastUpdatesGate() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+        var sends: [[String: Any]] = []
+        let t0 = Date(timeIntervalSinceReferenceDate: 8_000)
+        host.forceBroadcastSnapshot(now: t0, isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        host.broadcastSnapshot(now: t0.addingTimeInterval(0.1), isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        host.broadcastSnapshot(now: t0.addingTimeInterval(1.1), isReachable: true) { sends.append($0) }
+        #expect(sends.count == 2)
+    }
+
     @Test("broadcastSnapshot empty-session calls do not consume the rate-limit slot")
     func broadcastSnapshotEmptyDoesNotConsumeSlot() throws {
         let coordinator = PlaybackCoordinator.shared

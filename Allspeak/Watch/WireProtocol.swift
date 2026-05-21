@@ -147,15 +147,34 @@ enum WireCodingError: Error {
     case compressionFailed
 }
 
+nonisolated(unsafe) private let wireDateFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+}()
+
 private let wireJSONEncoder: JSONEncoder = {
     let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
+    encoder.dateEncodingStrategy = .custom { date, encoder in
+        var container = encoder.singleValueContainer()
+        try container.encode(wireDateFormatter.string(from: date))
+    }
     return encoder
 }()
 
 private let wireJSONDecoder: JSONDecoder = {
     let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
+    decoder.dateDecodingStrategy = .custom { decoder in
+        let container = try decoder.singleValueContainer()
+        let string = try container.decode(String.self)
+        guard let date = wireDateFormatter.date(from: string) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid ISO 8601 date with fractional seconds: \(string)"
+            )
+        }
+        return date
+    }
     return decoder
 }()
 

@@ -7,6 +7,7 @@ struct AllspeakWatchApp: App {
     init() {
         let shared = WatchSessionClient.shared
         shared.activate()
+        shared.loadCachedCues()
         shared.startInterpolationTimer()
         self._client = State(initialValue: shared)
     }

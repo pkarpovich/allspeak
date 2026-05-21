@@ -96,6 +96,32 @@ struct AudioControllerNowPlayingTests {
         #expect(abs(elapsed - 15) < 0.05)
     }
 
+    @Test("onStateChange fires on play, pause, and seek")
+    func onStateChangeFires() throws {
+        defer { NowPlayingCenter.shared.clear() }
+
+        let fixture = try Self.makeSilenceFile(seconds: 30)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+
+        let controller = AudioController()
+        try controller.load(audio: fixture, subtitles: [], title: "T")
+
+        var count = 0
+        controller.onStateChange = { count += 1 }
+
+        controller.play()
+        defer { controller.pause() }
+        #expect(count >= 1)
+        let afterPlay = count
+
+        controller.pause()
+        #expect(count > afterPlay)
+        let afterPause = count
+
+        controller.seek(to: 5)
+        #expect(count > afterPause)
+    }
+
     @Test("load registers remote command handlers")
     func loadRegistersRemoteCommands() throws {
         defer { NowPlayingCenter.shared.clear() }
