@@ -2,6 +2,9 @@ import SwiftUI
 
 struct CurrentLineView: View {
     @Environment(WatchSessionClient.self) private var client
+    @State private var skipCoalescer = SkipCoalescer { delta in
+        WatchSessionClient.shared.send(.skip(seconds: delta))
+    }
 
     var body: some View {
         ZStack {
@@ -98,10 +101,10 @@ struct CurrentLineView: View {
     }
 
     private func handleSkipBack() {
-        client.send(.skip(seconds: -0.5))
+        skipCoalescer.accumulate(-0.5)
     }
 
     private func handleSkipForward() {
-        client.send(.skip(seconds: 0.5))
+        skipCoalescer.accumulate(0.5)
     }
 }

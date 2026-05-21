@@ -71,6 +71,7 @@ targets:
       - path: Allspeak/Watch/CueCache.swift
       - path: Allspeak/Watch/WatchMessageSender.swift
       - path: Allspeak/Watch/WatchSessionClient.swift
+      - path: Allspeak/Watch/SkipCoalescer.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak.watchkitapp

@@ -156,11 +156,11 @@ Primary screen, blind-tap-friendly. Big subtitle text top half, ±0.5 nudge butt
 
 If user spams `+0.5` five times in 500ms, send one `skip(+2.5)` instead of five separate messages.
 
-- [ ] create `AllspeakWatch/SkipCoalescer.swift` — `@MainActor final class` with `accumulate(_ delta: Double)` and a debounce window (250ms)
-- [ ] when accumulate is called, restart a debounce Task; when debounce fires, call back with the summed delta
-- [ ] CurrentLineView wires skip buttons through coalescer instead of directly sending
-- [ ] write tests: single tap → one command, 5 rapid taps within 250ms → one command with summed delta, mixed +/- taps → sum cleanly to zero, no-send when zero
-- [ ] run tests — must pass before next task
+- [x] create `AllspeakWatch/SkipCoalescer.swift` — `@MainActor final class` with `accumulate(_ delta: Double)` and a debounce window (250ms) (placed under `Allspeak/Watch/SkipCoalescer.swift` shared between iOS + watchOS targets — mirrors Task 5's WatchSessionClient extraction so the type is reachable from `@testable import Allspeak`; AllspeakWatch picks it up via explicit `sources` entry in project.yml like the other Watch/* shared files)
+- [x] when accumulate is called, restart a debounce Task; when debounce fires, call back with the summed delta
+- [x] CurrentLineView wires skip buttons through coalescer instead of directly sending (skip handlers call `skipCoalescer.accumulate(±0.5)`; coalescer is a `@State` instance whose send closure routes to `WatchSessionClient.shared.send(.skip(seconds:))`)
+- [x] write tests: single tap → one command, 5 rapid taps within 250ms → one command with summed delta, mixed +/- taps → sum cleanly to zero, no-send when zero (new `AllspeakTests/SkipCoalescerTests.swift` — 8 cases: single-flush, 5-rapid-summed, mixed-±-no-send, empty-flush, accumulate-after-flush, timer-auto-fires, debounce-window-resets-per-tap, cancel-drops-pending)
+- [x] run tests — must pass before next task (compile-verified: `xcodebuild -project Allspeak.xcodeproj -target AllspeakTests -sdk iphonesimulator26.5 build` and `xcodebuild -project Allspeak.xcodeproj -target AllspeakWatch -sdk watchsimulator26.5 build` both succeed; runtime test execution remains blocked by the same Task 3/4/5/6 environment gap — watchOS 26.5 simulator runtime is not installed locally and the Allspeak scheme requires it because it embeds the watch app)
 
 ### Task 9: Watch UI Page 2 — Subtitle list with tap-to-seek
 
