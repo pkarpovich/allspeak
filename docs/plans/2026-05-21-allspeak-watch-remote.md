@@ -199,9 +199,9 @@ Best-effort 1Hz snapshot phone → watch while playback is active and watch is r
 
 ### Task 12: Update documentation
 
-- [ ] add a short section to `README.md` (or create one if absent) describing how to pair + use the watch remote
-- [ ] document the wire protocol in a comment at the top of `WireProtocol.swift` for future maintainers (the one exception to "no docstrings" rule — the wire format is the contract, and it must outlive code reading)
-- [ ] no tests
+- [x] add a short section to `README.md` (or create one if absent) describing how to pair + use the watch remote (new "Apple Watch remote" section in README.md covers pairing, both pages, coalescing, interpolation, and the five round-trip commands; points readers at `Allspeak/Watch/WireProtocol.swift` for the wire contract)
+- [x] document the wire protocol in a comment at the top of `WireProtocol.swift` for future maintainers (the one exception to "no docstrings" rule — the wire format is the contract, and it must outlive code reading) (new header comment block documents transports, wrapper dictionary shape, and an "Adding a new command" runbook)
+- [x] no tests
 
 ## Technical Details
 

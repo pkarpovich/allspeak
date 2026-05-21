@@ -1,5 +1,51 @@
 import Foundation
 
+// MARK: - Wire protocol contract
+//
+// This file is the contract between the iOS host (`Allspeak`) and the
+// watchOS remote (`AllspeakWatch`). The types and their property-list
+// encodings MUST stay binary-compatible between the two targets that share
+// this source file — if you change a type here, both apps need to be
+// reinstalled together. Bumping the in-payload `revision` field on
+// SessionMetadata / CueBundle is how we signal that cached cues are stale
+// and should be replaced.
+//
+// Transports (one-way arrows reflect actual reachability semantics):
+//
+//   iPhone --updateApplicationContext--> Watch   SessionMetadata
+//       small, latest-state-wins; replaces any previously delivered context
+//
+//   iPhone --transferFile---------------> Watch   CueBundle (gzipped JSON)
+//       large payload (20-80KB compressed); queued by the OS, survives
+//       reachability flaps; receiver decompresses + caches under
+//       Application Support so a watch restart does not re-trigger transfer
+//
+//   iPhone --sendMessage (no reply)-----> Watch   PlaybackSnapshot
+//       fire-and-forget, 1Hz while reachable + playing; dropped silently
+//       when watch is asleep or out of range
+//
+//   Watch  --sendMessage (with reply)---> iPhone  WatchCommand
+//       reply payload is a PlaybackSnapshot so the watch's lastSnapshot
+//       stays fresh after every user action; this is the only path that
+//       wakes the iOS app from background
+//
+// Wrapper dictionary shape (see WirePayloadKey / WirePayloadKind):
+//
+//   ["kind": "<command|snapshot|metadata>", "payload": <Data: JSON>]
+//
+// The JSON-inside-Data wrapper exists because WCSession dictionaries are
+// property-list-only (no nested Codable), and a single discriminator key
+// lets the receiver route to the correct decoder without sniffing fields.
+// CueBundle does not use this wrapper — it travels as a file URL produced
+// by `compressed()` (zlib) and is reconstructed with `init(compressed:)`.
+//
+// Adding a new command:
+//   1. Add a case to `WatchCommand` + its `Kind` discriminator.
+//   2. Extend `PlaybackCoordinator.apply(_:)` (iOS) to dispatch it.
+//   3. Watch-side UI sends it through `WatchSessionClient.send(_:)`.
+//   4. Old binaries will throw `DecodingError` on the unknown kind, which
+//      is acceptable — the watch retries on next user tap.
+
 enum WatchCommand: Codable, Equatable, Sendable {
     case play
     case pause
