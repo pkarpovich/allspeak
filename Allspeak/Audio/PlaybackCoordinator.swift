@@ -151,7 +151,7 @@ final class PlaybackCoordinator {
     }
 }
 
-struct PlaybackSnapshot: Sendable, Equatable {
+struct PlaybackSnapshot: Sendable, Equatable, Codable {
     let sessionID: UUID
     let revision: Int
     let currentTime: Double

@@ -79,14 +79,14 @@ App-level singleton that owns AudioController and survives view lifecycle. Requi
 
 Codable types for both sides of WatchConnectivity, plus property-list dictionary serialization helpers. Property-list constraint comes from WCSession.
 
-- [ ] create `Allspeak/Watch/WireProtocol.swift` (shared between iOS + watchOS targets via project.yml source membership)
-- [ ] define `enum WatchCommand: Codable { case play, pause, togglePlayPause, skip(seconds: Double), seek(time: Double) }` with stable string discriminator
-- [ ] define `struct PlaybackSnapshot: Codable { let sessionID: UUID, revision: Int, currentTime: Double, duration: Double, currentIndex: Int, isPlaying: Bool, serverDate: Date }`
-- [ ] define `struct SessionMetadata: Codable { let sessionID: UUID, revision: Int, title: String, duration: Double, cueCount: Int, isPlaying: Bool, currentTime: Double }` — sent via updateApplicationContext, small payload
-- [ ] define `struct CueBundle: Codable { let sessionID: UUID, revision: Int, cues: [Subtitle] }` — sent via transferFile, large payload, gzip-compressed via Foundation
-- [ ] add `toPropertyList() -> [String: Any]` and `init?(propertyList: [String: Any])` helpers for the command + snapshot + metadata wire types
-- [ ] write tests: round-trip every wire type via property-list, round-trip CueBundle via gzip+Codable
-- [ ] run tests — must pass before next task
+- [x] create `Allspeak/Watch/WireProtocol.swift` (shared between iOS + watchOS targets via project.yml source membership)
+- [x] define `enum WatchCommand: Codable { case play, pause, togglePlayPause, skip(seconds: Double), seek(time: Double) }` with stable string discriminator
+- [x] define `struct PlaybackSnapshot: Codable { let sessionID: UUID, revision: Int, currentTime: Double, duration: Double, currentIndex: Int, isPlaying: Bool, serverDate: Date }` (reused the existing one from PlaybackCoordinator, added Codable)
+- [x] define `struct SessionMetadata: Codable { let sessionID: UUID, revision: Int, title: String, duration: Double, cueCount: Int, isPlaying: Bool, currentTime: Double }` — sent via updateApplicationContext, small payload
+- [x] define `struct CueBundle: Codable { let sessionID: UUID, revision: Int, cues: [Subtitle] }` — sent via transferFile, large payload, compressed via Foundation NSData zlib
+- [x] add `toPropertyList() -> [String: Any]` and `init?(propertyList: [String: Any])` helpers for the command + snapshot + metadata wire types
+- [x] write tests: round-trip every wire type via property-list, round-trip CueBundle via gzip+Codable
+- [x] run tests — must pass before next task
 
 ### Task 3: Add watchOS target to project.yml
 
