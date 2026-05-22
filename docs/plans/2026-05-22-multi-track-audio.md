@@ -128,12 +128,12 @@ App-level switch method. AudioController already has `load(audio:subtitles:title
 
 ### Task 5: Wire protocol — switchTrack command + tracks in metadata
 
-- [ ] in `Allspeak/Watch/WireProtocol.swift`, extend `WatchCommand` enum: `case switchTrack(id: UUID)`
-- [ ] update `WatchCommand.toPropertyList()` / `init(propertyList:)` round-trip
-- [ ] add `struct TrackInfo: Codable { let id: UUID, label: String }` to wire protocol
-- [ ] extend `SessionMetadata` with `tracks: [TrackInfo]` and `activeTrackID: UUID?` — update property-list helpers
-- [ ] write tests: round-trip new command, round-trip metadata with tracks array
-- [ ] run tests — must pass before next task
+- [x] in `Allspeak/Watch/WireProtocol.swift`, extend `WatchCommand` enum: `case switchTrack(id: UUID)`
+- [x] update `WatchCommand.toPropertyList()` / `init(propertyList:)` round-trip
+- [x] add `struct TrackInfo: Codable { let id: UUID, label: String }` to wire protocol (already added as Task 4 prereq)
+- [x] extend `SessionMetadata` with `tracks: [TrackInfo]` and `activeTrackID: UUID?` — update property-list helpers (already added as Task 4 prereq; legacy decode path verified)
+- [x] write tests: round-trip new command, round-trip metadata with tracks array
+- [x] run tests — must pass before next task
 
 ### Task 6: WatchSessionHost dispatch
 

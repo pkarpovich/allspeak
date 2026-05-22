@@ -344,6 +344,10 @@ final class PlaybackCoordinator {
             controller.skip(by: seconds)
         case .seek(let time):
             controller.seek(to: time)
+        case .switchTrack(let id):
+            Task { [weak self] in
+                try? await self?.switchTrack(to: id)
+            }
         }
     }
 

@@ -52,11 +52,13 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case togglePlayPause
     case skip(seconds: Double)
     case seek(time: Double)
+    case switchTrack(id: UUID)
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case seconds
         case time
+        case trackID
     }
 
     private enum Kind: String, Codable {
@@ -65,6 +67,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case togglePlayPause
         case skip
         case seek
+        case switchTrack
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -82,6 +85,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .seek(let time):
             try container.encode(Kind.seek, forKey: .kind)
             try container.encode(time, forKey: .time)
+        case .switchTrack(let id):
+            try container.encode(Kind.switchTrack, forKey: .kind)
+            try container.encode(id, forKey: .trackID)
         }
     }
 
@@ -99,6 +105,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .skip(seconds: try container.decode(Double.self, forKey: .seconds))
         case .seek:
             self = .seek(time: try container.decode(Double.self, forKey: .time))
+        case .switchTrack:
+            self = .switchTrack(id: try container.decode(UUID.self, forKey: .trackID))
         }
     }
 }
