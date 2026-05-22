@@ -249,8 +249,22 @@ final class SessionRepository: @unchecked Sendable {
             try await context.perform {
                 let object = try context.existingObject(with: id)
                 object.setValue(newName, forKey: attribute)
-                if attribute == "audioFilename", let newDuration {
-                    object.setValue(newDuration, forKey: "durationSeconds")
+                if attribute == "audioFilename" {
+                    if let newDuration {
+                        object.setValue(newDuration, forKey: "durationSeconds")
+                    }
+                    let tracks = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+                    let activeID = object.value(forKey: "activeTrackID") as? UUID
+                    let activeMatch = tracks.first { ($0.value(forKey: "id") as? UUID) == activeID }
+                    let defaultMatch = tracks.first { ($0.value(forKey: "isDefault") as? Bool) == true }
+                    let firstBySort = tracks.min {
+                        let a = ($0.value(forKey: "sortOrder") as? Int16) ?? 0
+                        let b = ($1.value(forKey: "sortOrder") as? Int16) ?? 0
+                        return a < b
+                    }
+                    if let target = activeMatch ?? defaultMatch ?? firstBySort {
+                        target.setValue(newName, forKey: "filename")
+                    }
                 }
                 try context.save()
             }

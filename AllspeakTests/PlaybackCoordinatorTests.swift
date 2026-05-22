@@ -215,7 +215,7 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.coordinator.activeTrackID == fixture.track2UUID)
         let drift = abs(controller.currentTime - 2.5)
         #expect(drift < 0.2)
-        #expect(fixture.coordinator.revision > beforeRevision)
+        #expect(fixture.coordinator.revision == beforeRevision)
     }
 
     @Test("switchTrack to the active track is a no-op")

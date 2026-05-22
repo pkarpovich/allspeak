@@ -254,9 +254,10 @@ final class PlaybackCoordinator {
         if let repository, let sessionID {
             try? await repository.setActiveTrack(sessionID: sessionID, trackID: trackID)
         }
-        revision += 1
         #if os(iOS)
-        WatchSessionHost.shared.broadcastCurrentSession()
+        if let metadata = currentMetadata() {
+            WatchSessionHost.shared.broadcast(metadata: metadata)
+        }
         #endif
     }
 

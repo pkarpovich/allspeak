@@ -244,7 +244,7 @@ final class WatchSessionClient: NSObject {
             isPlaying: snapshot.isPlaying,
             currentTime: snapshot.currentTime,
             tracks: current.tracks,
-            activeTrackID: current.activeTrackID
+            activeTrackID: snapshot.activeTrackID ?? current.activeTrackID
         )
     }
 }

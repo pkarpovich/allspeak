@@ -36,7 +36,7 @@ iCloud Drive. Inside Allspeak:
 
 1. Tap `+` on the Sessions screen.
 2. Name the session (e.g. `After the Light · 21:30`).
-3. Tap `Choose audio file(s)` and pick one or more `.m4a` files via the
+3. Tap `Choose audio files` and pick one or more `.m4a` files via the
    system file picker. Each file becomes a separate audio track on the
    session (e.g. `loudnorm-only`, `demucs+loudnorm`, `DFN v3`, or a
    different dubbing studio). Label each picked file before saving — the
