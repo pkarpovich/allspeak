@@ -103,6 +103,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
     }
 }
 
+struct TrackInfo: Codable, Equatable, Sendable, Hashable, Identifiable {
+    let id: UUID
+    let label: String
+}
+
 struct SessionMetadata: Codable, Equatable, Sendable {
     let sessionID: UUID
     let revision: Int
@@ -111,6 +116,47 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let cueCount: Int
     let isPlaying: Bool
     let currentTime: Double
+    let tracks: [TrackInfo]
+    let activeTrackID: UUID?
+
+    init(
+        sessionID: UUID,
+        revision: Int,
+        title: String,
+        duration: Double,
+        cueCount: Int,
+        isPlaying: Bool,
+        currentTime: Double,
+        tracks: [TrackInfo] = [],
+        activeTrackID: UUID? = nil
+    ) {
+        self.sessionID = sessionID
+        self.revision = revision
+        self.title = title
+        self.duration = duration
+        self.cueCount = cueCount
+        self.isPlaying = isPlaying
+        self.currentTime = currentTime
+        self.tracks = tracks
+        self.activeTrackID = activeTrackID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        self.revision = try container.decode(Int.self, forKey: .revision)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.duration = try container.decode(Double.self, forKey: .duration)
+        self.cueCount = try container.decode(Int.self, forKey: .cueCount)
+        self.isPlaying = try container.decode(Bool.self, forKey: .isPlaying)
+        self.currentTime = try container.decode(Double.self, forKey: .currentTime)
+        self.tracks = try container.decodeIfPresent([TrackInfo].self, forKey: .tracks) ?? []
+        self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
+    }
 }
 
 struct CueBundle: Codable, Equatable, Sendable {

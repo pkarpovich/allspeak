@@ -112,8 +112,8 @@ Currently `Documents/sessions/<uuid>/<audioFilename>` is one file per session. N
 
 App-level switch method. AudioController already has `load(audio:subtitles:title:)` — we call it again with new URL while preserving position.
 
-- [ ] add `@MainActor private var activeTrackID: UUID?` and `@MainActor private var isSwitching: Bool` to `PlaybackCoordinator`
-- [ ] add `func switchTrack(to trackID: UUID) async throws`:
+- [x] add `@MainActor private var activeTrackID: UUID?` and `@MainActor private var isSwitching: Bool` to `PlaybackCoordinator`
+- [x] add `func switchTrack(to trackID: UUID) async throws`:
   - guard not already switching (idempotency)
   - capture `currentTime` + `isPlaying` from existing controller
   - look up track filename via repository
@@ -121,10 +121,10 @@ App-level switch method. AudioController already has `load(audio:subtitles:title
   - `controller.seek(to: capturedTime)`
   - resume if was playing
   - update `activeTrackID`, broadcast new SessionMetadata via WatchSessionHost
-- [ ] update `PlaybackCoordinator.startSession` to pick the active track (Session.activeTrackID ?? first isDefault) when loading audio
-- [ ] update `PlaybackCoordinator.currentMetadata()` to include `tracks: [TrackInfo]` and `activeTrackID`
-- [ ] write tests: switch preserves time/isPlaying, double-switch no-op, switch to unknown ID throws
-- [ ] run tests — must pass before next task
+- [x] update `PlaybackCoordinator.startSession` to pick the active track (Session.activeTrackID ?? first isDefault) when loading audio
+- [x] update `PlaybackCoordinator.currentMetadata()` to include `tracks: [TrackInfo]` and `activeTrackID` (TrackInfo struct + SessionMetadata fields added as prereq for Task 5)
+- [x] write tests: switch preserves time/isPlaying, double-switch no-op, switch to unknown ID throws
+- [x] run tests — must pass before next task
 
 ### Task 5: Wire protocol — switchTrack command + tracks in metadata
 
