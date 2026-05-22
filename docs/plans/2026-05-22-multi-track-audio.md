@@ -173,13 +173,13 @@ iPhone-side UI. Add Menu+Picker to the PlayerTopBar.
 
 Existing UI picks one audio file. New: pick array of audio files, each becomes a track.
 
-- [ ] in `Allspeak/Views/Create/CreateSessionView.swift`, change file picker to allowsMultipleSelection: true for audio
-- [ ] for each picked file, ask user for a label (default = filename without extension), wait until all are labeled before allowing Save
-- [ ] keep one srt picker (single subtitles file for the session)
-- [ ] on Save: create Session, then iterate over selected audio files → SessionRepository.addTrack for each
-- [ ] first track gets `isDefault=true`
-- [ ] write tests for the view model logic (track-labeling state machine, save calls correct repo methods)
-- [ ] run tests — must pass before next task
+- [x] in `Allspeak/Views/Create/CreateSessionView.swift`, change file picker to allowsMultipleSelection: true for audio
+- [x] for each picked file, ask user for a label (default = filename without extension), wait until all are labeled before allowing Save
+- [x] keep one srt picker (single subtitles file for the session)
+- [x] on Save: create Session, then iterate over selected audio files → SessionRepository.addTrack for each (consolidated into new `importMultiTrackSession` for atomic file-copy + Core Data insert)
+- [x] first track gets `isDefault=true`
+- [x] write tests for the view model logic (track-labeling state machine, save calls correct repo methods)
+- [x] run tests — must pass before next task
 
 ### Task 11: SessionEditView (new) — add tracks to existing session
 

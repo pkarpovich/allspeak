@@ -294,6 +294,94 @@ struct SessionRepositoryTests {
         #expect(snaps.dropFirst().allSatisfy { $0.isDefault == false })
     }
 
+    @Test("importMultiTrackSession creates one AudioTrack per source with first marked default")
+    func importMultiTrackSessionCreatesTracks() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "loud.m4a", contents: "a1")
+        let a2 = try writeSourceFile(in: srcDir, name: "dfn.m4a", contents: "a2")
+        let a3 = try writeSourceFile(in: srcDir, name: "rhs.m4a", contents: "a3")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "s")
+
+        let id = try await repo.importMultiTrackSession(
+            name: "Mando",
+            audioSources: [
+                PendingTrackImport(url: a1, label: "Loudnorm"),
+                PendingTrackImport(url: a2, label: "DFN v3"),
+                PendingTrackImport(url: a3, label: "RHS Dub")
+            ],
+            srtSrc: srt
+        )
+
+        persistence.viewContext.refreshAllObjects()
+        let snaps = try await repo.tracks(for: id)
+        #expect(snaps.count == 3)
+        #expect(snaps.map(\.label) == ["Loudnorm", "DFN v3", "RHS Dub"])
+        #expect(snaps.map(\.filename) == ["loud.m4a", "dfn.m4a", "rhs.m4a"])
+        #expect(snaps.map(\.sortOrder) == [0, 1, 2])
+        #expect(snaps.first?.isDefault == true)
+        #expect(snaps.dropFirst().allSatisfy { $0.isDefault == false })
+
+        let row = try persistence.viewContext.existingObject(with: id)
+        let sessionUUID = try #require(row.value(forKey: "id") as? UUID)
+        #expect(row.value(forKey: "name") as? String == "Mando")
+        #expect(row.value(forKey: "audioFilename") as? String == "loud.m4a")
+        #expect(row.value(forKey: "srtFilename") as? String == "movie.srt")
+
+        let dir = storage.sessionDir(for: sessionUUID)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("movie.srt").path))
+        for snap in snaps {
+            let trackFile = dir.appendingPathComponent(
+                DocumentsStorage.trackFilename(trackID: snap.trackID, originalFilename: snap.filename)
+            )
+            #expect(FileManager.default.fileExists(atPath: trackFile.path))
+        }
+    }
+
+    @Test("importMultiTrackSession throws noAudioSources for empty input")
+    func importMultiTrackSessionRejectsEmpty() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "s")
+
+        await #expect(throws: SessionRepositoryError.noAudioSources) {
+            _ = try await repo.importMultiTrackSession(
+                name: "Empty",
+                audioSources: [],
+                srtSrc: srt
+            )
+        }
+    }
+
+    @Test("CreateSessionView.performSave (new mode) routes to importMultiTrackSession")
+    @MainActor
+    func performSaveNewModeImportsMultiTrack() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "primary.m4a", contents: "1")
+        let a2 = try writeSourceFile(in: srcDir, name: "alt.m4a", contents: "2")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "s")
+
+        var form = CreateSessionFormState(name: "  Multi  ", srtURL: srt)
+        form.appendPendingTracks(from: [a1, a2])
+        form.updateLabel(for: form.pendingTracks[0].id, to: "Primary")
+        form.updateLabel(for: form.pendingTracks[1].id, to: "Alt")
+        #expect(form.canSave)
+
+        try await CreateSessionView.performSave(snapshot: form, mode: .new, repository: repo)
+
+        let rows = try fetchAllSessions(in: persistence)
+        #expect(rows.count == 1)
+        let session = try #require(rows.first)
+        #expect(session.value(forKey: "name") as? String == "Multi")
+        let snaps = try await repo.tracks(for: session.objectID)
+        #expect(snaps.map(\.label) == ["Primary", "Alt"])
+        #expect(snaps.first?.isDefault == true)
+    }
+
     @Test("objectID from import resolves cleanly on the view context (handoff smoke)")
     func objectIDHandoff() async throws {
         let (repo, persistence, _, root) = makeFixture()

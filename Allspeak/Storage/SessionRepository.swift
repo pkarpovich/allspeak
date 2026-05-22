@@ -22,6 +22,17 @@ enum SessionRepositoryError: Error, Equatable {
     case sessionNotFound
     case trackNotFound
     case lastTrackCannotBeRemoved
+    case noAudioSources
+}
+
+struct PendingTrackImport: Sendable, Equatable {
+    let url: URL
+    let label: String
+
+    init(url: URL, label: String) {
+        self.url = url
+        self.label = label
+    }
 }
 
 final class SessionRepository: @unchecked Sendable {
@@ -67,6 +78,87 @@ final class SessionRepository: @unchecked Sendable {
             }
         } catch {
             try? storage.removeSessionDir(id)
+            throw error
+        }
+    }
+
+    func importMultiTrackSession(
+        name: String,
+        audioSources: [PendingTrackImport],
+        srtSrc: URL
+    ) async throws -> NSManagedObjectID {
+        guard !audioSources.isEmpty else {
+            throw SessionRepositoryError.noAudioSources
+        }
+
+        let sessionUUID = UUID()
+        let srtName = srtSrc.lastPathComponent
+        let createdAt = Date()
+
+        struct StagedTrack {
+            let trackID: UUID
+            let originalFilename: String
+            let label: String
+        }
+        var staged: [StagedTrack] = []
+
+        do {
+            try storage.copyIntoSession(srcURL: srtSrc, sessionID: sessionUUID, as: srtName)
+            for source in audioSources {
+                let trackID = UUID()
+                let original = source.url.lastPathComponent
+                let trackFilename = DocumentsStorage.trackFilename(
+                    trackID: trackID,
+                    originalFilename: original
+                )
+                _ = try storage.copyIntoSession(
+                    srcURL: source.url,
+                    sessionID: sessionUUID,
+                    as: trackFilename
+                )
+                staged.append(StagedTrack(trackID: trackID, originalFilename: original, label: source.label))
+            }
+        } catch {
+            try? storage.removeSessionDir(sessionUUID)
+            throw error
+        }
+
+        let primary = staged[0]
+        let primaryURL = storage.trackURL(
+            sessionID: sessionUUID,
+            trackID: primary.trackID,
+            originalFilename: primary.originalFilename
+        )
+        let duration = await Self.readDuration(at: primaryURL)
+
+        let context = persistence.newBackgroundContext()
+        do {
+            let captured = staged
+            let primaryFilename = primary.originalFilename
+            return try await context.perform {
+                let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: context)
+                session.setValue(sessionUUID, forKey: "id")
+                session.setValue(name, forKey: "name")
+                session.setValue(primaryFilename, forKey: "audioFilename")
+                session.setValue(srtName, forKey: "srtFilename")
+                session.setValue(createdAt, forKey: "createdAt")
+                if let duration {
+                    session.setValue(duration, forKey: "durationSeconds")
+                }
+                for (index, item) in captured.enumerated() {
+                    let track = NSEntityDescription.insertNewObject(forEntityName: "AudioTrack", into: context)
+                    track.setValue(item.trackID, forKey: "id")
+                    track.setValue(item.originalFilename, forKey: "filename")
+                    track.setValue(item.label, forKey: "label")
+                    track.setValue(Int16(index), forKey: "sortOrder")
+                    track.setValue(index == 0, forKey: "isDefault")
+                    track.setValue(session, forKey: "session")
+                }
+                try context.save()
+                return session.objectID
+            }
+        } catch {
+            try? storage.removeSessionDir(sessionUUID)
             throw error
         }
     }
