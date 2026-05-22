@@ -208,14 +208,14 @@ Allows post-creation track additions, e.g., Pavel adds RHS dubbing to existing M
 
 ### Task 14: Verify acceptance criteria
 
-- [ ] all five wire commands round-trip including switchTrack
-- [ ] existing single-track sessions migrate to one AudioTrack (label="Original", isDefault=true)
-- [ ] create session with 2+ audio files works end-to-end
-- [ ] PlayerView toolbar Menu appears only when tracks.count > 1
-- [ ] iPhone switchTrack preserves currentTime ± 200ms
-- [ ] Watch TabView 3rd page renders tracks and tapping sends correct command
-- [ ] full Swift Testing suite passes
-- [ ] iOS + watchOS builds green on iOS 26.5 / watchOS 26.5 simulators
+- [x] all five wire commands round-trip including switchTrack (WireProtocol suite: "WatchCommand round-trips via property list" with 7 test cases — play/pause/togglePlayPause/skip/seek/switchTrack covered)
+- [x] existing single-track sessions migrate to one AudioTrack (label="Original", isDefault=true) (PersistenceController runtime backfill test passes)
+- [x] create session with 2+ audio files works end-to-end (CreateSessionViewModelTests cover importMultiTrackSession multi-pick flow + atomic file copy + first track isDefault=true)
+- [x] PlayerView toolbar Menu appears only when tracks.count > 1 (PlayerTopBar.swift:36 — `if tracks.count > 1`)
+- [x] iPhone switchTrack preserves currentTime ± 200ms (PlaybackCoordinatorTests "switchTrack preserves currentTime and isPlaying state" passes)
+- [x] Watch TabView 3rd page renders tracks and tapping sends correct command (TrackListView.swift:17 gates on tracks.count; WatchSessionClient "send(.switchTrack) encodes track id correctly" passes; watchOS scheme builds clean)
+- [x] full Swift Testing suite passes (222 tests in 21 suites, 0 failures on iOS 26.5 simulator)
+- [x] iOS + watchOS builds green on iOS 26.5 / watchOS 26.5 simulators (Allspeak scheme test+build on iPhone 17 Pro iOS 26.5; AllspeakWatch scheme build on Apple Watch Ultra 3 watchOS 26.5 — both BUILD SUCCEEDED)
 
 ### Task 15: Update documentation
 
