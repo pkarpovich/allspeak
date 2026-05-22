@@ -245,10 +245,12 @@ final class SessionRepository: @unchecked Sendable {
             throw error
         }
 
+        let updatedTrack: (UUID, String)?
         do {
-            try await context.perform {
+            updatedTrack = try await context.perform {
                 let object = try context.existingObject(with: id)
                 object.setValue(newName, forKey: attribute)
+                var result: (UUID, String)?
                 if attribute == "audioFilename" {
                     if let newDuration {
                         object.setValue(newDuration, forKey: "durationSeconds")
@@ -263,10 +265,16 @@ final class SessionRepository: @unchecked Sendable {
                         return a < b
                     }
                     if let target = activeMatch ?? defaultMatch ?? firstBySort {
+                        let priorFilename = target.value(forKey: "filename") as? String
+                        let trackID = target.value(forKey: "id") as? UUID
                         target.setValue(newName, forKey: "filename")
+                        if let trackID, let priorFilename {
+                            result = (trackID, priorFilename)
+                        }
                     }
                 }
                 try context.save()
+                return result
             }
         } catch {
             if let backupURL, FileManager.default.fileExists(atPath: backupURL.path) {
@@ -284,6 +292,13 @@ final class SessionRepository: @unchecked Sendable {
         if let oldName, oldName != newName {
             let oldURL = dir.appendingPathComponent(oldName)
             try? FileManager.default.removeItem(at: oldURL)
+        }
+        if let (trackID, priorFilename) = updatedTrack {
+            try? storage.removeTrackFile(
+                sessionID: sessionID,
+                trackID: trackID,
+                originalFilename: priorFilename
+            )
         }
     }
 

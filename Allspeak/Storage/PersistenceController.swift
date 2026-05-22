@@ -58,11 +58,9 @@ final class PersistenceController: @unchecked Sendable {
         context.mergePolicy = NSMergePolicy.mergeByPropertyStoreTrump
         context.performAndWait {
             let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
-            guard let sessions = try? context.fetch(request) else { return }
-            var didChange = false
+            request.predicate = NSPredicate(format: "tracks.@count == 0")
+            guard let sessions = try? context.fetch(request), !sessions.isEmpty else { return }
             for session in sessions {
-                let existing = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
-                if !existing.isEmpty { continue }
                 guard let audioFilename = session.value(forKey: "audioFilename") as? String,
                       !audioFilename.isEmpty else { continue }
                 let track = NSEntityDescription.insertNewObject(forEntityName: "AudioTrack", into: context)
@@ -72,11 +70,8 @@ final class PersistenceController: @unchecked Sendable {
                 track.setValue(Int16(0), forKey: "sortOrder")
                 track.setValue(true, forKey: "isDefault")
                 track.setValue(session, forKey: "session")
-                didChange = true
             }
-            if didChange {
-                try? context.save()
-            }
+            try? context.save()
         }
     }
 
