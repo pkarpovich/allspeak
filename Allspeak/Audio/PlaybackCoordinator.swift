@@ -5,6 +5,8 @@ import Foundation
 final class PlaybackCoordinator {
     static let shared = PlaybackCoordinator()
 
+    static let activeTrackChangedNotification = Notification.Name("PlaybackCoordinator.activeTrackChanged")
+
     enum StartError: Error, Equatable {
         case sessionNotFound
         case noCues
@@ -255,9 +257,14 @@ final class PlaybackCoordinator {
         let trackLabel: String? = (snap.tracks.count > 1) ? selectedTrack?.label : nil
 
         let previousActiveTrackID = self.activeTrackID
+        let previousTracks = self.tracks
         sessionTitle = snap.name
         tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         activeTrackID = selectedTrack?.trackID
+        let tracksChanged = previousTracks.map(\.id) != tracks.map(\.id) || previousActiveTrackID != activeTrackID
+        if tracksChanged {
+            NotificationCenter.default.post(name: Self.activeTrackChangedNotification, object: self)
+        }
 
         if let selectedTrack, previousActiveTrackID != selectedTrack.trackID {
             let capturedTime = controller.currentTime
@@ -337,10 +344,17 @@ final class PlaybackCoordinator {
         if let repository, let sessionID {
             do {
                 let snapshots = try await repository.tracks(for: sessionID)
+                guard self.controller === controller,
+                      self.sessionUUID == sessionUUID,
+                      self.sessionID == sessionID else {
+                    throw SwitchError.noActiveSession
+                }
                 guard let match = snapshots.first(where: { $0.trackID == trackID }) else {
                     throw SwitchError.trackNotFound
                 }
                 filename = match.filename
+            } catch let switchError as SwitchError {
+                throw switchError
             } catch is SessionRepositoryError {
                 throw SwitchError.trackNotFound
             } catch {
@@ -373,6 +387,7 @@ final class PlaybackCoordinator {
         if let repository, let sessionID {
             try? await repository.setActiveTrack(sessionID: sessionID, trackID: trackID)
         }
+        NotificationCenter.default.post(name: Self.activeTrackChangedNotification, object: self)
         #if os(iOS)
         if let metadata = currentMetadata() {
             WatchSessionHost.shared.broadcast(metadata: metadata)

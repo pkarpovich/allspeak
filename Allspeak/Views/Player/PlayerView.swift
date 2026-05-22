@@ -119,6 +119,10 @@ struct PlayerView: View {
             #endif
             controller = nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: PlaybackCoordinator.activeTrackChangedNotification)) { _ in
+            tracks = PlaybackCoordinator.shared.tracks
+            activeTrackID = PlaybackCoordinator.shared.activeTrackID
+        }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .background:
