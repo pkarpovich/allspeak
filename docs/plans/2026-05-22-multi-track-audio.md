@@ -145,10 +145,10 @@ App-level switch method. AudioController already has `load(audio:subtitles:title
 
 ### Task 7: WatchSessionClient state for tracks
 
-- [ ] in `AllspeakWatch/WatchSessionClient.swift`, expose `@MainActor var tracks: [TrackInfo]` and `var activeTrackID: UUID?` populated from received SessionMetadata
-- [ ] add `func send(.switchTrack(id:))` helper for the UI to call
-- [ ] write tests: receiving metadata updates tracks + activeTrackID, send switchTrack puts correct payload on wire
-- [ ] run tests — must pass before next task
+- [x] in `AllspeakWatch/WatchSessionClient.swift`, expose `@MainActor var tracks: [TrackInfo]` and `var activeTrackID: UUID?` populated from received SessionMetadata
+- [x] add `func send(.switchTrack(id:))` helper for the UI to call (existing generic `send(_ command:)` already covers this; tested with `.switchTrack(id:)`)
+- [x] write tests: receiving metadata updates tracks + activeTrackID, send switchTrack puts correct payload on wire
+- [x] run tests — must pass before next task
 
 ### Task 8: PlayerView toolbar — track Menu
 

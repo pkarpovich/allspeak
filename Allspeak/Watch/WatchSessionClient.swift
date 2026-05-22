@@ -16,6 +16,9 @@ final class WatchSessionClient: NSObject {
     var isConnected: Bool = false
     var interpolationTick: UInt64 = 0
 
+    var tracks: [TrackInfo] { metadata?.tracks ?? [] }
+    var activeTrackID: UUID? { metadata?.activeTrackID }
+
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
@@ -194,7 +197,9 @@ final class WatchSessionClient: NSObject {
                     duration: current.duration,
                     cueCount: bundle.cues.count,
                     isPlaying: current.isPlaying,
-                    currentTime: current.currentTime
+                    currentTime: current.currentTime,
+                    tracks: current.tracks,
+                    activeTrackID: current.activeTrackID
                 )
                 self.lastSnapshot = nil
             }
@@ -237,7 +242,9 @@ final class WatchSessionClient: NSObject {
             duration: current.duration,
             cueCount: current.cueCount,
             isPlaying: snapshot.isPlaying,
-            currentTime: snapshot.currentTime
+            currentTime: snapshot.currentTime,
+            tracks: current.tracks,
+            activeTrackID: current.activeTrackID
         )
     }
 }
