@@ -102,11 +102,11 @@ Lightweight migration: introduce `AudioTrack` entity, keep `Session.audioFilenam
 
 Currently `Documents/sessions/<uuid>/<audioFilename>` is one file per session. New: each track gets its own file under same session dir.
 
-- [ ] add `DocumentsStorage.trackURL(sessionID: UUID, trackID: UUID, originalFilename: String) -> URL` returning `Documents/sessions/<uuid>/track-<trackID>-<originalFilename>`
-- [ ] add `DocumentsStorage.removeTrackFile(sessionID:trackID:filename:)` for cleanup on removeTrack
-- [ ] keep legacy `audioURL(sessionID:filename:)` for backward compat
-- [ ] write tests: trackURL formatting, file existence after copy, file removal
-- [ ] run tests — must pass before next task
+- [x] add `DocumentsStorage.trackURL(sessionID: UUID, trackID: UUID, originalFilename: String) -> URL` returning `Documents/sessions/<uuid>/track-<trackID>-<originalFilename>`
+- [x] add `DocumentsStorage.removeTrackFile(sessionID:trackID:filename:)` for cleanup on removeTrack
+- [x] keep legacy `audioURL(sessionID:filename:)` for backward compat
+- [x] write tests: trackURL formatting, file existence after copy, file removal
+- [x] run tests — must pass before next task
 
 ### Task 4: PlaybackCoordinator.switchTrack
 

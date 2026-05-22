@@ -22,6 +22,26 @@ struct DocumentsStorage: Sendable {
         sessionsRoot.appendingPathComponent(sessionID.uuidString, isDirectory: true)
     }
 
+    func audioURL(sessionID: UUID, filename: String) -> URL {
+        sessionDir(for: sessionID).appendingPathComponent(filename)
+    }
+
+    static func trackFilename(trackID: UUID, originalFilename: String) -> String {
+        "track-\(trackID.uuidString)-\(originalFilename)"
+    }
+
+    func trackURL(sessionID: UUID, trackID: UUID, originalFilename: String) -> URL {
+        sessionDir(for: sessionID)
+            .appendingPathComponent(Self.trackFilename(trackID: trackID, originalFilename: originalFilename))
+    }
+
+    func removeTrackFile(sessionID: UUID, trackID: UUID, originalFilename: String) throws {
+        let url = trackURL(sessionID: sessionID, trackID: trackID, originalFilename: originalFilename)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     @discardableResult
     func copyIntoSession(srcURL: URL, sessionID: UUID, as filename: String) throws -> URL {
         let dir = sessionDir(for: sessionID)
