@@ -20,6 +20,29 @@ struct NowPlayingCenterTests {
         #expect(info[MPMediaItemPropertyPlaybackDuration] as? TimeInterval == 123.5)
     }
 
+    @Test("setMetadata appends trackLabel when provided")
+    func setMetadataAppendsTrackLabel() {
+        defer { NowPlayingCenter.shared.clear() }
+
+        NowPlayingCenter.shared.setMetadata(title: "Mandalorian", duration: 90, trackLabel: "DFN v3")
+
+        let info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        #expect(info[MPMediaItemPropertyTitle] as? String == "Mandalorian - DFN v3")
+    }
+
+    @Test("setMetadata omits trackLabel suffix when nil or empty")
+    func setMetadataOmitsTrackLabelWhenAbsent() {
+        defer { NowPlayingCenter.shared.clear() }
+
+        NowPlayingCenter.shared.setMetadata(title: "Mandalorian", duration: 90, trackLabel: nil)
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        #expect(info[MPMediaItemPropertyTitle] as? String == "Mandalorian")
+
+        NowPlayingCenter.shared.setMetadata(title: "Mandalorian", duration: 90, trackLabel: "")
+        info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        #expect(info[MPMediaItemPropertyTitle] as? String == "Mandalorian")
+    }
+
     @Test("updateTime writes elapsed time and playback rate")
     func updateTimeWritesElapsedAndRate() {
         defer { NowPlayingCenter.shared.clear() }

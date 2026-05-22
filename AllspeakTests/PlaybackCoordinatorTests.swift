@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreData
 import Foundation
 import Testing
 @testable import Allspeak
@@ -114,6 +115,143 @@ struct PlaybackCoordinatorTests {
         let coordinator = PlaybackCoordinator.shared
         coordinator.endSession()
         #expect(coordinator.currentSnapshot() == PlaybackSnapshot.empty)
+    }
+
+    private struct MultiTrackFixture {
+        let coordinator: PlaybackCoordinator
+        let persistence: PersistenceController
+        let storage: DocumentsStorage
+        let repo: SessionRepository
+        let sessionID: NSManagedObjectID
+        let sessionUUID: UUID
+        let track1UUID: UUID
+        let track2UUID: UUID
+        let root: URL
+    }
+
+    private static func makeMultiTrackFixture(secondsPerTrack: Double = 5) async throws -> MultiTrackFixture {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-coord-multi-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storage = DocumentsStorage(documentsURL: root)
+        let persistence = PersistenceController.makeInMemory()
+        let repo = SessionRepository(persistence: persistence, storage: storage)
+
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let initialAudio = try makeSilenceFile(seconds: secondsPerTrack)
+        let movedAudio = srcDir.appendingPathComponent("source.caf")
+        try FileManager.default.moveItem(at: initialAudio, to: movedAudio)
+        let srtURL = srcDir.appendingPathComponent("subs.srt")
+        let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
+        try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
+
+        let sessionID = try await repo.importSession(name: "Movie", audioSrc: movedAudio, srtSrc: srtURL)
+        persistence.viewContext.refreshAllObjects()
+        let sessionUUID = try #require(persistence.viewContext.existingObject(with: sessionID).value(forKey: "id") as? UUID)
+
+        let t1ObjID = try await repo.addTrack(sessionID: sessionID, filename: "loud.caf", label: "Loudnorm")
+        let t2ObjID = try await repo.addTrack(sessionID: sessionID, filename: "dfn.caf", label: "DFN")
+        persistence.viewContext.refreshAllObjects()
+        let snapshots = try await repo.tracks(for: sessionID)
+        let t1Snap = try #require(snapshots.first { $0.id == t1ObjID })
+        let t2Snap = try #require(snapshots.first { $0.id == t2ObjID })
+
+        let dir = storage.sessionDir(for: sessionUUID)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let t1URL = storage.trackURL(sessionID: sessionUUID, trackID: t1Snap.trackID, originalFilename: t1Snap.filename)
+        let t2URL = storage.trackURL(sessionID: sessionUUID, trackID: t2Snap.trackID, originalFilename: t2Snap.filename)
+        let silenceA = try makeSilenceFile(seconds: secondsPerTrack)
+        let silenceB = try makeSilenceFile(seconds: secondsPerTrack)
+        try FileManager.default.moveItem(at: silenceA, to: t1URL)
+        try FileManager.default.moveItem(at: silenceB, to: t2URL)
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        try await coordinator.startSession(sessionID: sessionID, repository: repo, persistence: persistence, storage: storage)
+
+        return MultiTrackFixture(
+            coordinator: coordinator,
+            persistence: persistence,
+            storage: storage,
+            repo: repo,
+            sessionID: sessionID,
+            sessionUUID: sessionUUID,
+            track1UUID: t1Snap.trackID,
+            track2UUID: t2Snap.trackID,
+            root: root
+        )
+    }
+
+    @Test("startSession populates tracks and activates the default track")
+    func startSessionUsesDefaultTrack() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        #expect(fixture.coordinator.tracks.count == 2)
+        #expect(fixture.coordinator.activeTrackID == fixture.track1UUID)
+
+        let metadata = try #require(fixture.coordinator.currentMetadata())
+        #expect(metadata.tracks.map(\.id) == [fixture.track1UUID, fixture.track2UUID])
+        #expect(metadata.activeTrackID == fixture.track1UUID)
+    }
+
+    @Test("switchTrack preserves currentTime and isPlaying state")
+    func switchTrackPreservesState() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        controller.seek(to: 2.5)
+        let beforeRevision = fixture.coordinator.revision
+
+        try await fixture.coordinator.switchTrack(to: fixture.track2UUID)
+
+        #expect(fixture.coordinator.activeTrackID == fixture.track2UUID)
+        let drift = abs(controller.currentTime - 2.5)
+        #expect(drift < 0.2)
+        #expect(fixture.coordinator.revision == beforeRevision)
+    }
+
+    @Test("switchTrack to the active track is a no-op")
+    func switchTrackSameIsNoOp() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let beforeRevision = fixture.coordinator.revision
+        let activeBefore = fixture.coordinator.activeTrackID
+        try await fixture.coordinator.switchTrack(to: try #require(activeBefore))
+
+        #expect(fixture.coordinator.activeTrackID == activeBefore)
+        #expect(fixture.coordinator.revision == beforeRevision)
+    }
+
+    @Test("switchTrack to an unknown id throws trackNotFound")
+    func switchTrackUnknownThrows() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        await #expect(throws: PlaybackCoordinator.SwitchError.trackNotFound) {
+            try await fixture.coordinator.switchTrack(to: UUID())
+        }
+    }
+
+    @Test("switchTrack on idle coordinator throws noActiveSession")
+    func switchTrackWithoutSessionThrows() async {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        await #expect(throws: PlaybackCoordinator.SwitchError.noActiveSession) {
+            try await coordinator.switchTrack(to: UUID())
+        }
     }
 }
 

@@ -37,13 +37,7 @@ struct CreateSessionView: View {
                 }
 
                 Section {
-                    FileSlotRow(
-                        kind: .audio,
-                        filename: form.audioDisplayName,
-                        onChoose: { presentPicker(.audio) },
-                        onClear: { form.audioURL = nil; form.existingAudioFilename = nil }
-                    )
-
+                    audioSlotSection
                     FileSlotRow(
                         kind: .subtitles,
                         filename: form.srtDisplayName,
@@ -79,7 +73,7 @@ struct CreateSessionView: View {
             .fileImporter(
                 isPresented: $isPickerPresented,
                 allowedContentTypes: pickerKind?.allowedTypes ?? [],
-                allowsMultipleSelection: false
+                allowsMultipleSelection: pickerKind?.allowsMultipleSelection ?? false
             ) { result in
                 handlePickerResult(result)
             }
@@ -87,6 +81,57 @@ struct CreateSessionView: View {
         .preferredColorScheme(.dark)
         .tint(Tokens.accent)
         .task { await loadIfEditing() }
+    }
+
+    @ViewBuilder
+    private var audioSlotSection: some View {
+        switch mode {
+        case .new:
+            ForEach($form.pendingTracks) { $track in
+                PendingTrackRow(
+                    track: $track,
+                    onRemove: { form.removePendingTrack(id: track.id) }
+                )
+            }
+            Button(action: { presentPicker(.audio) }) {
+                HStack(spacing: 12) {
+                    Image(systemName: Icons.audio)
+                        .font(.system(size: 18))
+                        .foregroundStyle(form.pendingTracks.isEmpty ? Tokens.text3 : Tokens.accent)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(form.pendingTracks.isEmpty ? "Choose audio files" : "Add another audio file")
+                            .font(.system(size: 17))
+                            .foregroundStyle(form.pendingTracks.isEmpty ? Tokens.text2 : Tokens.text)
+                        Text(".m4a · pick one or more")
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundStyle(Tokens.text3)
+                    }
+                    Spacer()
+                    Image(systemName: Icons.plus)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Tokens.text3)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        case .edit:
+            HStack(spacing: 12) {
+                Image(systemName: Icons.audio)
+                    .font(.system(size: 18))
+                    .foregroundStyle(Tokens.text3)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Manage audio in Tracks")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Tokens.text2)
+                    Text("Add or remove tracks from the Tracks menu")
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Tokens.text3)
+                }
+                Spacer()
+            }
+        }
     }
 
     private var navigationTitle: String {
@@ -118,14 +163,17 @@ struct CreateSessionView: View {
         pickerKind = nil
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { return }
+            guard !urls.isEmpty else { return }
             switch kind {
             case .audio:
-                form.audioURL = url
-                form.existingAudioFilename = nil
+                if case .new = mode {
+                    form.appendPendingTracks(from: urls)
+                }
             case .subtitles:
-                form.srtURL = url
-                form.existingSrtFilename = nil
+                if let url = urls.first {
+                    form.srtURL = url
+                    form.existingSrtFilename = nil
+                }
             case .none:
                 break
             }
@@ -142,7 +190,7 @@ struct CreateSessionView: View {
         let repo = repository
         Task {
             do {
-                try await performSave(snapshot: snapshot, mode: mode, repository: repo)
+                try await Self.performSave(snapshot: snapshot, mode: mode, repository: repo)
                 await MainActor.run {
                     isSaving = false
                     dismiss()
@@ -156,26 +204,74 @@ struct CreateSessionView: View {
         }
     }
 
-    private func performSave(
+    static func performSave(
         snapshot: CreateSessionFormState,
         mode: CreateSessionMode,
         repository: SessionRepository
     ) async throws {
         switch mode {
         case .new:
-            guard let audio = snapshot.audioURL, let srt = snapshot.srtURL else { return }
-            _ = try await repository.importSession(
+            guard let srt = snapshot.srtURL else { return }
+            guard !snapshot.pendingTracks.isEmpty else { return }
+            let sources = snapshot.pendingTracks.map {
+                PendingTrackImport(url: $0.url, label: $0.trimmedLabel)
+            }
+            _ = try await repository.importMultiTrackSession(
                 name: snapshot.trimmedName,
-                audioSrc: audio,
+                audioSources: sources,
                 srtSrc: srt
             )
         case .edit(let id):
-            try await repository.rename(id: id, to: snapshot.trimmedName)
-            if let audio = snapshot.audioURL {
-                try await repository.replaceAudio(id: id, srcURL: audio)
-            }
             if let srt = snapshot.srtURL {
                 try await repository.replaceSubtitle(id: id, srcURL: srt)
+            }
+            var renameError: Error?
+            do {
+                try await repository.rename(id: id, to: snapshot.trimmedName)
+            } catch {
+                renameError = error
+            }
+            await PlaybackCoordinator.shared.refreshIfActive(sessionID: id)
+            if let renameError {
+                throw renameError
+            }
+        }
+    }
+}
+
+private struct PendingTrackRow: View {
+    @Binding var track: PendingAudioTrack
+    var onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Image(systemName: Icons.audio)
+                    .font(.system(size: 18))
+                    .foregroundStyle(Tokens.accent)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(track.url.lastPathComponent)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Tokens.text)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    TextField("Track label", text: $track.label)
+                        .font(.system(size: 14))
+                        .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
+                        .foregroundStyle(track.hasValidLabel ? Tokens.text : Tokens.danger)
+                }
+                Spacer()
+                Button(action: onRemove) {
+                    Image(systemName: Icons.close)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Tokens.text3)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Remove track \(track.url.lastPathComponent)")
             }
         }
     }
@@ -194,6 +290,13 @@ private enum ActivePicker: Hashable {
                 return [srt, .plainText]
             }
             return [.plainText]
+        }
+    }
+
+    var allowsMultipleSelection: Bool {
+        switch self {
+        case .audio: return true
+        case .subtitles: return false
         }
     }
 }

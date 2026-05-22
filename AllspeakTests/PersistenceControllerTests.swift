@@ -93,4 +93,99 @@ struct PersistenceControllerTests {
         #expect(ctx.automaticallyMergesChangesFromParent == true)
         #expect(ctx.transactionAuthor == "Allspeak")
     }
+
+    @Test("Session has activeTrackID and tracks relationship in v2 schema")
+    func sessionV2Schema() throws {
+        let controller = PersistenceController.makeInMemory()
+        let model = controller.container.managedObjectModel
+        let entity = try #require(model.entitiesByName["Session"])
+
+        let active = try #require(entity.attributesByName["activeTrackID"])
+        #expect(active.attributeType == .UUIDAttributeType)
+        #expect(active.isOptional == true)
+
+        let tracks = try #require(entity.relationshipsByName["tracks"])
+        #expect(tracks.isToMany == true)
+        #expect(tracks.deleteRule == .cascadeDeleteRule)
+        #expect(tracks.destinationEntity?.name == "AudioTrack")
+    }
+
+    @Test("AudioTrack entity exists with expected attributes")
+    func audioTrackSchema() throws {
+        let controller = PersistenceController.makeInMemory()
+        let model = controller.container.managedObjectModel
+        let entity = try #require(model.entitiesByName["AudioTrack"])
+
+        let attrs = entity.attributesByName
+        let id = try #require(attrs["id"])
+        #expect(id.attributeType == .UUIDAttributeType)
+        #expect(id.isOptional == false)
+
+        let filename = try #require(attrs["filename"])
+        #expect(filename.attributeType == .stringAttributeType)
+        #expect(filename.isOptional == false)
+
+        let label = try #require(attrs["label"])
+        #expect(label.attributeType == .stringAttributeType)
+        #expect(label.isOptional == false)
+
+        let sortOrder = try #require(attrs["sortOrder"])
+        #expect(sortOrder.attributeType == .integer16AttributeType)
+        #expect(sortOrder.isOptional == false)
+
+        let isDefault = try #require(attrs["isDefault"])
+        #expect(isDefault.attributeType == .booleanAttributeType)
+        #expect(isDefault.isOptional == false)
+
+        let session = try #require(entity.relationshipsByName["session"])
+        #expect(session.isToMany == false)
+        #expect(session.destinationEntity?.name == "Session")
+    }
+
+    @Test("backfillDefaultTracks creates an Original AudioTrack for legacy single-audio sessions")
+    func backfillSynthesizesDefaultTrack() throws {
+        let controller = PersistenceController.makeInMemory()
+        let ctx = controller.viewContext
+
+        let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: ctx)
+        session.setValue(UUID(), forKey: "id")
+        session.setValue("Legacy Session", forKey: "name")
+        session.setValue("legacy-audio.m4a", forKey: "audioFilename")
+        session.setValue("legacy.srt", forKey: "srtFilename")
+        session.setValue(Date(), forKey: "createdAt")
+        try ctx.save()
+
+        PersistenceController.backfillDefaultTracks(in: controller.container)
+        ctx.refreshAllObjects()
+
+        let tracks = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+        #expect(tracks.count == 1)
+        let track = try #require(tracks.first)
+        #expect(track.value(forKey: "label") as? String == "Original")
+        #expect(track.value(forKey: "filename") as? String == "legacy-audio.m4a")
+        #expect(track.value(forKey: "isDefault") as? Bool == true)
+        #expect(track.value(forKey: "sortOrder") as? Int16 == 0)
+        #expect(track.value(forKey: "id") as? UUID != nil)
+    }
+
+    @Test("backfillDefaultTracks is idempotent and skips sessions that already have tracks")
+    func backfillIdempotent() throws {
+        let controller = PersistenceController.makeInMemory()
+        let ctx = controller.viewContext
+
+        let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: ctx)
+        session.setValue(UUID(), forKey: "id")
+        session.setValue("Legacy Session", forKey: "name")
+        session.setValue("legacy-audio.m4a", forKey: "audioFilename")
+        session.setValue("legacy.srt", forKey: "srtFilename")
+        session.setValue(Date(), forKey: "createdAt")
+        try ctx.save()
+
+        PersistenceController.backfillDefaultTracks(in: controller.container)
+        PersistenceController.backfillDefaultTracks(in: controller.container)
+        ctx.refreshAllObjects()
+
+        let tracks = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+        #expect(tracks.count == 1)
+    }
 }

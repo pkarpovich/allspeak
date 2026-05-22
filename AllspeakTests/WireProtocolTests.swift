@@ -12,6 +12,11 @@ struct WireProtocolTests {
         WatchCommand.skip(seconds: 0.5),
         WatchCommand.skip(seconds: -2.5),
         WatchCommand.seek(time: 123.456),
+        WatchCommand.switchTrack(id: UUID(uuidString: "D8C7A5C2-7C5B-4D52-9F2A-1F0B58F6A111")!),
+        WatchCommand.requestCueBundle(
+            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000001")!,
+            revision: 42
+        ),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()
@@ -74,6 +79,50 @@ struct WireProtocolTests {
         let plist = try meta.toPropertyList()
         let decoded = try SessionMetadata(propertyList: plist)
         #expect(decoded == meta)
+    }
+
+    @Test("SessionMetadata round-trips with tracks and activeTrackID")
+    func sessionMetadataRoundTripWithTracks() throws {
+        let trackA = TrackInfo(id: UUID(), label: "Original")
+        let trackB = TrackInfo(id: UUID(), label: "DFN v3")
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 5,
+            title: "The Mandalorian & Grogu",
+            duration: 5400.0,
+            cueCount: 1234,
+            isPlaying: true,
+            currentTime: 678.9,
+            tracks: [trackA, trackB],
+            activeTrackID: trackB.id
+        )
+        let plist = try meta.toPropertyList()
+        let decoded = try SessionMetadata(propertyList: plist)
+        #expect(decoded == meta)
+        #expect(decoded.tracks.count == 2)
+        #expect(decoded.activeTrackID == trackB.id)
+    }
+
+    @Test("SessionMetadata decodes legacy payload without tracks fields")
+    func sessionMetadataLegacyDecode() throws {
+        let legacyJSON = """
+        {
+            "sessionID": "11111111-1111-1111-1111-111111111111",
+            "revision": 1,
+            "title": "Legacy",
+            "duration": 100,
+            "cueCount": 5,
+            "isPlaying": false,
+            "currentTime": 0
+        }
+        """.data(using: .utf8)!
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.metadata.rawValue,
+            WirePayloadKey.payload: legacyJSON,
+        ]
+        let decoded = try SessionMetadata(propertyList: plist)
+        #expect(decoded.tracks.isEmpty)
+        #expect(decoded.activeTrackID == nil)
     }
 
     @Test("CueBundle round-trips via compression")

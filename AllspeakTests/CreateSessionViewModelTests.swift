@@ -13,6 +13,7 @@ struct CreateSessionViewModelTests {
     }
 
     private static let audio = URL(fileURLWithPath: "/tmp/example.m4a")
+    private static let audio2 = URL(fileURLWithPath: "/tmp/example2.m4a")
     private static let srt = URL(fileURLWithPath: "/tmp/example.srt")
 
     @Test(
@@ -81,5 +82,59 @@ struct CreateSessionViewModelTests {
     func trimmedName() {
         let state = CreateSessionFormState(name: "\n  Heat \t")
         #expect(state.trimmedName == "Heat")
+    }
+
+    @Test("appendPendingTracks adds new URLs with default labels derived from filenames")
+    func appendPendingTracksDerivesLabels() {
+        var state = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        state.appendPendingTracks(from: [Self.audio, Self.audio2])
+        #expect(state.pendingTracks.count == 2)
+        #expect(state.pendingTracks[0].label == "example")
+        #expect(state.pendingTracks[1].label == "example2")
+        #expect(state.canSave)
+    }
+
+    @Test("appendPendingTracks ignores duplicate URLs")
+    func appendPendingTracksDeduplicates() {
+        var state = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        state.appendPendingTracks(from: [Self.audio])
+        state.appendPendingTracks(from: [Self.audio, Self.audio2])
+        #expect(state.pendingTracks.map(\.url) == [Self.audio, Self.audio2])
+    }
+
+    @Test("removePendingTrack removes by identifier")
+    func removePendingTrack() {
+        var state = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        state.appendPendingTracks(from: [Self.audio, Self.audio2])
+        let firstID = state.pendingTracks[0].id
+        state.removePendingTrack(id: firstID)
+        #expect(state.pendingTracks.count == 1)
+        #expect(state.pendingTracks.first?.url == Self.audio2)
+    }
+
+    @Test("updateLabel mutates the targeted track")
+    func updateLabel() {
+        var state = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        state.appendPendingTracks(from: [Self.audio])
+        let trackID = state.pendingTracks[0].id
+        state.updateLabel(for: trackID, to: "Loudnorm")
+        #expect(state.pendingTracks.first?.label == "Loudnorm")
+    }
+
+    @Test("canSave is false when any pending track has an empty (whitespace) label")
+    func canSaveBlockedByEmptyLabel() {
+        var state = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        state.appendPendingTracks(from: [Self.audio, Self.audio2])
+        let firstID = state.pendingTracks[0].id
+        state.updateLabel(for: firstID, to: "   ")
+        #expect(state.canSave == false)
+        #expect(state.allTrackLabelsValid == false)
+    }
+
+    @Test("canSave is true with multiple pending tracks and srt set")
+    func canSaveMultiTrack() {
+        var state = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        state.appendPendingTracks(from: [Self.audio, Self.audio2])
+        #expect(state.canSave)
     }
 }

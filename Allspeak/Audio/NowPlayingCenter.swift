@@ -13,8 +13,14 @@ final class NowPlayingCenter {
 
     private init() {}
 
-    func setMetadata(title: String, duration: TimeInterval) {
-        info[MPMediaItemPropertyTitle] = title
+    func setMetadata(title: String, duration: TimeInterval, trackLabel: String? = nil) {
+        let displayTitle: String
+        if let trackLabel, !trackLabel.isEmpty {
+            displayTitle = "\(title) - \(trackLabel)"
+        } else {
+            displayTitle = title
+        }
+        info[MPMediaItemPropertyTitle] = displayTitle
         info[MPMediaItemPropertyPlaybackDuration] = duration
         commit()
     }

@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreData
 import Foundation
 import Testing
 @testable import Allspeak
@@ -38,34 +39,34 @@ struct WatchSessionHostTests {
     }
 
     @Test("dispatch(.play) starts playback and reports isPlaying in snapshot")
-    func dispatchPlay() throws {
+    func dispatchPlay() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
         defer {
             coordinator.endSession()
             try? FileManager.default.removeItem(at: audio)
         }
 
-        let snap = host.dispatch(.play)
+        let snap = await host.dispatch(.play)
         #expect(snap.isPlaying == true)
         #expect(coordinator.controller?.isPlaying == true)
     }
 
     @Test("dispatch(.pause) stops playback")
-    func dispatchPause() throws {
+    func dispatchPause() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
         defer {
             coordinator.endSession()
             try? FileManager.default.removeItem(at: audio)
         }
 
-        _ = host.dispatch(.play)
-        let snap = host.dispatch(.pause)
+        _ = await host.dispatch(.play)
+        let snap = await host.dispatch(.pause)
         #expect(snap.isPlaying == false)
         #expect(coordinator.controller?.isPlaying == false)
     }
 
     @Test("dispatch(.togglePlayPause) flips current state")
-    func dispatchToggle() throws {
+    func dispatchToggle() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
         defer {
             coordinator.endSession()
@@ -73,21 +74,21 @@ struct WatchSessionHostTests {
         }
 
         #expect(coordinator.controller?.isPlaying == false)
-        let firstSnap = host.dispatch(.togglePlayPause)
+        let firstSnap = await host.dispatch(.togglePlayPause)
         #expect(firstSnap.isPlaying == true)
-        let secondSnap = host.dispatch(.togglePlayPause)
+        let secondSnap = await host.dispatch(.togglePlayPause)
         #expect(secondSnap.isPlaying == false)
     }
 
     @Test("dispatch(.seek) moves current time and snapshot reflects new position")
-    func dispatchSeek() throws {
+    func dispatchSeek() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
         defer {
             coordinator.endSession()
             try? FileManager.default.removeItem(at: audio)
         }
 
-        let snap = host.dispatch(.seek(time: 3.5))
+        let snap = await host.dispatch(.seek(time: 3.5))
         #expect(abs(snap.currentTime - 3.5) < 0.05)
         #expect(coordinator.controller != nil)
         #expect(abs((coordinator.controller?.currentTime ?? 0) - 3.5) < 0.05)
@@ -95,24 +96,24 @@ struct WatchSessionHostTests {
     }
 
     @Test("dispatch(.skip) offsets current time by the supplied delta")
-    func dispatchSkip() throws {
+    func dispatchSkip() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
         defer {
             coordinator.endSession()
             try? FileManager.default.removeItem(at: audio)
         }
 
-        _ = host.dispatch(.seek(time: 2.0))
-        let snap = host.dispatch(.skip(seconds: 0.5))
+        _ = await host.dispatch(.seek(time: 2.0))
+        let snap = await host.dispatch(.skip(seconds: 0.5))
         #expect(abs(snap.currentTime - 2.5) < 0.05)
     }
 
     @Test("dispatch without active session returns empty snapshot")
-    func dispatchWithoutSession() {
+    func dispatchWithoutSession() async {
         let coordinator = PlaybackCoordinator.shared
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
-        let snap = host.dispatch(.play)
+        let snap = await host.dispatch(.play)
         #expect(snap == PlaybackSnapshot.empty)
     }
 
@@ -299,6 +300,346 @@ struct WatchSessionHostTests {
         #expect(sends.count == 1)
         host.broadcastSnapshot(now: t0.addingTimeInterval(1.1), isReachable: true) { sends.append($0) }
         #expect(sends.count == 2)
+    }
+
+    private struct MultiTrackFixture {
+        let coordinator: PlaybackCoordinator
+        let host: WatchSessionHost
+        let sessionUUID: UUID
+        let track1UUID: UUID
+        let track2UUID: UUID
+        let root: URL
+    }
+
+    private func makeMultiTrackFixture() async throws -> MultiTrackFixture {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-host-multi-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storage = DocumentsStorage(documentsURL: root)
+        let persistence = PersistenceController.makeInMemory()
+        let repo = SessionRepository(persistence: persistence, storage: storage)
+
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let initialAudio = try Self.makeSilenceFile(seconds: 5)
+        let movedAudio = srcDir.appendingPathComponent("source.caf")
+        try FileManager.default.moveItem(at: initialAudio, to: movedAudio)
+        let srtURL = srcDir.appendingPathComponent("subs.srt")
+        let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
+        try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
+
+        let sessionID = try await repo.importSession(name: "Movie", audioSrc: movedAudio, srtSrc: srtURL)
+        persistence.viewContext.refreshAllObjects()
+        let sessionUUID = try #require(persistence.viewContext.existingObject(with: sessionID).value(forKey: "id") as? UUID)
+
+        let t1ObjID = try await repo.addTrack(sessionID: sessionID, filename: "loud.caf", label: "Loudnorm")
+        let t2ObjID = try await repo.addTrack(sessionID: sessionID, filename: "dfn.caf", label: "DFN")
+        persistence.viewContext.refreshAllObjects()
+        let snapshots = try await repo.tracks(for: sessionID)
+        let t1Snap = try #require(snapshots.first { $0.id == t1ObjID })
+        let t2Snap = try #require(snapshots.first { $0.id == t2ObjID })
+
+        let dir = storage.sessionDir(for: sessionUUID)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let t1URL = storage.trackURL(sessionID: sessionUUID, trackID: t1Snap.trackID, originalFilename: t1Snap.filename)
+        let t2URL = storage.trackURL(sessionID: sessionUUID, trackID: t2Snap.trackID, originalFilename: t2Snap.filename)
+        let silenceA = try Self.makeSilenceFile(seconds: 5)
+        let silenceB = try Self.makeSilenceFile(seconds: 5)
+        try FileManager.default.moveItem(at: silenceA, to: t1URL)
+        try FileManager.default.moveItem(at: silenceB, to: t2URL)
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        try await coordinator.startSession(sessionID: sessionID, repository: repo, persistence: persistence, storage: storage)
+        let host = WatchSessionHost(coordinator: coordinator)
+        return MultiTrackFixture(
+            coordinator: coordinator,
+            host: host,
+            sessionUUID: sessionUUID,
+            track1UUID: t1Snap.trackID,
+            track2UUID: t2Snap.trackID,
+            root: root
+        )
+    }
+
+    @Test("dispatch(.switchTrack) updates activeTrackID and snapshot reflects it")
+    func dispatchSwitchTrackUpdatesActive() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        #expect(fixture.coordinator.activeTrackID == fixture.track1UUID)
+        let snap = await fixture.host.dispatch(.switchTrack(id: fixture.track2UUID))
+        #expect(fixture.coordinator.activeTrackID == fixture.track2UUID)
+        #expect(snap.activeTrackID == fixture.track2UUID)
+        #expect(snap.sessionID == fixture.sessionUUID)
+    }
+
+    @Test("dispatch(.switchTrack) with unknown id leaves active track unchanged")
+    func dispatchSwitchTrackUnknownNoop() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        let snap = await fixture.host.dispatch(.switchTrack(id: UUID()))
+        #expect(fixture.coordinator.activeTrackID == fixture.track1UUID)
+        #expect(snap.activeTrackID == fixture.track1UUID)
+    }
+
+    @Test("dispatch(.switchTrack) snapshot round-trips activeTrackID via property list")
+    func dispatchSwitchTrackSnapshotRoundTrip() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        let snap = await fixture.host.dispatch(.switchTrack(id: fixture.track2UUID))
+        let plist = try snap.toPropertyList()
+        let decoded = try PlaybackSnapshot(propertyList: plist)
+        #expect(decoded.activeTrackID == fixture.track2UUID)
+    }
+
+    @Test("broadcastCurrentSession payload carries tracks and activeTrackID after switchTrack")
+    func broadcastCurrentSessionReflectsSwitchTrack() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        _ = await fixture.host.dispatch(.switchTrack(id: fixture.track2UUID))
+
+        var contexts: [[String: Any]] = []
+        fixture.host.broadcastCurrentSession(sendContext: { payload in
+            contexts.append(payload)
+        })
+        #expect(contexts.count == 1)
+        let metadata = try SessionMetadata(propertyList: contexts[0])
+        #expect(metadata.sessionID == fixture.sessionUUID)
+        #expect(metadata.activeTrackID == fixture.track2UUID)
+        #expect(metadata.tracks.count == 2)
+        #expect(metadata.tracks.map(\.id).contains(fixture.track1UUID))
+        #expect(metadata.tracks.map(\.id).contains(fixture.track2UUID))
+    }
+
+    @Test("broadcastSnapshot payload carries refreshed activeTrackID after switchTrack")
+    func broadcastSnapshotReflectsSwitchTrack() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        _ = await fixture.host.dispatch(.switchTrack(id: fixture.track2UUID))
+
+        var sends: [[String: Any]] = []
+        fixture.host.forceBroadcastSnapshot(now: Date(), isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        let snapshot = try PlaybackSnapshot(propertyList: sends[0])
+        #expect(snapshot.activeTrackID == fixture.track2UUID)
+        #expect(snapshot.sessionID == fixture.sessionUUID)
+    }
+
+    @Test("broadcastCurrentSession skips re-sending the cue bundle when revision is unchanged")
+    func broadcastCurrentSessionDeduplicatesBundleByRevision() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+    }
+
+    @Test("broadcastCurrentSession does not cache the bundle key when sendFile reports failure")
+    func broadcastCurrentSessionRetriesAfterFailedSend() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var attempts: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { attempts.append($0); return false }
+        )
+        #expect(attempts.count == 1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { attempts.append($0); return true }
+        )
+        #expect(attempts.count == 2)
+    }
+
+    @Test("handleFileTransferFailure clears dedupe key so next broadcast retries")
+    func handleFileTransferFailureClearsDedupe() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.handleFileTransferFailure(metadata: [
+            "sessionID": bundles[0].sessionID.uuidString,
+            "revision": bundles[0].revision,
+        ])
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 2)
+    }
+
+    @Test("handleFileTransferFailure ignores metadata for a different revision")
+    func handleFileTransferFailureIgnoresStaleMetadata() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.handleFileTransferFailure(metadata: [
+            "sessionID": bundles[0].sessionID.uuidString,
+            "revision": bundles[0].revision - 1,
+        ])
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+    }
+
+    @Test("handleCueBundleRequest clears dedupe so next broadcast resends")
+    func handleCueBundleRequestForcesResend() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+        let key = (bundles[0].sessionID, bundles[0].revision)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.handleCueBundleRequest(sessionID: key.0, revision: key.1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 2)
+    }
+
+    @Test("handleCueBundleRequest does not clear dedupe for stale key")
+    func handleCueBundleRequestIgnoresStaleKey() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+        let key = (bundles[0].sessionID, bundles[0].revision)
+
+        host.handleCueBundleRequest(sessionID: UUID(), revision: key.1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+    }
+
+    @Test("dispatch(.requestCueBundle) routes through handleCueBundleRequest")
+    func dispatchRequestCueBundleRoutes() async throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+        let bundle = bundles[0]
+
+        _ = await host.dispatch(.requestCueBundle(sessionID: bundle.sessionID, revision: bundle.revision))
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 2)
+    }
+
+    @Test("broadcastCurrentSession without active session sends nothing")
+    func broadcastCurrentSessionNoSession() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+        var contexts: [[String: Any]] = []
+        host.broadcastCurrentSession(sendContext: { payload in
+            contexts.append(payload)
+        })
+        #expect(contexts.isEmpty)
     }
 
     @Test("broadcastSnapshot empty-session calls do not consume the rate-limit slot")

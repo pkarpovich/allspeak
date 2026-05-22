@@ -11,6 +11,7 @@ struct SessionsView: View {
     @State private var renameTarget: RenameTarget?
     @State private var isPresentingCreate = false
     @State private var editTarget: EditTarget?
+    @State private var tracksTarget: TracksTarget?
 
     var body: some View {
         NavigationStack {
@@ -47,6 +48,9 @@ struct SessionsView: View {
             }
             .sheet(item: $editTarget) { target in
                 CreateSessionView(mode: .edit(target.id), repository: repository)
+            }
+            .sheet(item: $tracksTarget) { target in
+                SessionEditView(sessionID: target.id, repository: repository)
             }
             .alert(
                 "Rename session",
@@ -112,6 +116,11 @@ struct SessionsView: View {
                             Label("Edit", systemImage: Icons.pencil)
                         }
                         Button {
+                            tracksTarget = TracksTarget(id: id)
+                        } label: {
+                            Label("Tracks", systemImage: Icons.trackPicker)
+                        }
+                        Button {
                             renameTarget = RenameTarget(id: id, draft: currentName)
                         } label: {
                             Label("Rename", systemImage: Icons.pencil)
@@ -140,7 +149,10 @@ struct SessionsView: View {
         guard !trimmed.isEmpty else { return }
         let repo = repository
         let id = target.id
-        Task { try? await repo.rename(id: id, to: trimmed) }
+        Task {
+            try? await repo.rename(id: id, to: trimmed)
+            await PlaybackCoordinator.shared.refreshIfActive(sessionID: id)
+        }
     }
 }
 
@@ -150,5 +162,9 @@ private struct RenameTarget: Identifiable {
 }
 
 private struct EditTarget: Identifiable {
+    let id: NSManagedObjectID
+}
+
+private struct TracksTarget: Identifiable {
     let id: NSManagedObjectID
 }

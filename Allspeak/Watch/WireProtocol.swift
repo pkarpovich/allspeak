@@ -10,15 +10,39 @@ import Foundation
 // SessionMetadata / CueBundle is how we signal that cached cues are stale
 // and should be replaced.
 //
+// Commands (Watch -> iPhone):
+//
+//   .play, .pause, .togglePlayPause   transport-style controls
+//   .skip(seconds:)                   ±0.5s coalesced taps
+//   .seek(time:)                      tap-on-cue jumps
+//   .switchTrack(id:)                 swap active AudioTrack on the host
+//                                     session (preserves currentTime +
+//                                     isPlaying; ~100-300ms reload gap)
+//   .requestCueBundle(sessionID:,     watch-initiated resync after a cache
+//                     revision:)      miss (watch app reset / Application
+//                                     Support cleanup); host clears its
+//                                     dedup key and rebroadcasts the bundle
+//
+// Metadata (iPhone -> Watch) carries the full track list so the watch
+// can render its TrackListView without a separate request:
+//
+//   SessionMetadata.tracks: [TrackInfo]   (id + label, ordered by sortOrder)
+//   SessionMetadata.activeTrackID: UUID?  (nil only for legacy single-track
+//                                          sessions still on the v1 store)
+//
 // Transports (one-way arrows reflect actual reachability semantics):
 //
 //   iPhone --updateApplicationContext--> Watch   SessionMetadata
-//       small, latest-state-wins; replaces any previously delivered context
+//       small, latest-state-wins; replaces any previously delivered context.
+//       Rebroadcast on every switchTrack so the watch checkmark stays in
+//       sync with the iPhone-side selection.
 //
 //   iPhone --transferFile---------------> Watch   CueBundle (gzipped JSON)
 //       large payload (20-80KB compressed); queued by the OS, survives
 //       reachability flaps; receiver decompresses + caches under
-//       Application Support so a watch restart does not re-trigger transfer
+//       Application Support so a watch restart does not re-trigger transfer.
+//       Tracks are NOT in the bundle — switching tracks does not invalidate
+//       the cue cache (subtitle timeline is shared across all tracks).
 //
 //   iPhone --sendMessage (no reply)-----> Watch   PlaybackSnapshot
 //       fire-and-forget, 1Hz while reachable + playing; dropped silently
@@ -41,9 +65,12 @@ import Foundation
 //
 // Adding a new command:
 //   1. Add a case to `WatchCommand` + its `Kind` discriminator.
-//   2. Extend `PlaybackCoordinator.apply(_:)` (iOS) to dispatch it.
-//   3. Watch-side UI sends it through `WatchSessionClient.send(_:)`.
-//   4. Old binaries will throw `DecodingError` on the unknown kind, which
+//   2. Extend the encode/decode switches above with the new associated
+//      values and CodingKeys.
+//   3. Extend `WatchSessionHost.dispatch(_:)` (iOS) to dispatch it to the
+//      `PlaybackCoordinator`.
+//   4. Watch-side UI sends it through `WatchSessionClient.send(_:)`.
+//   5. Old binaries will throw `DecodingError` on the unknown kind, which
 //      is acceptable — the watch retries on next user tap.
 
 enum WatchCommand: Codable, Equatable, Sendable {
@@ -52,11 +79,16 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case togglePlayPause
     case skip(seconds: Double)
     case seek(time: Double)
+    case switchTrack(id: UUID)
+    case requestCueBundle(sessionID: UUID, revision: Int)
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case seconds
         case time
+        case trackID
+        case sessionID
+        case revision
     }
 
     private enum Kind: String, Codable {
@@ -65,6 +97,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case togglePlayPause
         case skip
         case seek
+        case switchTrack
+        case requestCueBundle
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -82,6 +116,13 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .seek(let time):
             try container.encode(Kind.seek, forKey: .kind)
             try container.encode(time, forKey: .time)
+        case .switchTrack(let id):
+            try container.encode(Kind.switchTrack, forKey: .kind)
+            try container.encode(id, forKey: .trackID)
+        case .requestCueBundle(let sessionID, let revision):
+            try container.encode(Kind.requestCueBundle, forKey: .kind)
+            try container.encode(sessionID, forKey: .sessionID)
+            try container.encode(revision, forKey: .revision)
         }
     }
 
@@ -99,8 +140,20 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .skip(seconds: try container.decode(Double.self, forKey: .seconds))
         case .seek:
             self = .seek(time: try container.decode(Double.self, forKey: .time))
+        case .switchTrack:
+            self = .switchTrack(id: try container.decode(UUID.self, forKey: .trackID))
+        case .requestCueBundle:
+            self = .requestCueBundle(
+                sessionID: try container.decode(UUID.self, forKey: .sessionID),
+                revision: try container.decode(Int.self, forKey: .revision)
+            )
         }
     }
+}
+
+struct TrackInfo: Codable, Equatable, Sendable, Hashable, Identifiable {
+    let id: UUID
+    let label: String
 }
 
 struct SessionMetadata: Codable, Equatable, Sendable {
@@ -111,6 +164,47 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let cueCount: Int
     let isPlaying: Bool
     let currentTime: Double
+    let tracks: [TrackInfo]
+    let activeTrackID: UUID?
+
+    init(
+        sessionID: UUID,
+        revision: Int,
+        title: String,
+        duration: Double,
+        cueCount: Int,
+        isPlaying: Bool,
+        currentTime: Double,
+        tracks: [TrackInfo] = [],
+        activeTrackID: UUID? = nil
+    ) {
+        self.sessionID = sessionID
+        self.revision = revision
+        self.title = title
+        self.duration = duration
+        self.cueCount = cueCount
+        self.isPlaying = isPlaying
+        self.currentTime = currentTime
+        self.tracks = tracks
+        self.activeTrackID = activeTrackID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        self.revision = try container.decode(Int.self, forKey: .revision)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.duration = try container.decode(Double.self, forKey: .duration)
+        self.cueCount = try container.decode(Int.self, forKey: .cueCount)
+        self.isPlaying = try container.decode(Bool.self, forKey: .isPlaying)
+        self.currentTime = try container.decode(Double.self, forKey: .currentTime)
+        self.tracks = try container.decodeIfPresent([TrackInfo].self, forKey: .tracks) ?? []
+        self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
+    }
 }
 
 struct CueBundle: Codable, Equatable, Sendable {

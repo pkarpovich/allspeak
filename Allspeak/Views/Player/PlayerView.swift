@@ -13,6 +13,8 @@ struct PlayerView: View {
 
     @State private var controller: AudioController?
     @State private var sessionName: String = ""
+    @State private var tracks: [TrackInfo] = []
+    @State private var activeTrackID: UUID?
     @State private var loadError: String?
     @State private var cinema: CinemaMode = .off
 
@@ -59,8 +61,11 @@ struct PlayerView: View {
                     PlayerTopBar(
                         sessionName: sessionName,
                         cinemaActive: cinema.isCinema,
+                        tracks: tracks,
+                        activeTrackID: activeTrackID,
                         onBack: { dismiss() },
-                        onCinema: { applyCinema(.pill) }
+                        onCinema: { applyCinema(.pill) },
+                        onSwitchTrack: switchTrack
                     )
                     .padding(.top, 18)
 
@@ -130,6 +135,13 @@ struct PlayerView: View {
         }
     }
 
+    private func switchTrack(_ trackID: UUID) {
+        Task {
+            try? await PlaybackCoordinator.shared.switchTrack(to: trackID)
+            activeTrackID = PlaybackCoordinator.shared.activeTrackID
+        }
+    }
+
     private func applyCinema(_ input: CinemaInput) {
         withAnimation(.easeInOut(duration: 0.25)) {
             cinema.apply(input)
@@ -141,6 +153,8 @@ struct PlayerView: View {
             try await PlaybackCoordinator.shared.startSession(sessionID: sessionID, repository: repository)
             controller = PlaybackCoordinator.shared.controller
             sessionName = PlaybackCoordinator.shared.sessionTitle
+            tracks = PlaybackCoordinator.shared.tracks
+            activeTrackID = PlaybackCoordinator.shared.activeTrackID
         } catch PlaybackCoordinator.StartError.sessionNotFound {
             loadError = "Couldn't load session."
         } catch PlaybackCoordinator.StartError.noCues {

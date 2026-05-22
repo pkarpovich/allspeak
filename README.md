@@ -36,13 +36,29 @@ iCloud Drive. Inside Allspeak:
 
 1. Tap `+` on the Sessions screen.
 2. Name the session (e.g. `After the Light · 21:30`).
-3. Tap `Choose audio file` and pick the `.m4a` via the system file picker.
-4. Tap `Choose subtitles file` and pick the `.srt`.
+3. Tap `Choose audio files` and pick one or more `.m4a` files via the
+   system file picker. Each file becomes a separate audio track on the
+   session (e.g. `loudnorm-only`, `demucs+loudnorm`, `DFN v3`, or a
+   different dubbing studio). Label each picked file before saving — the
+   first track becomes the default.
+4. Tap `Choose subtitles file` and pick the `.srt`. The subtitle timeline
+   is shared across all tracks in the session.
 5. Save.
 
-The picked files are copied into the app's Documents container at
-`Documents/sessions/<uuid>/<filename>` and are independent of the original
-source location after import.
+Picked files are copied into the app's Documents container at
+`Documents/sessions/<uuid>/track-<trackID>-<filename>` (one per track)
+plus a single subtitles file, and are independent of the original source
+location after import. To add more tracks to an existing session (e.g.
+drop in a new dub when it becomes available), use the `Tracks` action in
+the session row's context menu.
+
+### Switching tracks at runtime
+
+In `PlayerView`, a toolbar `Menu` appears when a session has more than one
+track. Tapping it lists every track with a checkmark on the active one;
+selecting another switches the playing audio while preserving the current
+position (~100-300ms gap during reload, no crossfade). The same list lives
+on the Apple Watch as a third TabView page — see below.
 
 ## Apple Watch remote
 
@@ -71,14 +87,20 @@ seek-to-cue) to the iPhone, which remains the audio host.
   ±0.5s skip buttons sized for blind tapping through a sleeve.
 - **Page 2** (swipe up): scrollable list of all cues with the current line
   highlighted; tap any line to seek the iPhone audio to that timestamp.
+- **Page 3** (swipe up again): list of audio tracks on the current
+  session, with a checkmark on the active one. Tap any track to switch
+  the iPhone-side audio. Shows a `Single track` placeholder when the
+  session has only one track.
 - Rapid ±0.5 taps coalesce inside a 250ms window so five quick taps send
   a single `skip(+2.5)` command rather than five round-trips.
 - Between authoritative snapshots from the iPhone, the watch interpolates
   the displayed position locally (`currentTime + (now - serverDate)` while
   playing) so the UI never feels frozen.
 
-The five commands round-tripped over WatchConnectivity are: `play`,
-`pause`, `togglePlayPause`, `skip(seconds:)`, `seek(time:)`. The wire
+The six commands round-tripped over WatchConnectivity are: `play`,
+`pause`, `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, and
+`switchTrack(id:)`. Session metadata delivered to the watch carries a
+`tracks: [TrackInfo]` array plus the current `activeTrackID`. The wire
 contract lives in `Allspeak/Watch/WireProtocol.swift` — see the header
 comment there for the protocol summary.
 
@@ -87,9 +109,12 @@ comment there for the protocol summary.
 - **UI**: SwiftUI, dark-only, single device family (iPhone, portrait).
   Liquid Glass surfaces use iOS 26's `.glassEffect()` with warm-tint overlays
   per the design's chrome / plate variants.
-- **Persistence**: Core Data with a single `Session` entity. Persistent
-  history tracking is enabled; lightweight migration is configured.
-  File payloads (audio + srt) are not stored in Core Data — only filenames.
+- **Persistence**: Core Data with `Session` and `AudioTrack` entities
+  (one-to-many, cascade delete). Persistent history tracking is enabled;
+  lightweight migration carries pre-multitrack sessions forward by
+  back-filling a single `AudioTrack(label: "Original", isDefault: true)`
+  from the legacy `Session.audioFilename` field. File payloads (audio +
+  srt) are not stored in Core Data — only filenames.
 - **Audio**: Single `AVAudioPlayer` per player session, `.playback` category,
   `.spokenAudio` mode. Background audio is permitted via the `audio` entry in
   `UIBackgroundModes`.

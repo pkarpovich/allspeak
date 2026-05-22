@@ -901,4 +901,228 @@ struct WatchSessionClientTests {
 
         #expect(cache.load(sessionID: UUID(), revision: 1) == nil)
     }
+
+    @Test("tracks and activeTrackID reflect received metadata")
+    func tracksAndActiveTrackIDReflectMetadata() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(client.tracks == [])
+        #expect(client.activeTrackID == nil)
+
+        let trackA = TrackInfo(id: UUID(), label: "Original")
+        let trackB = TrackInfo(id: UUID(), label: "DFN v3")
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "Multi",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0,
+            tracks: [trackA, trackB],
+            activeTrackID: trackB.id
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(client.tracks == [trackA, trackB])
+        #expect(client.activeTrackID == trackB.id)
+    }
+
+    @Test("snapshot updates preserve tracks and activeTrackID")
+    func snapshotUpdatesPreserveTracksAndActive() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let trackA = TrackInfo(id: UUID(), label: "A")
+        let trackB = TrackInfo(id: UUID(), label: "B")
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "S",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0,
+            tracks: [trackA, trackB],
+            activeTrackID: trackA.id
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let snapshot = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 12.5,
+            duration: 60,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        client.handleReceivedSnapshot(try snapshot.toPropertyList())
+
+        #expect(client.tracks == [trackA, trackB])
+        #expect(client.activeTrackID == trackA.id)
+        #expect(client.metadata?.isPlaying == true)
+    }
+
+    @Test("send(.switchTrack) encodes track id correctly")
+    func sendSwitchTrackEncodes() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let trackID = UUID()
+        client.send(.switchTrack(id: trackID))
+
+        #expect(sender.sentMessages.count == 1)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[0])
+        #expect(decoded == .switchTrack(id: trackID))
+    }
+
+    @Test("handleReceivedApplicationContext sends requestCueBundle on cache miss")
+    func receiveApplicationContextRequestsBundleOnCacheMiss() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 7,
+            title: "Missing",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(client.cues == [])
+        #expect(sender.sentMessages.count == 1)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[0])
+        #expect(decoded == .requestCueBundle(sessionID: sessionID, revision: 7))
+    }
+
+    @Test("handleReceivedApplicationContext does not request bundle when cueCount is zero")
+    func receiveApplicationContextSkipsRequestForEmptyCueCount() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "No cues",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("handleReceivedApplicationContext does not request bundle when cache hits")
+    func receiveApplicationContextSkipsRequestWhenCacheHits() async throws {
+        let (_, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let cache = try CueCache(baseURL: dir)
+        try cache.save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
+
+        let warmClient = WatchSessionClient(sender: sender, cache: cache)
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Cached",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        warmClient.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(warmClient.cues == Self.cues)
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("handleReceivedApplicationContext deduplicates requests for the same revision")
+    func receiveApplicationContextDeduplicatesRequest() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 3,
+            title: "Missing",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(sender.sentMessages.count == 1)
+    }
+
+    @Test("requestCueBundle send error clears dedup key, allowing later retry")
+    func requestCueBundleErrorClearsDedupKey() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 4,
+            title: "Missing",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+
+        sender.nextError = WatchMessageError.notReachable
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        #expect(sender.sentMessages.count == 1)
+
+        try await Task.sleep(for: .milliseconds(50))
+
+        sender.nextError = nil
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(sender.sentMessages.count == 2)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[1])
+        #expect(decoded == .requestCueBundle(sessionID: sessionID, revision: 4))
+    }
+
+    @Test("file-receive revision bump preserves tracks and activeTrackID")
+    func fileReceiveRevisionBumpPreservesTracks() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let trackA = TrackInfo(id: UUID(), label: "A")
+        let trackB = TrackInfo(id: UUID(), label: "B")
+        let metaR1 = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "S",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0,
+            tracks: [trackA, trackB],
+            activeTrackID: trackB.id
+        )
+        client.handleReceivedApplicationContext(try metaR1.toPropertyList())
+
+        let bundleR2 = CueBundle(sessionID: sessionID, revision: 2, cues: Self.cues)
+        client.handleReceivedFile(data: try bundleR2.compressed(), metadata: [:])
+
+        #expect(client.metadata?.revision == 2)
+        #expect(client.tracks == [trackA, trackB])
+        #expect(client.activeTrackID == trackB.id)
+    }
 }

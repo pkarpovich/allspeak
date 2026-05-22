@@ -28,7 +28,7 @@ final class AudioController {
         self.sessionID = sessionID
     }
 
-    func load(audio: URL, subtitles: [Subtitle], title: String) throws {
+    func load(audio: URL, subtitles: [Subtitle], title: String, trackLabel: String? = nil) throws {
         let player = try AVAudioPlayer(contentsOf: audio)
         player.prepareToPlay()
         let delegateProxy = PlayerDelegateProxy { [weak self] in
@@ -44,7 +44,7 @@ final class AudioController {
         self.lastNowPlayingTickSecond = -1
 
         #if os(iOS) || os(tvOS) || os(visionOS)
-        NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration)
+        NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration, trackLabel: trackLabel)
         NowPlayingCenter.shared.configureRemoteCommands(
             play: { [weak self] in
                 Task { @MainActor in self?.play() }
@@ -128,6 +128,19 @@ final class AudioController {
         guard let player else { return }
         currentTime = player.currentTime
         updateIndexIfNeeded()
+    }
+
+    func replaceSubtitles(_ newCues: [Subtitle]) {
+        subtitles = newCues
+        currentIndex = Self.index(at: currentTime, in: newCues)
+    }
+
+    func refreshNowPlaying(title: String, trackLabel: String?) {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        guard player != nil else { return }
+        NowPlayingCenter.shared.setMetadata(title: title, duration: duration, trackLabel: trackLabel)
+        NowPlayingCenter.shared.updateTime(currentTime, isPlaying: isPlaying)
+        #endif
     }
 
     nonisolated static func index(at time: TimeInterval, in cues: [Subtitle]) -> Int {

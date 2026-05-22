@@ -97,4 +97,80 @@ struct DocumentsStorageTests {
         try storage.removeSessionDir(id)
         try storage.removeSessionDir(id)
     }
+
+    @Test("audioURL composes legacy session-dir filename path")
+    func audioURLLegacy() {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let url = storage.audioURL(sessionID: id, filename: "audio.m4a")
+        #expect(url == storage.sessionDir(for: id).appendingPathComponent("audio.m4a"))
+    }
+
+    @Test("trackURL formats as track-<trackID>-<originalFilename>")
+    func trackURLFormat() {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let trackID = UUID()
+        let url = storage.trackURL(sessionID: sessionID, trackID: trackID, originalFilename: "dfnv3.m4a")
+        #expect(url.lastPathComponent == "track-\(trackID.uuidString)-dfnv3.m4a")
+        #expect(url.deletingLastPathComponent() == storage.sessionDir(for: sessionID))
+    }
+
+    @Test("trackURL points at file copied into the session dir")
+    func trackURLFileExistsAfterCopy() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let trackID = UUID()
+        let originalFilename = "audio.m4a"
+        let srcDir = root.appendingPathComponent("src", isDirectory: true)
+        let src = try writeFile(in: srcDir, name: originalFilename, contents: "audio-bytes")
+
+        let storedName = DocumentsStorage.trackFilename(trackID: trackID, originalFilename: originalFilename)
+        let dest = try storage.copyIntoSession(srcURL: src, sessionID: sessionID, as: storedName)
+        let expected = storage.trackURL(sessionID: sessionID, trackID: trackID, originalFilename: originalFilename)
+
+        #expect(dest == expected)
+        #expect(FileManager.default.fileExists(atPath: expected.path))
+        let copied = try String(contentsOf: expected, encoding: .utf8)
+        #expect(copied == "audio-bytes")
+    }
+
+    @Test("removeTrackFile deletes the specific track file only")
+    func removeTrackFileDeletesFile() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let trackA = UUID()
+        let trackB = UUID()
+        let srcDir = root.appendingPathComponent("src", isDirectory: true)
+        let src = try writeFile(in: srcDir, name: "audio.m4a", contents: "bytes")
+
+        let nameA = DocumentsStorage.trackFilename(trackID: trackA, originalFilename: "audio.m4a")
+        let nameB = DocumentsStorage.trackFilename(trackID: trackB, originalFilename: "audio.m4a")
+        _ = try storage.copyIntoSession(srcURL: src, sessionID: sessionID, as: nameA)
+        _ = try storage.copyIntoSession(srcURL: src, sessionID: sessionID, as: nameB)
+
+        let urlA = storage.trackURL(sessionID: sessionID, trackID: trackA, originalFilename: "audio.m4a")
+        let urlB = storage.trackURL(sessionID: sessionID, trackID: trackB, originalFilename: "audio.m4a")
+        #expect(FileManager.default.fileExists(atPath: urlA.path))
+        #expect(FileManager.default.fileExists(atPath: urlB.path))
+
+        try storage.removeTrackFile(sessionID: sessionID, trackID: trackA, originalFilename: "audio.m4a")
+
+        #expect(FileManager.default.fileExists(atPath: urlA.path) == false)
+        #expect(FileManager.default.fileExists(atPath: urlB.path))
+    }
+
+    @Test("removeTrackFile is idempotent for a missing file")
+    func removeTrackFileIdempotent() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let trackID = UUID()
+        try storage.removeTrackFile(sessionID: sessionID, trackID: trackID, originalFilename: "missing.m4a")
+        try storage.removeTrackFile(sessionID: sessionID, trackID: trackID, originalFilename: "missing.m4a")
+    }
 }
