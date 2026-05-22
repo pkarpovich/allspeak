@@ -307,7 +307,8 @@ final class PlaybackCoordinator {
             duration: controller.duration,
             currentIndex: controller.currentIndex,
             isPlaying: controller.isPlaying,
-            serverDate: Date()
+            serverDate: Date(),
+            activeTrackID: activeTrackID
         )
     }
 

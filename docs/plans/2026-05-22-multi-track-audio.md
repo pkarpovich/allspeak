@@ -137,11 +137,11 @@ App-level switch method. AudioController already has `load(audio:subtitles:title
 
 ### Task 6: WatchSessionHost dispatch
 
-- [ ] in `WatchSessionHost.dispatch(_ command: WatchCommand)`, handle new `switchTrack` case → call `coordinator.switchTrack(to: id)`
-- [ ] make `dispatch` async (or wrap switchTrack in a sync wrapper)
-- [ ] ensure response Snapshot includes activeTrackID
-- [ ] write tests: incoming switchTrack message dispatches correctly (mock PlaybackCoordinator)
-- [ ] run tests — must pass before next task
+- [x] in `WatchSessionHost.dispatch(_ command: WatchCommand)`, handle new `switchTrack` case → call `coordinator.switchTrack(to: id)`
+- [x] make `dispatch` async (or wrap switchTrack in a sync wrapper)
+- [x] ensure response Snapshot includes activeTrackID
+- [x] write tests: incoming switchTrack message dispatches correctly (mock PlaybackCoordinator)
+- [x] run tests — must pass before next task
 
 ### Task 7: WatchSessionClient state for tracks
 

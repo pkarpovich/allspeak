@@ -74,8 +74,13 @@ final class WatchSessionHost: NSObject {
         session.transferFile(url, metadata: meta)
     }
 
-    func dispatch(_ command: WatchCommand) -> PlaybackSnapshot {
-        coordinator.apply(command)
+    func dispatch(_ command: WatchCommand) async -> PlaybackSnapshot {
+        switch command {
+        case .switchTrack(let id):
+            try? await coordinator.switchTrack(to: id)
+        default:
+            coordinator.apply(command)
+        }
         return coordinator.currentSnapshot()
     }
 
@@ -172,7 +177,7 @@ extension WatchSessionHost: WCSessionDelegate {
         }
         let sendableReply = SendablePayloadCallback(invoke: replyHandler)
         Task { @MainActor in
-            let snapshot = self.dispatch(command)
+            let snapshot = await self.dispatch(command)
             let payload = (try? snapshot.toPropertyList()) ?? [:]
             sendableReply.invoke(payload)
         }
