@@ -14,6 +14,7 @@ enum Icons {
     static let ellipsis       = "ellipsis"
     static let cinema         = "moon.fill"
     static let audio          = "waveform"
+    static let trackPicker    = "speaker.wave.2.bubble"
     static let caption        = "captions.bubble"
     static let check          = "checkmark"
     static let filmReel       = "film"
