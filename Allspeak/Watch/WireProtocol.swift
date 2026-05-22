@@ -10,15 +10,35 @@ import Foundation
 // SessionMetadata / CueBundle is how we signal that cached cues are stale
 // and should be replaced.
 //
+// Commands (Watch -> iPhone):
+//
+//   .play, .pause, .togglePlayPause   transport-style controls
+//   .skip(seconds:)                   ±0.5s coalesced taps
+//   .seek(time:)                      tap-on-cue jumps
+//   .switchTrack(id:)                 swap active AudioTrack on the host
+//                                     session (preserves currentTime +
+//                                     isPlaying; ~100-300ms reload gap)
+//
+// Metadata (iPhone -> Watch) carries the full track list so the watch
+// can render its TrackListView without a separate request:
+//
+//   SessionMetadata.tracks: [TrackInfo]   (id + label, ordered by sortOrder)
+//   SessionMetadata.activeTrackID: UUID?  (nil only for legacy single-track
+//                                          sessions still on the v1 store)
+//
 // Transports (one-way arrows reflect actual reachability semantics):
 //
 //   iPhone --updateApplicationContext--> Watch   SessionMetadata
-//       small, latest-state-wins; replaces any previously delivered context
+//       small, latest-state-wins; replaces any previously delivered context.
+//       Rebroadcast on every switchTrack so the watch checkmark stays in
+//       sync with the iPhone-side selection.
 //
 //   iPhone --transferFile---------------> Watch   CueBundle (gzipped JSON)
 //       large payload (20-80KB compressed); queued by the OS, survives
 //       reachability flaps; receiver decompresses + caches under
-//       Application Support so a watch restart does not re-trigger transfer
+//       Application Support so a watch restart does not re-trigger transfer.
+//       Tracks are NOT in the bundle — switching tracks does not invalidate
+//       the cue cache (subtitle timeline is shared across all tracks).
 //
 //   iPhone --sendMessage (no reply)-----> Watch   PlaybackSnapshot
 //       fire-and-forget, 1Hz while reachable + playing; dropped silently
@@ -41,9 +61,12 @@ import Foundation
 //
 // Adding a new command:
 //   1. Add a case to `WatchCommand` + its `Kind` discriminator.
-//   2. Extend `PlaybackCoordinator.apply(_:)` (iOS) to dispatch it.
-//   3. Watch-side UI sends it through `WatchSessionClient.send(_:)`.
-//   4. Old binaries will throw `DecodingError` on the unknown kind, which
+//   2. Extend the encode/decode switches above with the new associated
+//      values and CodingKeys.
+//   3. Extend `WatchSessionHost.dispatch(_:)` (iOS) to dispatch it to the
+//      `PlaybackCoordinator`.
+//   4. Watch-side UI sends it through `WatchSessionClient.send(_:)`.
+//   5. Old binaries will throw `DecodingError` on the unknown kind, which
 //      is acceptable — the watch retries on next user tap.
 
 enum WatchCommand: Codable, Equatable, Sendable {

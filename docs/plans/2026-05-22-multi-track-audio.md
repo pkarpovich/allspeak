@@ -219,9 +219,9 @@ Allows post-creation track additions, e.g., Pavel adds RHS dubbing to existing M
 
 ### Task 15: Update documentation
 
-- [ ] update README.md (if it documents session structure) to mention multi-track
-- [ ] update wire protocol comment in `WireProtocol.swift` with new switchTrack command + TrackInfo type
-- [ ] no tests
+- [x] update README.md (if it documents session structure) to mention multi-track
+- [x] update wire protocol comment in `WireProtocol.swift` with new switchTrack command + TrackInfo type
+- [x] no tests
 
 ## Technical Details
 
