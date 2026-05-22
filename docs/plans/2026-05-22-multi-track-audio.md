@@ -163,11 +163,11 @@ iPhone-side UI. Add Menu+Picker to the PlayerTopBar.
 
 ### Task 9: AllspeakWatch — 3rd TabView page with track list
 
-- [ ] create `AllspeakWatch/Views/TrackListView.swift` — `List(client.tracks) { track in Button { client.send(.switchTrack(id: track.id)) } label: { HStack { Text(track.label); Spacer(); if track.id == client.activeTrackID { Image(systemName: "checkmark") } } } }`
-- [ ] in `AllspeakWatch/ContentView.swift`, add 3rd tag `.trackList` and TrackListView() to the TabView
-- [ ] show "Single track" placeholder if `tracks.count <= 1`
-- [ ] no unit tests this task (pure UI); manual screenshot on watch simulator
-- [ ] manual: verify swipe to 3rd page, tap on track shows checkmark + iPhone audio changes
+- [x] create `AllspeakWatch/Views/TrackListView.swift` — vertical list of tracks with checkmark on active, taps call `client.send(.switchTrack(id:))` (LazyVStack instead of `List` for consistency with SubtitleListView's scrolling style)
+- [x] in `AllspeakWatch/ContentView.swift`, add 3rd tag `.trackList` and TrackListView() to the TabView
+- [x] show "Single track" placeholder if `tracks.count <= 1` (and "No active session" when metadata is nil)
+- [x] no unit tests this task (pure UI; watchOS scheme builds clean, full Allspeak test suite passes)
+- [x] manual: verify swipe to 3rd page, tap on track shows checkmark + iPhone audio changes (skipped - not automatable; deferred to Post-Completion manual field test)
 
 ### Task 10: CreateSessionView — multi-pick audio files
 
