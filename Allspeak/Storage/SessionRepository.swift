@@ -9,6 +9,21 @@ struct SessionSnapshot: Equatable, Sendable {
     let srtFilename: String
 }
 
+struct TrackSnapshot: Equatable, Sendable {
+    let id: NSManagedObjectID
+    let trackID: UUID
+    let filename: String
+    let label: String
+    let sortOrder: Int16
+    let isDefault: Bool
+}
+
+enum SessionRepositoryError: Error, Equatable {
+    case sessionNotFound
+    case trackNotFound
+    case lastTrackCannotBeRemoved
+}
+
 final class SessionRepository: @unchecked Sendable {
     private let persistence: PersistenceController
     private let storage: DocumentsStorage
@@ -172,6 +187,114 @@ final class SessionRepository: @unchecked Sendable {
             let object = try context.existingObject(with: id)
             object.setValue(seconds, forKey: "lastPositionSeconds")
             try context.save()
+        }
+    }
+
+    func addTrack(sessionID: NSManagedObjectID, filename: String, label: String) async throws -> NSManagedObjectID {
+        let context = persistence.newBackgroundContext()
+        return try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let existing = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+            let maxOrder = existing.compactMap { $0.value(forKey: "sortOrder") as? Int16 }.max() ?? -1
+            let track = NSEntityDescription.insertNewObject(forEntityName: "AudioTrack", into: context)
+            track.setValue(UUID(), forKey: "id")
+            track.setValue(filename, forKey: "filename")
+            track.setValue(label, forKey: "label")
+            track.setValue(Int16(maxOrder + 1), forKey: "sortOrder")
+            track.setValue(existing.isEmpty, forKey: "isDefault")
+            track.setValue(session, forKey: "session")
+            try context.save()
+            return track.objectID
+        }
+    }
+
+    func removeTrack(id: NSManagedObjectID) async throws {
+        let context = persistence.newBackgroundContext()
+        try await context.perform {
+            let track: NSManagedObject
+            do {
+                track = try context.existingObject(with: id)
+            } catch {
+                throw SessionRepositoryError.trackNotFound
+            }
+            guard let session = track.value(forKey: "session") as? NSManagedObject else {
+                throw SessionRepositoryError.trackNotFound
+            }
+            let siblings = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+            if siblings.count <= 1 {
+                throw SessionRepositoryError.lastTrackCannotBeRemoved
+            }
+            let trackUUID = track.value(forKey: "id") as? UUID
+            let activeID = session.value(forKey: "activeTrackID") as? UUID
+            if let trackUUID, let activeID, trackUUID == activeID {
+                session.setValue(nil, forKey: "activeTrackID")
+            }
+            let wasDefault = (track.value(forKey: "isDefault") as? Bool) ?? false
+            context.delete(track)
+            if wasDefault {
+                let remaining = siblings.filter { $0 != track }
+                if let nextDefault = remaining.min(by: {
+                    let a = ($0.value(forKey: "sortOrder") as? Int16) ?? 0
+                    let b = ($1.value(forKey: "sortOrder") as? Int16) ?? 0
+                    return a < b
+                }) {
+                    nextDefault.setValue(true, forKey: "isDefault")
+                }
+            }
+            try context.save()
+        }
+    }
+
+    func setActiveTrack(sessionID: NSManagedObjectID, trackID: UUID) async throws {
+        let context = persistence.newBackgroundContext()
+        try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let tracks = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+            let match = tracks.first { ($0.value(forKey: "id") as? UUID) == trackID }
+            guard match != nil else {
+                throw SessionRepositoryError.trackNotFound
+            }
+            session.setValue(trackID, forKey: "activeTrackID")
+            try context.save()
+        }
+    }
+
+    func tracks(for sessionID: NSManagedObjectID) async throws -> [TrackSnapshot] {
+        let context = persistence.viewContext
+        return try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let tracks = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+            return tracks.compactMap { obj -> TrackSnapshot? in
+                guard let trackID = obj.value(forKey: "id") as? UUID,
+                      let filename = obj.value(forKey: "filename") as? String,
+                      let label = obj.value(forKey: "label") as? String else { return nil }
+                let sortOrder = (obj.value(forKey: "sortOrder") as? Int16) ?? 0
+                let isDefault = (obj.value(forKey: "isDefault") as? Bool) ?? false
+                return TrackSnapshot(
+                    id: obj.objectID,
+                    trackID: trackID,
+                    filename: filename,
+                    label: label,
+                    sortOrder: sortOrder,
+                    isDefault: isDefault
+                )
+            }
+            .sorted { $0.sortOrder < $1.sortOrder }
         }
     }
 

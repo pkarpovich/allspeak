@@ -129,6 +129,171 @@ struct SessionRepositoryTests {
         #expect(object.value(forKey: "lastPositionSeconds") as? Double == 42.0)
     }
 
+    @Test("addTrack inserts an AudioTrack with sequential sortOrder; first track is default")
+    func addTrackInsertsAndMarksFirstDefault() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "main.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "main.srt", contents: "s")
+        let id = try await repo.importSession(name: "Multi", audioSrc: audio, srtSrc: srt)
+
+        let t1 = try await repo.addTrack(sessionID: id, filename: "loud.m4a", label: "Loudnorm")
+        let t2 = try await repo.addTrack(sessionID: id, filename: "dfn.m4a", label: "DFN v3")
+
+        persistence.viewContext.refreshAllObjects()
+        let first = try persistence.viewContext.existingObject(with: t1)
+        let second = try persistence.viewContext.existingObject(with: t2)
+        #expect(first.value(forKey: "filename") as? String == "loud.m4a")
+        #expect(first.value(forKey: "label") as? String == "Loudnorm")
+        #expect(first.value(forKey: "sortOrder") as? Int16 == 0)
+        #expect(first.value(forKey: "isDefault") as? Bool == true)
+        #expect(second.value(forKey: "sortOrder") as? Int16 == 1)
+        #expect(second.value(forKey: "isDefault") as? Bool == false)
+    }
+
+    @Test("addTrack throws sessionNotFound for an unknown objectID")
+    func addTrackUnknownSession() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        try await repo.delete(id: id)
+
+        await #expect(throws: SessionRepositoryError.sessionNotFound) {
+            _ = try await repo.addTrack(sessionID: id, filename: "x.m4a", label: "X")
+        }
+        _ = persistence
+    }
+
+    @Test("removeTrack deletes when more than one track remains")
+    func removeTrackSucceedsWithSiblings() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        let t1 = try await repo.addTrack(sessionID: id, filename: "t1.m4a", label: "T1")
+        let t2 = try await repo.addTrack(sessionID: id, filename: "t2.m4a", label: "T2")
+
+        try await repo.removeTrack(id: t2)
+        persistence.viewContext.refreshAllObjects()
+        let snaps = try await repo.tracks(for: id)
+        #expect(snaps.count == 1)
+        #expect(snaps.first?.id == t1)
+    }
+
+    @Test("removeTrack promotes a new default when the removed track was default")
+    func removeTrackPromotesNewDefault() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        let t1 = try await repo.addTrack(sessionID: id, filename: "t1.m4a", label: "T1")
+        let t2 = try await repo.addTrack(sessionID: id, filename: "t2.m4a", label: "T2")
+
+        try await repo.removeTrack(id: t1)
+        let snaps = try await repo.tracks(for: id)
+        #expect(snaps.count == 1)
+        #expect(snaps.first?.id == t2)
+        #expect(snaps.first?.isDefault == true)
+    }
+
+    @Test("removeTrack guards the last remaining track")
+    func removeTrackLastGuard() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        let only = try await repo.addTrack(sessionID: id, filename: "only.m4a", label: "Only")
+
+        await #expect(throws: SessionRepositoryError.lastTrackCannotBeRemoved) {
+            try await repo.removeTrack(id: only)
+        }
+        let snaps = try await repo.tracks(for: id)
+        #expect(snaps.count == 1)
+    }
+
+    @Test("removeTrack clears Session.activeTrackID when removing the active track")
+    func removeTrackClearsActive() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        _ = try await repo.addTrack(sessionID: id, filename: "t1.m4a", label: "T1")
+        let t2 = try await repo.addTrack(sessionID: id, filename: "t2.m4a", label: "T2")
+        let t2Snap = try await repo.tracks(for: id).first { $0.id == t2 }
+        let t2UUID = try #require(t2Snap?.trackID)
+        try await repo.setActiveTrack(sessionID: id, trackID: t2UUID)
+
+        try await repo.removeTrack(id: t2)
+        persistence.viewContext.refreshAllObjects()
+        let session = try persistence.viewContext.existingObject(with: id)
+        #expect(session.value(forKey: "activeTrackID") as? UUID == nil)
+    }
+
+    @Test("setActiveTrack stores the UUID on Session.activeTrackID")
+    func setActiveTrackPersists() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        _ = try await repo.addTrack(sessionID: id, filename: "t1.m4a", label: "T1")
+        let t2 = try await repo.addTrack(sessionID: id, filename: "t2.m4a", label: "T2")
+        let snaps = try await repo.tracks(for: id)
+        let t2UUID = try #require(snaps.first { $0.id == t2 }?.trackID)
+
+        try await repo.setActiveTrack(sessionID: id, trackID: t2UUID)
+        persistence.viewContext.refreshAllObjects()
+        let session = try persistence.viewContext.existingObject(with: id)
+        #expect(session.value(forKey: "activeTrackID") as? UUID == t2UUID)
+    }
+
+    @Test("setActiveTrack throws trackNotFound when UUID is not a track of the session")
+    func setActiveTrackUnknown() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        _ = try await repo.addTrack(sessionID: id, filename: "t1.m4a", label: "T1")
+
+        await #expect(throws: SessionRepositoryError.trackNotFound) {
+            try await repo.setActiveTrack(sessionID: id, trackID: UUID())
+        }
+    }
+
+    @Test("tracks(for:) returns snapshots sorted by sortOrder")
+    func tracksReturnsSortedSnapshots() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        _ = try await repo.addTrack(sessionID: id, filename: "alpha.m4a", label: "Alpha")
+        _ = try await repo.addTrack(sessionID: id, filename: "beta.m4a", label: "Beta")
+        _ = try await repo.addTrack(sessionID: id, filename: "gamma.m4a", label: "Gamma")
+
+        let snaps = try await repo.tracks(for: id)
+        #expect(snaps.map(\.label) == ["Alpha", "Beta", "Gamma"])
+        #expect(snaps.map(\.sortOrder) == [0, 1, 2])
+        #expect(snaps.first?.isDefault == true)
+        #expect(snaps.dropFirst().allSatisfy { $0.isDefault == false })
+    }
+
     @Test("objectID from import resolves cleanly on the view context (handoff smoke)")
     func objectIDHandoff() async throws {
         let (repo, persistence, _, root) = makeFixture()

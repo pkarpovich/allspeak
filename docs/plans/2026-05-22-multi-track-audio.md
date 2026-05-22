@@ -90,13 +90,13 @@ Lightweight migration: introduce `AudioTrack` entity, keep `Session.audioFilenam
 
 ### Task 2: SessionRepository — track CRUD
 
-- [ ] add `SessionRepository.addTrack(sessionID:filename:label:)` async method that creates AudioTrack via backgroundContext, appends to session, returns NSManagedObjectID
-- [ ] add `SessionRepository.removeTrack(id:)` — guards against removing the last remaining track
-- [ ] add `SessionRepository.setActiveTrack(sessionID:trackID:)` — updates Session.activeTrackID
-- [ ] add `SessionRepository.tracks(for sessionID:)` — returns sorted [TrackSnapshot] for UI
-- [ ] keep `audioFilename` field functional as legacy fallback (read-only after migration)
-- [ ] write tests: addTrack success + error (session not found), removeTrack with single-remaining track guard, setActiveTrack, tracks ordering by sortOrder
-- [ ] run tests — must pass before next task
+- [x] add `SessionRepository.addTrack(sessionID:filename:label:)` async method that creates AudioTrack via backgroundContext, appends to session, returns NSManagedObjectID
+- [x] add `SessionRepository.removeTrack(id:)` — guards against removing the last remaining track
+- [x] add `SessionRepository.setActiveTrack(sessionID:trackID:)` — updates Session.activeTrackID
+- [x] add `SessionRepository.tracks(for sessionID:)` — returns sorted [TrackSnapshot] for UI
+- [x] keep `audioFilename` field functional as legacy fallback (read-only after migration)
+- [x] write tests: addTrack success + error (session not found), removeTrack with single-remaining track guard, setActiveTrack, tracks ordering by sortOrder
+- [x] run tests — must pass before next task
 
 ### Task 3: DocumentsStorage — per-track files
 
