@@ -49,6 +49,35 @@ final class PersistenceController: @unchecked Sendable {
         container.viewContext.name = "ViewContext"
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyStoreTrump
+
+        Self.backfillDefaultTracks(in: container)
+    }
+
+    static func backfillDefaultTracks(in container: NSPersistentContainer) {
+        let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergePolicy.mergeByPropertyStoreTrump
+        context.performAndWait {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
+            guard let sessions = try? context.fetch(request) else { return }
+            var didChange = false
+            for session in sessions {
+                let existing = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+                if !existing.isEmpty { continue }
+                guard let audioFilename = session.value(forKey: "audioFilename") as? String,
+                      !audioFilename.isEmpty else { continue }
+                let track = NSEntityDescription.insertNewObject(forEntityName: "AudioTrack", into: context)
+                track.setValue(UUID(), forKey: "id")
+                track.setValue(audioFilename, forKey: "filename")
+                track.setValue("Original", forKey: "label")
+                track.setValue(Int16(0), forKey: "sortOrder")
+                track.setValue(true, forKey: "isDefault")
+                track.setValue(session, forKey: "session")
+                didChange = true
+            }
+            if didChange {
+                try? context.save()
+            }
+        }
     }
 
     func newBackgroundContext() -> NSManagedObjectContext {

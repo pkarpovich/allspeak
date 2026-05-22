@@ -80,13 +80,13 @@ Driven by real test: Pavel ended up with 5 candidate audio files for The Mandalo
 
 Lightweight migration: introduce `AudioTrack` entity, keep `Session.audioFilename` field initially for backwards compat, then a deriveTrackFromAudioFilename migration step populates an AudioTrack record.
 
-- [ ] open `Allspeak.xcdatamodeld`, create new model version `Allspeak v2`
-- [ ] add `AudioTrack` entity: `id: UUID`, `filename: String`, `label: String`, `sortOrder: Int16`, `session: Session` (to-one inverse), `isDefault: Bool`
-- [ ] add `Session.tracks: [AudioTrack]` to-many relationship (cascade delete)
-- [ ] add `Session.activeTrackID: UUID?` attribute (nil = use isDefault track)
-- [ ] mark Allspeak v2 as current model in xcdatamodeld
-- [ ] write Swift Testing test: load test bundle with old v1 store, verify migration creates one AudioTrack per session with `label="Original"`, `isDefault=true`, `filename=oldAudioFilename`
-- [ ] run tests — must pass before next task
+- [x] open `Allspeak.xcdatamodeld`, create new model version `Allspeak v2`
+- [x] add `AudioTrack` entity: `id: UUID`, `filename: String`, `label: String`, `sortOrder: Int16`, `session: Session` (to-one inverse), `isDefault: Bool`
+- [x] add `Session.tracks: [AudioTrack]` to-many relationship (cascade delete)
+- [x] add `Session.activeTrackID: UUID?` attribute (nil = use isDefault track)
+- [x] mark Allspeak v2 as current model in xcdatamodeld
+- [x] write Swift Testing test: load test bundle with old v1 store, verify migration creates one AudioTrack per session with `label="Original"`, `isDefault=true`, `filename=oldAudioFilename` (implemented as runtime backfill test in PersistenceControllerTests)
+- [x] run tests — must pass before next task
 
 ### Task 2: SessionRepository — track CRUD
 
