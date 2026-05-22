@@ -305,9 +305,70 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func addTrackImporting(
+        sessionID: NSManagedObjectID,
+        srcURL: URL,
+        label: String
+    ) async throws -> NSManagedObjectID {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+
+        let sessionUUID: UUID = try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = session.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            return uuid
+        }
+
+        let trackID = UUID()
+        let originalFilename = srcURL.lastPathComponent
+        let trackFilename = DocumentsStorage.trackFilename(
+            trackID: trackID,
+            originalFilename: originalFilename
+        )
+
+        let copiedURL = try storage.copyIntoSession(
+            srcURL: srcURL,
+            sessionID: sessionUUID,
+            as: trackFilename
+        )
+
+        do {
+            return try await context.perform {
+                let session: NSManagedObject
+                do {
+                    session = try context.existingObject(with: sessionID)
+                } catch {
+                    throw SessionRepositoryError.sessionNotFound
+                }
+                let existing = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+                let maxOrder = existing.compactMap { $0.value(forKey: "sortOrder") as? Int16 }.max() ?? -1
+                let track = NSEntityDescription.insertNewObject(forEntityName: "AudioTrack", into: context)
+                track.setValue(trackID, forKey: "id")
+                track.setValue(originalFilename, forKey: "filename")
+                track.setValue(label, forKey: "label")
+                track.setValue(Int16(maxOrder + 1), forKey: "sortOrder")
+                track.setValue(existing.isEmpty, forKey: "isDefault")
+                track.setValue(session, forKey: "session")
+                try context.save()
+                return track.objectID
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: copiedURL)
+            throw error
+        }
+    }
+
     func removeTrack(id: NSManagedObjectID) async throws {
         let context = persistence.newBackgroundContext()
-        try await context.perform {
+        let storage = self.storage
+        let cleanup: (UUID, UUID, String)? = try await context.perform {
             let track: NSManagedObject
             do {
                 track = try context.existingObject(with: id)
@@ -322,6 +383,8 @@ final class SessionRepository: @unchecked Sendable {
                 throw SessionRepositoryError.lastTrackCannotBeRemoved
             }
             let trackUUID = track.value(forKey: "id") as? UUID
+            let trackFilename = track.value(forKey: "filename") as? String
+            let sessionUUID = session.value(forKey: "id") as? UUID
             let activeID = session.value(forKey: "activeTrackID") as? UUID
             if let trackUUID, let activeID, trackUUID == activeID {
                 session.setValue(nil, forKey: "activeTrackID")
@@ -339,6 +402,17 @@ final class SessionRepository: @unchecked Sendable {
                 }
             }
             try context.save()
+            if let sessionUUID, let trackUUID, let trackFilename {
+                return (sessionUUID, trackUUID, trackFilename)
+            }
+            return nil
+        }
+        if let (sessionUUID, trackUUID, trackFilename) = cleanup {
+            try? storage.removeTrackFile(
+                sessionID: sessionUUID,
+                trackID: trackUUID,
+                originalFilename: trackFilename
+            )
         }
     }
 

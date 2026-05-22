@@ -185,12 +185,12 @@ Existing UI picks one audio file. New: pick array of audio files, each becomes a
 
 Allows post-creation track additions, e.g., Pavel adds RHS dubbing to existing Mandalorian session.
 
-- [ ] create `Allspeak/Views/Sessions/SessionEditView.swift` — list of existing tracks with delete swipe, plus "Add track" button
-- [ ] add button opens file picker → label prompt → SessionRepository.addTrack
-- [ ] delete swipe → SessionRepository.removeTrack (guard if last remaining)
-- [ ] navigation to SessionEditView from SessionCardView via context menu or trailing toolbar item
-- [ ] write tests for the view model: add flow, delete flow, last-track guard
-- [ ] run tests — must pass before next task
+- [x] create `Allspeak/Views/Sessions/SessionEditView.swift` — list of existing tracks with delete swipe, plus "Add track" button
+- [x] add button opens file picker → label prompt → SessionRepository.addTrack (uses new `addTrackImporting` repo method that copies the file + inserts atomically)
+- [x] delete swipe → SessionRepository.removeTrack (guard if last remaining; repo cleanup now also removes the on-disk track file)
+- [x] navigation to SessionEditView from SessionCardView via context menu (new "Tracks" item in `SessionsView` swiped/long-press menu, opens as sheet)
+- [x] write tests for the view model: add flow, delete flow, last-track guard (SessionEditViewModelTests)
+- [x] run tests — must pass before next task
 
 ### Task 12: NowPlayingCenter title update
 
