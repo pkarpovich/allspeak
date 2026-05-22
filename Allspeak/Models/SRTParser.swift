@@ -1,6 +1,19 @@
 import Foundation
 
 enum SRTParser {
+    static func read(at url: URL) throws -> String {
+        if let utf8 = try? String(contentsOf: url, encoding: .utf8) {
+            return utf8
+        }
+        for encoding: String.Encoding in [.windowsCP1252, .windowsCP1251, .isoLatin1] {
+            if let text = try? String(contentsOf: url, encoding: encoding) {
+                return text
+            }
+        }
+        var usedEncoding: String.Encoding = .utf8
+        return try String(contentsOf: url, usedEncoding: &usedEncoding)
+    }
+
     static func parse(_ raw: String) -> [Subtitle] {
         var text = raw
         if text.hasPrefix("\u{FEFF}") {

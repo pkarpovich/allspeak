@@ -979,6 +979,124 @@ struct WatchSessionClientTests {
         #expect(decoded == .switchTrack(id: trackID))
     }
 
+    @Test("handleReceivedApplicationContext sends requestCueBundle on cache miss")
+    func receiveApplicationContextRequestsBundleOnCacheMiss() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 7,
+            title: "Missing",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(client.cues == [])
+        #expect(sender.sentMessages.count == 1)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[0])
+        #expect(decoded == .requestCueBundle(sessionID: sessionID, revision: 7))
+    }
+
+    @Test("handleReceivedApplicationContext does not request bundle when cueCount is zero")
+    func receiveApplicationContextSkipsRequestForEmptyCueCount() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "No cues",
+            duration: 60,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("handleReceivedApplicationContext does not request bundle when cache hits")
+    func receiveApplicationContextSkipsRequestWhenCacheHits() async throws {
+        let (_, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let cache = try CueCache(baseURL: dir)
+        try cache.save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
+
+        let warmClient = WatchSessionClient(sender: sender, cache: cache)
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Cached",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        warmClient.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(warmClient.cues == Self.cues)
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("handleReceivedApplicationContext deduplicates requests for the same revision")
+    func receiveApplicationContextDeduplicatesRequest() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 3,
+            title: "Missing",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(sender.sentMessages.count == 1)
+    }
+
+    @Test("requestCueBundle send error clears dedup key, allowing later retry")
+    func requestCueBundleErrorClearsDedupKey() async throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 4,
+            title: "Missing",
+            duration: 60,
+            cueCount: Self.cues.count,
+            isPlaying: false,
+            currentTime: 0
+        )
+
+        sender.nextError = WatchMessageError.notReachable
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        #expect(sender.sentMessages.count == 1)
+
+        try await Task.sleep(for: .milliseconds(50))
+
+        sender.nextError = nil
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(sender.sentMessages.count == 2)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[1])
+        #expect(decoded == .requestCueBundle(sessionID: sessionID, revision: 4))
+    }
+
     @Test("file-receive revision bump preserves tracks and activeTrackID")
     func fileReceiveRevisionBumpPreservesTracks() async throws {
         let (client, _, dir) = try makeClient()

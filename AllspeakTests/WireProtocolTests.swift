@@ -13,6 +13,10 @@ struct WireProtocolTests {
         WatchCommand.skip(seconds: -2.5),
         WatchCommand.seek(time: 123.456),
         WatchCommand.switchTrack(id: UUID(uuidString: "D8C7A5C2-7C5B-4D52-9F2A-1F0B58F6A111")!),
+        WatchCommand.requestCueBundle(
+            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000001")!,
+            revision: 42
+        ),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()

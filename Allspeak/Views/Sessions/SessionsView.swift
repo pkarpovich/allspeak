@@ -149,7 +149,10 @@ struct SessionsView: View {
         guard !trimmed.isEmpty else { return }
         let repo = repository
         let id = target.id
-        Task { try? await repo.rename(id: id, to: trimmed) }
+        Task {
+            try? await repo.rename(id: id, to: trimmed)
+            await PlaybackCoordinator.shared.refreshIfActive(sessionID: id)
+        }
     }
 }
 

@@ -28,6 +28,7 @@ final class PlaybackCoordinator {
     private var isSwitching: Bool = false
     private var repository: SessionRepository?
     private var storage: DocumentsStorage = .default
+    private var persistence: PersistenceController = .shared
 
     private init() {}
 
@@ -118,7 +119,7 @@ final class PlaybackCoordinator {
 
         let cues: [Subtitle]
         do {
-            let srtText = try Self.readSubtitleText(at: srtURL)
+            let srtText = try SRTParser.read(at: srtURL)
             cues = SRTParser.parse(srtText)
         } catch {
             throw StartError.loadFailed
@@ -147,6 +148,7 @@ final class PlaybackCoordinator {
         self.activeTrackID = selectedTrack?.trackID
         self.repository = repository
         self.storage = storage
+        self.persistence = persistence
         self.revision += 1
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
@@ -196,6 +198,121 @@ final class PlaybackCoordinator {
         #endif
     }
 
+    func refreshIfActive(sessionID: NSManagedObjectID) async {
+        guard self.sessionID == sessionID, let controller = controller, let sessionUUID else { return }
+
+        let storage = self.storage
+        let context = persistence.viewContext
+        struct TrackSnap: Sendable {
+            let trackID: UUID
+            let filename: String
+            let label: String
+            let sortOrder: Int16
+            let isDefault: Bool
+        }
+        struct Snap: Sendable {
+            let name: String
+            let srtFilename: String
+            let activeTrackID: UUID?
+            let tracks: [TrackSnap]
+        }
+
+        let snap: Snap
+        do {
+            snap = try await context.perform {
+                let object = try context.existingObject(with: sessionID)
+                let name = (object.value(forKey: "name") as? String) ?? ""
+                let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
+                let activeID = object.value(forKey: "activeTrackID") as? UUID
+                let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+                let trackSnaps: [TrackSnap] = raw.compactMap { obj in
+                    guard let id = obj.value(forKey: "id") as? UUID,
+                          let fn = obj.value(forKey: "filename") as? String,
+                          let label = obj.value(forKey: "label") as? String else { return nil }
+                    let order = (obj.value(forKey: "sortOrder") as? Int16) ?? 0
+                    let isDefault = (obj.value(forKey: "isDefault") as? Bool) ?? false
+                    return TrackSnap(trackID: id, filename: fn, label: label, sortOrder: order, isDefault: isDefault)
+                }
+                .sorted { $0.sortOrder < $1.sortOrder }
+                return Snap(name: name, srtFilename: srt, activeTrackID: activeID, tracks: trackSnaps)
+            }
+        } catch {
+            return
+        }
+
+        guard self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
+            return
+        }
+
+        let selectedTrack: TrackSnap?
+        if let activeID = snap.activeTrackID, let match = snap.tracks.first(where: { $0.trackID == activeID }) {
+            selectedTrack = match
+        } else if let defaultTrack = snap.tracks.first(where: { $0.isDefault }) {
+            selectedTrack = defaultTrack
+        } else {
+            selectedTrack = snap.tracks.first
+        }
+        let trackLabel: String? = (snap.tracks.count > 1) ? selectedTrack?.label : nil
+
+        let previousActiveTrackID = self.activeTrackID
+        sessionTitle = snap.name
+        tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
+        activeTrackID = selectedTrack?.trackID
+
+        if let selectedTrack, previousActiveTrackID != selectedTrack.trackID {
+            let capturedTime = controller.currentTime
+            let wasPlaying = controller.isPlaying
+            let cues = controller.subtitles
+            let newURL = Self.resolveTrackURL(
+                storage: storage,
+                sessionUUID: sessionUUID,
+                trackID: selectedTrack.trackID,
+                filename: selectedTrack.filename
+            )
+            controller.pause()
+            do {
+                try controller.load(audio: newURL, subtitles: cues, title: snap.name, trackLabel: trackLabel)
+                let safeSeek = min(capturedTime, controller.duration)
+                if safeSeek > 0 {
+                    controller.seek(to: safeSeek)
+                }
+                if wasPlaying {
+                    controller.play()
+                }
+                if snap.activeTrackID != selectedTrack.trackID, let repository {
+                    try? await repository.setActiveTrack(sessionID: sessionID, trackID: selectedTrack.trackID)
+                    guard self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
+                        return
+                    }
+                }
+            } catch {
+                if self.sessionID == sessionID, self.controller === controller {
+                    endSession()
+                }
+                return
+            }
+        }
+
+        let dir = storage.sessionDir(for: sessionUUID)
+        let srtURL = dir.appendingPathComponent(snap.srtFilename)
+        var cuesChanged = false
+        if let srtText = try? SRTParser.read(at: srtURL) {
+            let newCues = SRTParser.parse(srtText)
+            if !newCues.isEmpty, newCues != controller.subtitles {
+                controller.replaceSubtitles(newCues)
+                cuesChanged = true
+            }
+        }
+
+        controller.refreshNowPlaying(title: snap.name, trackLabel: trackLabel)
+        if cuesChanged {
+            revision += 1
+        }
+        #if os(iOS)
+        WatchSessionHost.shared.broadcastCurrentSession()
+        #endif
+    }
+
     func switchTrack(to trackID: UUID) async throws {
         guard let controller, let sessionUUID else {
             throw SwitchError.noActiveSession
@@ -233,6 +350,8 @@ final class PlaybackCoordinator {
             throw SwitchError.noActiveSession
         }
 
+        let previousActiveTrackID = activeTrackID
+        activeTrackID = trackID
         controller.pause()
         let newURL = Self.resolveTrackURL(
             storage: storage,
@@ -244,13 +363,13 @@ final class PlaybackCoordinator {
         do {
             try controller.load(audio: newURL, subtitles: cues, title: sessionTitle, trackLabel: trackLabel)
         } catch {
+            activeTrackID = previousActiveTrackID
             throw SwitchError.loadFailed
         }
         controller.seek(to: capturedTime)
         if wasPlaying {
             controller.play()
         }
-        activeTrackID = trackID
         if let repository, let sessionID {
             try? await repository.setActiveTrack(sessionID: sessionID, trackID: trackID)
         }
@@ -350,19 +469,9 @@ final class PlaybackCoordinator {
             Task { [weak self] in
                 try? await self?.switchTrack(to: id)
             }
+        case .requestCueBundle:
+            break
         }
     }
 
-    private static func readSubtitleText(at url: URL) throws -> String {
-        if let utf8 = try? String(contentsOf: url, encoding: .utf8) {
-            return utf8
-        }
-        for encoding: String.Encoding in [.windowsCP1252, .windowsCP1251, .isoLatin1] {
-            if let text = try? String(contentsOf: url, encoding: encoding) {
-                return text
-            }
-        }
-        var usedEncoding: String.Encoding = .utf8
-        return try String(contentsOf: url, usedEncoding: &usedEncoding)
-    }
 }

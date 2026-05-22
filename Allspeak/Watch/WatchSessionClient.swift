@@ -23,6 +23,7 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var interpolationTimer: Timer?
+    @ObservationIgnored private var lastRequestedBundleKey: (sessionID: UUID, revision: Int)?
     #if os(watchOS)
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
@@ -115,6 +116,13 @@ final class WatchSessionClient: NSObject {
     }
 
     func send(_ command: WatchCommand) {
+        sendCommand(command, errorHandler: { _ in })
+    }
+
+    private func sendCommand(
+        _ command: WatchCommand,
+        errorHandler: @escaping @Sendable (Error) -> Void
+    ) {
         guard let payload = try? command.toPropertyList() else { return }
         let replyHandler: @Sendable ([String: Any]) -> Void = { [weak self] reply in
             let bridge = SendableDictionary(value: reply)
@@ -123,7 +131,6 @@ final class WatchSessionClient: NSObject {
                 self.handleReceivedSnapshot(bridge.value)
             }
         }
-        let errorHandler: @Sendable (Error) -> Void = { _ in }
         sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
     }
 
@@ -148,6 +155,7 @@ final class WatchSessionClient: NSObject {
             self.metadata = nil
             self.cues = []
             self.lastSnapshot = nil
+            self.lastRequestedBundleKey = nil
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
@@ -163,6 +171,41 @@ final class WatchSessionClient: NSObject {
         } else if sessionChanged || revisionChanged {
             self.cues = []
         }
+        if cues.isEmpty && meta.cueCount > 0 {
+            requestCueBundleIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
+        }
+    }
+
+    private func requestCueBundleIfNeeded(sessionID: UUID, revision: Int) {
+        if let last = lastRequestedBundleKey,
+           last.sessionID == sessionID,
+           last.revision == revision {
+            return
+        }
+        lastRequestedBundleKey = (sessionID, revision)
+        sendCommand(.requestCueBundle(sessionID: sessionID, revision: revision)) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if let last = self.lastRequestedBundleKey,
+                   last.sessionID == sessionID,
+                   last.revision == revision {
+                    self.lastRequestedBundleKey = nil
+                }
+            }
+        }
+    }
+
+    private func retryPendingCueBundleRequestIfNeeded() {
+        guard cues.isEmpty,
+              let meta = metadata,
+              meta.cueCount > 0
+        else { return }
+        if let last = lastRequestedBundleKey,
+           last.sessionID == meta.sessionID,
+           last.revision == meta.revision {
+            lastRequestedBundleKey = nil
+        }
+        requestCueBundleIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
     }
 
     func handleReceivedFile(at url: URL, metadata fileMetadata: [String: Any]) {
@@ -258,6 +301,9 @@ extension WatchSessionClient: WCSessionDelegate {
         let reachable = session.isReachable
         Task { @MainActor in
             self.isConnected = reachable
+            if reachable {
+                self.retryPendingCueBundleRequestIfNeeded()
+            }
         }
     }
 
@@ -265,6 +311,9 @@ extension WatchSessionClient: WCSessionDelegate {
         let reachable = session.isReachable
         Task { @MainActor in
             self.isConnected = reachable
+            if reachable {
+                self.retryPendingCueBundleRequestIfNeeded()
+            }
         }
     }
 

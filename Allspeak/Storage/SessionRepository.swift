@@ -23,6 +23,7 @@ enum SessionRepositoryError: Error, Equatable {
     case trackNotFound
     case lastTrackCannotBeRemoved
     case noAudioSources
+    case invalidSubtitle
 }
 
 struct PendingTrackImport: Sendable, Equatable {
@@ -104,6 +105,18 @@ final class SessionRepository: @unchecked Sendable {
 
         do {
             try storage.copyIntoSession(srcURL: srtSrc, sessionID: sessionUUID, as: srtName)
+            let copiedSrtURL = storage.sessionDir(for: sessionUUID).appendingPathComponent(srtName)
+            do {
+                let srtText = try SRTParser.read(at: copiedSrtURL)
+                let cues = SRTParser.parse(srtText)
+                guard !cues.isEmpty else {
+                    throw SessionRepositoryError.invalidSubtitle
+                }
+            } catch let error as SessionRepositoryError {
+                throw error
+            } catch {
+                throw SessionRepositoryError.invalidSubtitle
+            }
             for source in audioSources {
                 let trackID = UUID()
                 let original = source.url.lastPathComponent
@@ -195,15 +208,7 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
-    func replaceAudio(id: NSManagedObjectID, srcURL: URL) async throws {
-        try await replaceFile(id: id, srcURL: srcURL, attribute: "audioFilename")
-    }
-
     func replaceSubtitle(id: NSManagedObjectID, srcURL: URL) async throws {
-        try await replaceFile(id: id, srcURL: srcURL, attribute: "srtFilename")
-    }
-
-    private func replaceFile(id: NSManagedObjectID, srcURL: URL, attribute: String) async throws {
         let context = persistence.newBackgroundContext()
         let storage = self.storage
         let newName = srcURL.lastPathComponent
@@ -212,7 +217,7 @@ final class SessionRepository: @unchecked Sendable {
             guard let sessionID = object.value(forKey: "id") as? UUID else {
                 throw CocoaError(.fileNoSuchFile)
             }
-            let prior = object.value(forKey: attribute) as? String
+            let prior = object.value(forKey: "srtFilename") as? String
             return (sessionID, prior)
         }
 
@@ -228,7 +233,19 @@ final class SessionRepository: @unchecked Sendable {
         }
         if scoped { srcURL.stopAccessingSecurityScopedResource() }
 
-        let newDuration: Double? = attribute == "audioFilename" ? await Self.readDuration(at: stagedURL) : nil
+        do {
+            let stagedText = try SRTParser.read(at: stagedURL)
+            let cues = SRTParser.parse(stagedText)
+            guard !cues.isEmpty else {
+                try? FileManager.default.removeItem(at: stagedURL)
+                throw SessionRepositoryError.invalidSubtitle
+            }
+        } catch let error as SessionRepositoryError {
+            throw error
+        } catch {
+            try? FileManager.default.removeItem(at: stagedURL)
+            throw SessionRepositoryError.invalidSubtitle
+        }
 
         let finalURL = dir.appendingPathComponent(newName)
         let backupName = "backup-\(UUID().uuidString)"
@@ -245,36 +262,11 @@ final class SessionRepository: @unchecked Sendable {
             throw error
         }
 
-        let updatedTrack: (UUID, String)?
         do {
-            updatedTrack = try await context.perform {
+            try await context.perform {
                 let object = try context.existingObject(with: id)
-                object.setValue(newName, forKey: attribute)
-                var result: (UUID, String)?
-                if attribute == "audioFilename" {
-                    if let newDuration {
-                        object.setValue(newDuration, forKey: "durationSeconds")
-                    }
-                    let tracks = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
-                    let activeID = object.value(forKey: "activeTrackID") as? UUID
-                    let activeMatch = tracks.first { ($0.value(forKey: "id") as? UUID) == activeID }
-                    let defaultMatch = tracks.first { ($0.value(forKey: "isDefault") as? Bool) == true }
-                    let firstBySort = tracks.min {
-                        let a = ($0.value(forKey: "sortOrder") as? Int16) ?? 0
-                        let b = ($1.value(forKey: "sortOrder") as? Int16) ?? 0
-                        return a < b
-                    }
-                    if let target = activeMatch ?? defaultMatch ?? firstBySort {
-                        let priorFilename = target.value(forKey: "filename") as? String
-                        let trackID = target.value(forKey: "id") as? UUID
-                        target.setValue(newName, forKey: "filename")
-                        if let trackID, let priorFilename {
-                            result = (trackID, priorFilename)
-                        }
-                    }
-                }
+                object.setValue(newName, forKey: "srtFilename")
                 try context.save()
-                return result
             }
         } catch {
             if let backupURL, FileManager.default.fileExists(atPath: backupURL.path) {
@@ -292,13 +284,6 @@ final class SessionRepository: @unchecked Sendable {
         if let oldName, oldName != newName {
             let oldURL = dir.appendingPathComponent(oldName)
             try? FileManager.default.removeItem(at: oldURL)
-        }
-        if let (trackID, priorFilename) = updatedTrack {
-            try? storage.removeTrackFile(
-                sessionID: sessionID,
-                trackID: trackID,
-                originalFilename: priorFilename
-            )
         }
     }
 

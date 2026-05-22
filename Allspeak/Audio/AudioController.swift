@@ -130,6 +130,19 @@ final class AudioController {
         updateIndexIfNeeded()
     }
 
+    func replaceSubtitles(_ newCues: [Subtitle]) {
+        subtitles = newCues
+        currentIndex = Self.index(at: currentTime, in: newCues)
+    }
+
+    func refreshNowPlaying(title: String, trackLabel: String?) {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        guard player != nil else { return }
+        NowPlayingCenter.shared.setMetadata(title: title, duration: duration, trackLabel: trackLabel)
+        NowPlayingCenter.shared.updateTime(currentTime, isPlaying: isPlaying)
+        #endif
+    }
+
     nonisolated static func index(at time: TimeInterval, in cues: [Subtitle]) -> Int {
         guard !cues.isEmpty else { return 0 }
         if time < cues[0].start { return 0 }

@@ -445,6 +445,191 @@ struct WatchSessionHostTests {
         #expect(snapshot.sessionID == fixture.sessionUUID)
     }
 
+    @Test("broadcastCurrentSession skips re-sending the cue bundle when revision is unchanged")
+    func broadcastCurrentSessionDeduplicatesBundleByRevision() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+    }
+
+    @Test("broadcastCurrentSession does not cache the bundle key when sendFile reports failure")
+    func broadcastCurrentSessionRetriesAfterFailedSend() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var attempts: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { attempts.append($0); return false }
+        )
+        #expect(attempts.count == 1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { attempts.append($0); return true }
+        )
+        #expect(attempts.count == 2)
+    }
+
+    @Test("handleFileTransferFailure clears dedupe key so next broadcast retries")
+    func handleFileTransferFailureClearsDedupe() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.handleFileTransferFailure(metadata: [
+            "sessionID": bundles[0].sessionID.uuidString,
+            "revision": bundles[0].revision,
+        ])
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 2)
+    }
+
+    @Test("handleFileTransferFailure ignores metadata for a different revision")
+    func handleFileTransferFailureIgnoresStaleMetadata() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.handleFileTransferFailure(metadata: [
+            "sessionID": bundles[0].sessionID.uuidString,
+            "revision": bundles[0].revision - 1,
+        ])
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+    }
+
+    @Test("handleCueBundleRequest clears dedupe so next broadcast resends")
+    func handleCueBundleRequestForcesResend() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+        let key = (bundles[0].sessionID, bundles[0].revision)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.handleCueBundleRequest(sessionID: key.0, revision: key.1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 2)
+    }
+
+    @Test("handleCueBundleRequest does not clear dedupe for stale key")
+    func handleCueBundleRequestIgnoresStaleKey() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+        let key = (bundles[0].sessionID, bundles[0].revision)
+
+        host.handleCueBundleRequest(sessionID: UUID(), revision: key.1)
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+    }
+
+    @Test("dispatch(.requestCueBundle) routes through handleCueBundleRequest")
+    func dispatchRequestCueBundleRoutes() async throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+        let bundle = bundles[0]
+
+        _ = await host.dispatch(.requestCueBundle(sessionID: bundle.sessionID, revision: bundle.revision))
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 2)
+    }
+
     @Test("broadcastCurrentSession without active session sends nothing")
     func broadcastCurrentSessionNoSession() {
         let coordinator = PlaybackCoordinator.shared

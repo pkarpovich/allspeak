@@ -18,6 +18,10 @@ import Foundation
 //   .switchTrack(id:)                 swap active AudioTrack on the host
 //                                     session (preserves currentTime +
 //                                     isPlaying; ~100-300ms reload gap)
+//   .requestCueBundle(sessionID:,     watch-initiated resync after a cache
+//                     revision:)      miss (watch app reset / Application
+//                                     Support cleanup); host clears its
+//                                     dedup key and rebroadcasts the bundle
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -76,12 +80,15 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case skip(seconds: Double)
     case seek(time: Double)
     case switchTrack(id: UUID)
+    case requestCueBundle(sessionID: UUID, revision: Int)
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case seconds
         case time
         case trackID
+        case sessionID
+        case revision
     }
 
     private enum Kind: String, Codable {
@@ -91,6 +98,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case skip
         case seek
         case switchTrack
+        case requestCueBundle
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -111,6 +119,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .switchTrack(let id):
             try container.encode(Kind.switchTrack, forKey: .kind)
             try container.encode(id, forKey: .trackID)
+        case .requestCueBundle(let sessionID, let revision):
+            try container.encode(Kind.requestCueBundle, forKey: .kind)
+            try container.encode(sessionID, forKey: .sessionID)
+            try container.encode(revision, forKey: .revision)
         }
     }
 
@@ -130,6 +142,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .seek(time: try container.decode(Double.self, forKey: .time))
         case .switchTrack:
             self = .switchTrack(id: try container.decode(UUID.self, forKey: .trackID))
+        case .requestCueBundle:
+            self = .requestCueBundle(
+                sessionID: try container.decode(UUID.self, forKey: .sessionID),
+                revision: try container.decode(Int.self, forKey: .revision)
+            )
         }
     }
 }

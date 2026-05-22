@@ -43,6 +43,7 @@ final class SessionEditViewModel {
             )
             errorMessage = nil
             await reload()
+            await PlaybackCoordinator.shared.refreshIfActive(sessionID: sessionID)
         } catch {
             errorMessage = "Couldn't add track: \(error.localizedDescription)"
         }
@@ -59,6 +60,7 @@ final class SessionEditViewModel {
             try await repository.removeTrack(id: id)
             errorMessage = nil
             await reload()
+            await PlaybackCoordinator.shared.refreshIfActive(sessionID: sessionID)
         } catch SessionRepositoryError.lastTrackCannotBeRemoved {
             errorMessage = "Can't remove the only remaining track"
             await reload()

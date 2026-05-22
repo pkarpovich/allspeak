@@ -24,9 +24,15 @@ struct SessionEditViewModelTests {
         return url
     }
 
+    private static let sampleSRT = """
+    1
+    00:00:00,000 --> 00:00:01,000
+    hello
+    """
+
     private func importMultiTrack(repo: SessionRepository, root: URL, labels: [String]) async throws -> NSManagedObjectID {
         let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
-        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "s")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
         var imports: [PendingTrackImport] = []
         for (index, label) in labels.enumerated() {
             let audio = try writeSourceFile(

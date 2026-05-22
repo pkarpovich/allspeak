@@ -23,6 +23,12 @@ struct SessionRepositoryTests {
         return url
     }
 
+    private static let sampleSRT = """
+    1
+    00:00:00,000 --> 00:00:01,000
+    hello
+    """
+
     private func fetchAllSessions(in controller: PersistenceController) throws -> [NSManagedObject] {
         let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
         return try controller.viewContext.fetch(request)
@@ -302,7 +308,7 @@ struct SessionRepositoryTests {
         let a1 = try writeSourceFile(in: srcDir, name: "loud.m4a", contents: "a1")
         let a2 = try writeSourceFile(in: srcDir, name: "dfn.m4a", contents: "a2")
         let a3 = try writeSourceFile(in: srcDir, name: "rhs.m4a", contents: "a3")
-        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "s")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
 
         let id = try await repo.importMultiTrackSession(
             name: "Mando",
@@ -363,7 +369,7 @@ struct SessionRepositoryTests {
         let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
         let a1 = try writeSourceFile(in: srcDir, name: "primary.m4a", contents: "1")
         let a2 = try writeSourceFile(in: srcDir, name: "alt.m4a", contents: "2")
-        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "s")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
 
         var form = CreateSessionFormState(name: "  Multi  ", srtURL: srt)
         form.appendPendingTracks(from: [a1, a2])

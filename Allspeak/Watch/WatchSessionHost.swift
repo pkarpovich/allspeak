@@ -9,6 +9,7 @@ final class WatchSessionHost: NSObject {
     private let coordinator: PlaybackCoordinator
     private let broadcastGate: SnapshotBroadcastGate
     private var session: WCSession?
+    private var lastSentBundleKey: (sessionID: UUID, revision: Int)?
 
     init(
         coordinator: PlaybackCoordinator = .shared,
@@ -42,21 +43,26 @@ final class WatchSessionHost: NSObject {
                 try? session.updateApplicationContext(payload)
             },
             sendFile: { [weak self] bundle in
-                self?.sendCueBundle(bundle)
+                self?.sendCueBundle(bundle) ?? false
             }
         )
     }
 
     func broadcastCurrentSession(
         sendContext: ([String: Any]) -> Void,
-        sendFile: ((CueBundle) -> Void)? = nil
+        sendFile: ((CueBundle) -> Bool)? = nil
     ) {
         if let metadata = coordinator.currentMetadata(),
            let payload = try? metadata.toPropertyList() {
             sendContext(payload)
         }
         if let bundle = coordinator.currentCueBundle(), let sendFile {
-            sendFile(bundle)
+            let key = (bundle.sessionID, bundle.revision)
+            if lastSentBundleKey?.sessionID != key.0 || lastSentBundleKey?.revision != key.1 {
+                if sendFile(bundle) {
+                    lastSentBundleKey = key
+                }
+            }
         }
     }
 
@@ -67,13 +73,15 @@ final class WatchSessionHost: NSObject {
     }
 
     func broadcastSessionEnded() {
+        lastSentBundleKey = nil
         guard let session, session.activationState == .activated else { return }
         try? session.updateApplicationContext(SessionEndedSignal.propertyList())
     }
 
-    func sendCueBundle(_ bundle: CueBundle) {
-        guard let session, session.activationState == .activated else { return }
-        guard let data = try? bundle.compressed() else { return }
+    @discardableResult
+    func sendCueBundle(_ bundle: CueBundle) -> Bool {
+        guard let session, session.activationState == .activated else { return false }
+        guard let data = try? bundle.compressed() else { return false }
         let unique = UUID().uuidString.prefix(8)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "cuebundle-\(bundle.sessionID.uuidString)-\(bundle.revision)-\(unique).gz"
@@ -81,23 +89,48 @@ final class WatchSessionHost: NSObject {
         do {
             try data.write(to: url, options: .atomic)
         } catch {
-            return
+            return false
         }
         let meta: [String: Any] = [
             "sessionID": bundle.sessionID.uuidString,
             "revision": bundle.revision,
         ]
         session.transferFile(url, metadata: meta)
+        return true
+    }
+
+    func handleFileTransferFailure(metadata fileMetadata: [String: Any]?) {
+        guard
+            let fileMetadata,
+            let sessionIDString = fileMetadata["sessionID"] as? String,
+            let sessionID = UUID(uuidString: sessionIDString),
+            let revision = fileMetadata["revision"] as? Int,
+            let cached = lastSentBundleKey,
+            cached.sessionID == sessionID,
+            cached.revision == revision
+        else { return }
+        lastSentBundleKey = nil
     }
 
     func dispatch(_ command: WatchCommand) async -> PlaybackSnapshot {
         switch command {
         case .switchTrack(let id):
             try? await coordinator.switchTrack(to: id)
+        case .requestCueBundle(let sessionID, let revision):
+            handleCueBundleRequest(sessionID: sessionID, revision: revision)
         default:
             coordinator.apply(command)
         }
         return coordinator.currentSnapshot()
+    }
+
+    func handleCueBundleRequest(sessionID: UUID, revision: Int) {
+        if let cached = lastSentBundleKey,
+           cached.sessionID == sessionID,
+           cached.revision == revision {
+            lastSentBundleKey = nil
+        }
+        broadcastCurrentSession()
     }
 
     func broadcastSnapshot() {
@@ -144,8 +177,14 @@ final class WatchSessionHost: NSObject {
 }
 
 extension WatchSessionHost: WCSessionDelegate {
-    nonisolated func session(_: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error _: Error?) {
+    nonisolated func session(_: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
         try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        guard error != nil else { return }
+        let meta = SendablePayload(value: fileTransfer.file.metadata)
+        Task { @MainActor in
+            self.handleFileTransferFailure(metadata: meta.value)
+            self.broadcastCurrentSession()
+        }
     }
 
     nonisolated func session(
@@ -202,5 +241,9 @@ extension WatchSessionHost: WCSessionDelegate {
 
 private struct SendablePayloadCallback: @unchecked Sendable {
     let invoke: ([String: Any]) -> Void
+}
+
+private struct SendablePayload: @unchecked Sendable {
+    let value: [String: Any]?
 }
 #endif

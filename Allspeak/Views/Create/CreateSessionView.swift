@@ -116,12 +116,21 @@ struct CreateSessionView: View {
             }
             .buttonStyle(.plain)
         case .edit:
-            FileSlotRow(
-                kind: .audio,
-                filename: form.audioDisplayName,
-                onChoose: { presentPicker(.audio) },
-                onClear: { form.audioURL = nil; form.existingAudioFilename = nil }
-            )
+            HStack(spacing: 12) {
+                Image(systemName: Icons.audio)
+                    .font(.system(size: 18))
+                    .foregroundStyle(Tokens.text3)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Manage audio in Tracks")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Tokens.text2)
+                    Text("Add or remove tracks from the Tracks menu")
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Tokens.text3)
+                }
+                Spacer()
+            }
         }
     }
 
@@ -157,14 +166,8 @@ struct CreateSessionView: View {
             guard !urls.isEmpty else { return }
             switch kind {
             case .audio:
-                switch mode {
-                case .new:
+                if case .new = mode {
                     form.appendPendingTracks(from: urls)
-                case .edit:
-                    if let url = urls.first {
-                        form.audioURL = url
-                        form.existingAudioFilename = nil
-                    }
                 }
             case .subtitles:
                 if let url = urls.first {
@@ -219,12 +222,18 @@ struct CreateSessionView: View {
                 srtSrc: srt
             )
         case .edit(let id):
-            try await repository.rename(id: id, to: snapshot.trimmedName)
-            if let audio = snapshot.audioURL {
-                try await repository.replaceAudio(id: id, srcURL: audio)
-            }
             if let srt = snapshot.srtURL {
                 try await repository.replaceSubtitle(id: id, srcURL: srt)
+            }
+            var renameError: Error?
+            do {
+                try await repository.rename(id: id, to: snapshot.trimmedName)
+            } catch {
+                renameError = error
+            }
+            await PlaybackCoordinator.shared.refreshIfActive(sessionID: id)
+            if let renameError {
+                throw renameError
             }
         }
     }
