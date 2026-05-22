@@ -201,10 +201,10 @@ Allows post-creation track additions, e.g., Pavel adds RHS dubbing to existing M
 
 ### Task 13: iPhone-side broadcast on track change
 
-- [ ] ensure `WatchSessionHost.broadcastCurrentSession()` and `broadcastSnapshot()` include latest tracks + activeTrackID from coordinator
-- [ ] on `switchTrack`, explicitly call `updateApplicationContext` with refreshed metadata (so watch sees the new activeTrackID even when reachable)
-- [ ] write tests: rebroadcast on track change carries correct payload
-- [ ] run tests — must pass before next task
+- [x] ensure `WatchSessionHost.broadcastCurrentSession()` and `broadcastSnapshot()` include latest tracks + activeTrackID from coordinator (currentMetadata threads tracks/activeTrackID; currentSnapshot already threads activeTrackID)
+- [x] on `switchTrack`, explicitly call `updateApplicationContext` with refreshed metadata (PlaybackCoordinator.switchTrack already calls WatchSessionHost.shared.broadcastCurrentSession() → session.updateApplicationContext(payload); kept as-is, added testable seam)
+- [x] write tests: rebroadcast on track change carries correct payload (broadcastCurrentSession(sendContext:) test confirms tracks+activeTrackID after switchTrack; broadcastSnapshot test confirms activeTrackID after switch)
+- [x] run tests — must pass before next task
 
 ### Task 14: Verify acceptance criteria
 

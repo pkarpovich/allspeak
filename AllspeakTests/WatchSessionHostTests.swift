@@ -404,6 +404,59 @@ struct WatchSessionHostTests {
         #expect(decoded.activeTrackID == fixture.track2UUID)
     }
 
+    @Test("broadcastCurrentSession payload carries tracks and activeTrackID after switchTrack")
+    func broadcastCurrentSessionReflectsSwitchTrack() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        _ = await fixture.host.dispatch(.switchTrack(id: fixture.track2UUID))
+
+        var contexts: [[String: Any]] = []
+        fixture.host.broadcastCurrentSession(sendContext: { payload in
+            contexts.append(payload)
+        })
+        #expect(contexts.count == 1)
+        let metadata = try SessionMetadata(propertyList: contexts[0])
+        #expect(metadata.sessionID == fixture.sessionUUID)
+        #expect(metadata.activeTrackID == fixture.track2UUID)
+        #expect(metadata.tracks.count == 2)
+        #expect(metadata.tracks.map(\.id).contains(fixture.track1UUID))
+        #expect(metadata.tracks.map(\.id).contains(fixture.track2UUID))
+    }
+
+    @Test("broadcastSnapshot payload carries refreshed activeTrackID after switchTrack")
+    func broadcastSnapshotReflectsSwitchTrack() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        _ = await fixture.host.dispatch(.switchTrack(id: fixture.track2UUID))
+
+        var sends: [[String: Any]] = []
+        fixture.host.forceBroadcastSnapshot(now: Date(), isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        let snapshot = try PlaybackSnapshot(propertyList: sends[0])
+        #expect(snapshot.activeTrackID == fixture.track2UUID)
+        #expect(snapshot.sessionID == fixture.sessionUUID)
+    }
+
+    @Test("broadcastCurrentSession without active session sends nothing")
+    func broadcastCurrentSessionNoSession() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+        var contexts: [[String: Any]] = []
+        host.broadcastCurrentSession(sendContext: { payload in
+            contexts.append(payload)
+        })
+        #expect(contexts.isEmpty)
+    }
+
     @Test("broadcastSnapshot empty-session calls do not consume the rate-limit slot")
     func broadcastSnapshotEmptyDoesNotConsumeSlot() throws {
         let coordinator = PlaybackCoordinator.shared

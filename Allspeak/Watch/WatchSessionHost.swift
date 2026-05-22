@@ -36,11 +36,27 @@ final class WatchSessionHost: NSObject {
     }
 
     func broadcastCurrentSession() {
-        if let metadata = coordinator.currentMetadata() {
-            broadcast(metadata: metadata)
+        broadcastCurrentSession(
+            sendContext: { [weak self] payload in
+                guard let session = self?.session, session.activationState == .activated else { return }
+                try? session.updateApplicationContext(payload)
+            },
+            sendFile: { [weak self] bundle in
+                self?.sendCueBundle(bundle)
+            }
+        )
+    }
+
+    func broadcastCurrentSession(
+        sendContext: ([String: Any]) -> Void,
+        sendFile: ((CueBundle) -> Void)? = nil
+    ) {
+        if let metadata = coordinator.currentMetadata(),
+           let payload = try? metadata.toPropertyList() {
+            sendContext(payload)
         }
-        if let bundle = coordinator.currentCueBundle() {
-            sendCueBundle(bundle)
+        if let bundle = coordinator.currentCueBundle(), let sendFile {
+            sendFile(bundle)
         }
     }
 
