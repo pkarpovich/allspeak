@@ -194,10 +194,10 @@ Allows post-creation track additions, e.g., Pavel adds RHS dubbing to existing M
 
 ### Task 12: NowPlayingCenter title update
 
-- [ ] in `NowPlayingCenter.setMetadata(title:duration:)`, accept an optional `trackLabel: String?` — display as `<title> — <trackLabel>` when non-nil
-- [ ] PlaybackCoordinator calls this on session start and on every switchTrack
-- [ ] write tests: title formatting with/without trackLabel
-- [ ] run tests — must pass before next task
+- [x] in `NowPlayingCenter.setMetadata(title:duration:)`, accept an optional `trackLabel: String?` — display as `<title> - <trackLabel>` when non-nil
+- [x] PlaybackCoordinator calls this on session start and on every switchTrack (label threaded through `AudioController.load(audio:subtitles:title:trackLabel:)`; PlaybackCoordinator passes `trackLabel = track.label` when `tracks.count > 1` instead of pre-concatenating the title string)
+- [x] write tests: title formatting with/without trackLabel
+- [x] run tests — must pass before next task
 
 ### Task 13: iPhone-side broadcast on track change
 

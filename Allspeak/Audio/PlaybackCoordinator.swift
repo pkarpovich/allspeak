@@ -107,13 +107,13 @@ final class PlaybackCoordinator {
         }
 
         let audioURL: URL
-        let trackTitle: String
+        let trackLabel: String?
         if let track = selectedTrack {
             audioURL = Self.resolveTrackURL(storage: storage, sessionUUID: snap.uuid, trackID: track.trackID, filename: track.filename)
-            trackTitle = snap.tracks.count > 1 ? "\(snap.name) - \(track.label)" : snap.name
+            trackLabel = snap.tracks.count > 1 ? track.label : nil
         } else {
             audioURL = dir.appendingPathComponent(snap.audioFilename)
-            trackTitle = snap.name
+            trackLabel = nil
         }
 
         let cues: [Subtitle]
@@ -129,7 +129,7 @@ final class PlaybackCoordinator {
 
         let controller = AudioController(repository: repository, sessionID: sessionID)
         do {
-            try controller.load(audio: audioURL, subtitles: cues, title: trackTitle)
+            try controller.load(audio: audioURL, subtitles: cues, title: snap.name, trackLabel: trackLabel)
         } catch {
             throw StartError.loadFailed
         }
@@ -240,9 +240,9 @@ final class PlaybackCoordinator {
             trackID: trackID,
             filename: filename
         )
-        let title = tracks.count > 1 ? "\(sessionTitle) - \(track.label)" : sessionTitle
+        let trackLabel: String? = tracks.count > 1 ? track.label : nil
         do {
-            try controller.load(audio: newURL, subtitles: cues, title: title)
+            try controller.load(audio: newURL, subtitles: cues, title: sessionTitle, trackLabel: trackLabel)
         } catch {
             throw SwitchError.loadFailed
         }

@@ -28,7 +28,7 @@ final class AudioController {
         self.sessionID = sessionID
     }
 
-    func load(audio: URL, subtitles: [Subtitle], title: String) throws {
+    func load(audio: URL, subtitles: [Subtitle], title: String, trackLabel: String? = nil) throws {
         let player = try AVAudioPlayer(contentsOf: audio)
         player.prepareToPlay()
         let delegateProxy = PlayerDelegateProxy { [weak self] in
@@ -44,7 +44,7 @@ final class AudioController {
         self.lastNowPlayingTickSecond = -1
 
         #if os(iOS) || os(tvOS) || os(visionOS)
-        NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration)
+        NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration, trackLabel: trackLabel)
         NowPlayingCenter.shared.configureRemoteCommands(
             play: { [weak self] in
                 Task { @MainActor in self?.play() }
