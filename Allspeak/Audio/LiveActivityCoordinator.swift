@@ -14,6 +14,7 @@ protocol ActivityCoordinating: AnyObject {
 @MainActor
 final class RealActivityCoordinator: ActivityCoordinating {
     private var activityID: String?
+    private var inFlight: Task<Void, Never>?
 
     func start(
         attributes: AllspeakActivityAttributes,
@@ -37,7 +38,9 @@ final class RealActivityCoordinator: ActivityCoordinating {
     func update(state: AllspeakActivityAttributes.ContentState) {
         guard let id = activityID else { return }
         let content = ActivityContent(state: state, staleDate: nil)
-        Task.detached {
+        let previous = inFlight
+        inFlight = Task.detached {
+            _ = await previous?.value
             guard let activity = Activity<AllspeakActivityAttributes>.activities
                 .first(where: { $0.id == id }) else { return }
             await activity.update(content)
@@ -47,7 +50,9 @@ final class RealActivityCoordinator: ActivityCoordinating {
     func end() {
         guard let id = activityID else { return }
         activityID = nil
-        Task.detached {
+        let previous = inFlight
+        inFlight = Task.detached {
+            _ = await previous?.value
             guard let activity = Activity<AllspeakActivityAttributes>.activities
                 .first(where: { $0.id == id }) else { return }
             await activity.end(nil, dismissalPolicy: .immediate)
