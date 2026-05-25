@@ -342,6 +342,9 @@ final class PlaybackCoordinator {
         if cuesChanged {
             revision += 1
         }
+        if previousActiveTrackID != activeTrackID {
+            emitActivityStateChange()
+        }
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -452,7 +455,9 @@ final class PlaybackCoordinator {
     }
 
     private func currentTrackLabel() -> String {
-        guard let activeTrackID, let track = tracks.first(where: { $0.id == activeTrackID }) else {
+        guard tracks.count > 1,
+              let activeTrackID,
+              let track = tracks.first(where: { $0.id == activeTrackID }) else {
             return ""
         }
         return track.label
