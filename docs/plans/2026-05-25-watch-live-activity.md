@@ -169,9 +169,9 @@ round-trip needed.
 
 **Skills**: none required — straight doc updates.
 
-- [ ] update `README.md` — add Live Activity bullet under Apple Watch remote section
-- [ ] document URL scheme contract (`allspeak://session/<uuid>`) in `AllspeakWatch/AllspeakWatchApp.swift` header comment
-- [ ] note in `Allspeak/Audio/PlaybackCoordinator.swift` header the new LiveActivity integration seam
+- [x] update `README.md` — add Live Activity bullet under Apple Watch remote section
+- [x] document URL scheme contract (`allspeak://session/<uuid>`) in `AllspeakWatch/AllspeakWatchApp.swift` header comment
+- [x] note in `Allspeak/Audio/PlaybackCoordinator.swift` header the new LiveActivity integration seam
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`*
 

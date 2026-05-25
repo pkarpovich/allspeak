@@ -1,6 +1,18 @@
 import CoreData
 import Foundation
 
+// Owns the iPhone-side audio session lifecycle and broadcasts state to two
+// downstream surfaces: the paired watch app (via `WatchSessionHost`) and the
+// ActivityKit Live Activity (via `liveActivity`, a `LiveActivityCoordinator`).
+//
+// LiveActivity integration seam: every state-change emission point
+// (`handleControllerStateChange`, `switchTrack`, `endSession`) also forwards
+// into `liveActivity` so the Lock Screen / Dynamic Island / watch Smart Stack
+// widget stays in sync. The `liveActivity` property is `var` to allow tests
+// to inject a `MockActivityCoordinator`. Activity interaction (Pause/Play
+// from the widget) flows back in via `TogglePlaybackIntent.perform()`, which
+// calls `PlaybackCoordinator.shared.controller?.togglePlayPause()` directly
+// in the main app process.
 @MainActor
 final class PlaybackCoordinator {
     static let shared = PlaybackCoordinator()
