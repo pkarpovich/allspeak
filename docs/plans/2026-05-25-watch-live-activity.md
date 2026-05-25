@@ -92,13 +92,13 @@ round-trip needed.
 
 **Skills**: `axiom:axiom-integration` → `skills/extensions-widgets-ref.md` for `Activity.request`/`update`/`end`, `ActivityAuthorizationInfo`, `dismissalPolicy`; `axiom:axiom-concurrency` for `@MainActor` isolation and `Sendable` on the protocol; `swift-testing-expert` for protocol-mock pattern (see `references/fundamentals.md` + existing `AllspeakTests/WatchSessionClientTests.swift` as template).
 
-- [ ] create `Allspeak/Audio/LiveActivityCoordinator.swift` — `@MainActor final class`
-- [ ] define `protocol ActivityCoordinating` with `start(attributes:state:)`, `update(state:)`, `end()` — wraps `Activity<AllspeakActivityAttributes>` so tests can replace
-- [ ] implement `RealActivityCoordinator: ActivityCoordinating` calling `Activity.request` / `activity.update` / `activity.end(.immediate)`, guarding on `ActivityAuthorizationInfo().areActivitiesEnabled`
-- [ ] `LiveActivityCoordinator` exposes: `sessionStarted(id:title:totalDuration:initialState:)`, `stateChanged(isPlaying:currentTime:trackLabel:)`, `sessionEnded()` — idempotent
-- [ ] internal state: holds reference to active coordinator handle; `stateChanged` either calls `start` (if no active) or `update`
-- [ ] write `LiveActivityCoordinatorTests.swift` with a `MockActivityCoordinator` that records calls; cover: first stateChanged starts activity, subsequent updates, sessionEnded ends, no-op when authorization off
-- [ ] run project tests — must pass before task 4
+- [x] create `Allspeak/Audio/LiveActivityCoordinator.swift` — `@MainActor final class`
+- [x] define `protocol ActivityCoordinating` with `start(attributes:state:)`, `update(state:)`, `end()` — wraps `Activity<AllspeakActivityAttributes>` so tests can replace
+- [x] implement `RealActivityCoordinator: ActivityCoordinating` calling `Activity.request` / `activity.update` / `activity.end(.immediate)`, guarding on `ActivityAuthorizationInfo().areActivitiesEnabled` (stores activityID and re-fetches via `Activity.activities` inside detached Task to satisfy Swift 6 sending checks)
+- [x] `LiveActivityCoordinator` exposes: `sessionStarted(id:title:totalDuration:initialState:)`, `stateChanged(isPlaying:currentTime:trackLabel:)`, `sessionEnded()` — idempotent
+- [x] internal state: holds attributes + isActive flag; `sessionStarted` seeds attributes and triggers start; `stateChanged` either retries start (if previous start failed, e.g. auth off) or updates
+- [x] write `LiveActivityCoordinatorTests.swift` with a `MockActivityCoordinator` that records calls; cover: sessionStarted triggers start, subsequent stateChanged updates, sessionEnded ends, idempotency, no-op when authorization off (start returns false), state replacement on second sessionStarted, injected dateProvider
+- [x] run project tests — must pass before task 4
 
 ### Task 4: Wire `LiveActivityCoordinator` into `PlaybackCoordinator`
 
