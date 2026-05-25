@@ -104,6 +104,19 @@ The six commands round-tripped over WatchConnectivity are: `play`,
 contract lives in `Allspeak/Watch/WireProtocol.swift` — see the header
 comment there for the protocol summary.
 
+### Live Activity (Smart Stack)
+
+While a session is playing, Allspeak runs an ActivityKit Live Activity that
+appears on the iPhone Lock Screen / Dynamic Island and is automatically
+mirrored into the watch Smart Stack (via `supplementalActivityFamilies([.small])`).
+Rotating the Digital Crown down from the watch face surfaces the widget
+without unlocking the phone — one tap on its Pause/Play button toggles
+playback (routed through `TogglePlaybackIntent`, a `LiveActivityIntent`
+whose `perform()` runs in the main iPhone app process), and tapping the
+widget body deep-links into the AllspeakWatch app via the
+`allspeak://session/<uuid>` URL scheme. The Activity ends automatically
+when the session ends or the track finishes.
+
 ## Architecture
 
 - **UI**: SwiftUI, dark-only, single device family (iPhone, portrait).

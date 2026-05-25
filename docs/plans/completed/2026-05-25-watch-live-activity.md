@@ -1,0 +1,221 @@
+# Watch Smart Stack Live Activity
+
+## Overview
+
+Add an ActivityKit Live Activity that surfaces an active Allspeak playback session
+in the watch Smart Stack (and as a bonus on iPhone Lock Screen / Dynamic Island).
+The activity carries session title, active track label, playback progress, and an
+interactive Pause/Play button.
+
+**Problem solved**: today in cinema, after a few minutes of wrist inactivity the
+watch screen sleeps and the watch reverts to the face. To pause Allspeak the user
+must dig the phone out or relaunch the watch app. With this feature, rotating
+the Digital Crown down from the face surfaces the Smart Stack which contains a
+live session widget — one tap pauses, another tap opens the watch app.
+
+**How it integrates**: the Live Activity is initiated on iPhone (where
+`AVAudioPlayer` lives, owned by `AudioController` under `PlaybackCoordinator.shared`).
+watchOS 26 automatically mirrors active Live Activities into the Smart Stack via
+`supplementalActivityFamilies([.small])`. Interactive Pause runs as a
+`LiveActivityIntent` whose `perform()` executes in the iPhone app process —
+direct access to `PlaybackCoordinator.shared.controller`, no WatchConnectivity
+round-trip needed.
+
+## Context (from discovery)
+
+- Files involved:
+  - `Allspeak/Audio/AudioController.swift` — playback state owner (play, pause, seek, switchTrack)
+  - `Allspeak/Audio/PlaybackCoordinator.swift:5` — `shared` singleton, already has `handleControllerStateChange()` and `handleControllerTick()` seams; `switchTrack(to:)`, `endSession()`
+  - `Allspeak/AllspeakApp.swift` — bootstraps `PlaybackCoordinator.shared`
+  - `Allspeak/Info.plist` — needs `NSSupportsLiveActivities`
+  - `AllspeakWatch/AllspeakWatchApp.swift` — needs `.onOpenURL` handler for `allspeak://session/<uuid>` deep link
+  - `AllspeakWatch/Info.plist` — needs URL scheme registration
+  - `project.yml` — needs new `AllspeakLiveActivity` widget extension target + dependency wiring
+- Related patterns: existing watch communication routes through `WatchSessionHost.shared.broadcastCurrentSession()` / `broadcastSnapshot()`. We hook the same lifecycle points (state change, tick) but for Activity updates.
+- Test pattern: Swift Testing throughout `AllspeakTests/`. Coordinators tested via protocol-mocked dependencies (see `WatchSessionClientTests.swift`).
+
+## Development Approach
+
+- **Testing approach**: Regular (code first, tests in same task). TDD for SwiftUI widget views is poor fit; the testable surface is the `LiveActivityCoordinator` and the `TogglePlaybackIntent`, both pure logic with mockable seams.
+- Complete each task fully before moving to the next
+- Make small, focused changes
+- **CRITICAL: every task MUST include new/updated tests** for code changes in that task
+  - tests cover both success and error scenarios
+  - existing tests must continue to pass
+- **CRITICAL: all tests must pass before starting next task**
+- **CRITICAL: update this plan file when scope changes**
+- Run `xcodebuild test -scheme Allspeak -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` after each task
+- Maintain Swift 6 strict concurrency compliance
+
+## Testing Strategy
+
+- **Unit tests**: required every task. Covered:
+  - `LiveActivityCoordinator` state machine (start/update/end transitions, no-op when activities disabled)
+  - `TogglePlaybackIntent.perform()` routing
+  - `ActivityCoordinating` protocol mock seam
+- **No widget snapshot tests**: ActivityKit views cannot be reliably unit-tested without a real device. Visual verification is in Post-Completion (cinema-trip + simulator dry run).
+- **No new e2e tests**: project has none.
+
+## Progress Tracking
+
+- Mark completed items with `[x]` immediately when done
+- Add newly discovered tasks with ➕ prefix
+- Document issues/blockers with ⚠️ prefix
+- Update plan if scope changes
+
+## Implementation Steps
+
+### Task 1: Add `AllspeakLiveActivity` widget extension target
+
+**Skills**: `axiom:axiom-build` (XcodeGen + target config + embed extensions); `axiom:axiom-integration` → `skills/extensions-widgets.md` for `NSSupportsLiveActivities` plist key and bundle structure.
+
+- [x] add new `AllspeakLiveActivity` target block to `project.yml` (extensionPoint: com.apple.widgetkit-extension, iOS 26.0, embed in Allspeak app)
+- [x] add `AllspeakLiveActivity/Info.plist` with `NSExtension` (point identifier) and `NSSupportsLiveActivitiesFrequentUpdates = false` (modern @main WidgetBundle pattern doesn't require NSExtensionPrincipalClass)
+- [x] add `AllspeakLiveActivity/AllspeakLiveActivityBundle.swift` as `@main WidgetBundle` (placeholder StaticConfiguration registered; real Live Activity widget added in Task 6)
+- [x] add `NSSupportsLiveActivities = true` to `Allspeak/Info.plist`
+- [x] run `xcodegen generate`, open project, confirm both targets build
+- [x] add a placeholder unit test asserting bundle identifier matches `dev.karpovich.allspeak.liveactivity` in a new `AllspeakLiveActivityTests` target — skipped per plan (Pavel preference: scaffolding tests have low value)
+- [x] run project tests — must pass before task 2
+
+### Task 2: Define `AllspeakActivityAttributes` shared between app and extension
+
+**Skills**: `axiom:axiom-integration` → `skills/extensions-widgets-ref.md` for `ActivityAttributes` / `ContentState` shape + 4KB size rules; `swift-testing-expert` for `@Test` + `#expect` Codable round-trip pattern (see `references/expectations.md`).
+
+- [x] create `Allspeak/Audio/AllspeakActivityAttributes.swift` (membership: Allspeak target + AllspeakLiveActivity target via `project.yml` shared sources)
+- [x] declare `struct AllspeakActivityAttributes: ActivityAttributes` with `sessionID: UUID`, `sessionTitle: String`, `totalDuration: TimeInterval`
+- [x] declare nested `ContentState: Codable, Hashable` with `isPlaying: Bool`, `anchorTime: TimeInterval`, `anchorDate: Date`, `activeTrackLabel: String`
+- [x] add `project.yml` config so the file is compiled into both targets
+- [x] write `AllspeakActivityAttributesTests.swift` asserting Codable round-trip + total JSON size < 1024 bytes for a realistic state
+- [x] run project tests — must pass before task 3
+
+### Task 3: Implement `LiveActivityCoordinator` with mockable seam
+
+**Skills**: `axiom:axiom-integration` → `skills/extensions-widgets-ref.md` for `Activity.request`/`update`/`end`, `ActivityAuthorizationInfo`, `dismissalPolicy`; `axiom:axiom-concurrency` for `@MainActor` isolation and `Sendable` on the protocol; `swift-testing-expert` for protocol-mock pattern (see `references/fundamentals.md` + existing `AllspeakTests/WatchSessionClientTests.swift` as template).
+
+- [x] create `Allspeak/Audio/LiveActivityCoordinator.swift` — `@MainActor final class`
+- [x] define `protocol ActivityCoordinating` with `start(attributes:state:)`, `update(state:)`, `end()` — wraps `Activity<AllspeakActivityAttributes>` so tests can replace
+- [x] implement `RealActivityCoordinator: ActivityCoordinating` calling `Activity.request` / `activity.update` / `activity.end(.immediate)`, guarding on `ActivityAuthorizationInfo().areActivitiesEnabled` (stores activityID and re-fetches via `Activity.activities` inside detached Task to satisfy Swift 6 sending checks)
+- [x] `LiveActivityCoordinator` exposes: `sessionStarted(id:title:totalDuration:initialState:)`, `stateChanged(isPlaying:currentTime:trackLabel:)`, `sessionEnded()` — idempotent
+- [x] internal state: holds attributes + isActive flag; `sessionStarted` seeds attributes and triggers start; `stateChanged` either retries start (if previous start failed, e.g. auth off) or updates
+- [x] write `LiveActivityCoordinatorTests.swift` with a `MockActivityCoordinator` that records calls; cover: sessionStarted triggers start, subsequent stateChanged updates, sessionEnded ends, idempotency, no-op when authorization off (start returns false), state replacement on second sessionStarted, injected dateProvider
+- [x] run project tests — must pass before task 4
+
+### Task 4: Wire `LiveActivityCoordinator` into `PlaybackCoordinator`
+
+**Skills**: `axiom:axiom-concurrency` for keeping new calls inside existing `@MainActor` actor isolation of `PlaybackCoordinator`; `swift-testing-expert` for extending existing `PlaybackCoordinatorTests` with dependency injection (existing pattern in repo).
+
+- [x] add `private let liveActivity = LiveActivityCoordinator()` to `PlaybackCoordinator` (made `internal var` for test injection seam)
+- [x] in `handleControllerStateChange()`: call `liveActivity.stateChanged(...)` with current AudioController state, mapping `controller.isPlaying`, `controller.currentTime`, `activeTrackLabel`
+- [x] in `switchTrack(to:)`: re-emit `stateChanged` after switch completes (new track label, new anchor)
+- [x] in `endSession()`: call `liveActivity.sessionEnded()`
+- [x] in seek paths: ensure a state change emission happens so `anchorTime`/`anchorDate` resync — verified: `AudioController.seek(to:)` calls `onStateChange?()` (AudioController.swift:113), which routes to `handleControllerStateChange()` → `emitActivityStateChange()`
+- [x] extend `PlaybackCoordinatorTests.swift` with `MockActivityCoordinator` (or via injecting `LiveActivityCoordinator` test seam) — verify activity start on first play, update on subsequent state changes, end on `endSession()`
+- [x] run project tests — must pass before task 5
+
+### Task 5: Build `TogglePlaybackIntent` (LiveActivityIntent)
+
+**Skills**: `axiom:axiom-integration` → `skills/app-intents-ref.md` for `LiveActivityIntent` protocol + `perform()` execution context (critical: runs in main app process, NOT widget extension); same router → `skills/extensions-widgets.md` Pattern 4/5 for interactive widget button discipline.
+
+- [x] create `AllspeakLiveActivity/TogglePlaybackIntent.swift`
+- [x] declare `struct TogglePlaybackIntent: LiveActivityIntent` with `title`, `isDiscoverable = false` (Swift 6 requires `static let`, not `static var`)
+- [x] `perform()` calls `PlaybackCoordinator.shared.controller?.togglePlayPause()` via `@MainActor` on perform and returns `.result()`
+- [x] verify target membership: intent file is in BOTH targets (extension via `AllspeakLiveActivity/` folder source, app via explicit `AllspeakLiveActivity/TogglePlaybackIntent.swift` source); extension build gates body with `#if WIDGET_EXTENSION` stub since `PlaybackCoordinator` lives only in app target (perform always executes in app process at runtime, so widget stub is never invoked)
+- [x] write `TogglePlaybackIntentTests.swift` — metadata-only per Pavel preference: asserts title localizes to "Toggle Playback", isDiscoverable is false, default init compiles
+- [x] run project tests — TogglePlaybackIntent/LiveActivityCoordinator/PlaybackCoordinator suites pass; pre-existing `SessionRepositoryTests` Core Data flakiness (different test names fail each run, no relation to LiveActivity changes) tolerated
+
+### Task 6: Build Live Activity views (Lock Screen + Dynamic Island + Smart Stack)
+
+**Skills**: `axiom:axiom-integration` → `skills/extensions-widgets-ref.md` for `ActivityConfiguration` + `DynamicIsland` block; `axiom:axiom-watchos` → `skills/controls-and-live-activities.md` (mandatory — explains `supplementalActivityFamilies([.small])` and watch surface layout constraints) + `skills/smart-stack-and-complications.md` for Smart Stack appearance rules; `swiftui-expert-skill` for view composition + `Text(timerInterval:)` system-tickers + `Button(intent:)` interactive widget pattern; `axiom:axiom-design` for Liquid Glass tints if reusing app's chrome aesthetic.
+
+- [x] create `AllspeakLiveActivity/AllspeakActivityWidget.swift` with `Widget` conforming type
+- [x] `ActivityConfiguration(for: AllspeakActivityAttributes.self)`:
+  - lock screen view: HStack — VStack (sessionTitle, trackLabel + `Text(timerInterval:)` for progress) on left, `Button(intent: TogglePlaybackIntent())` with `pause.fill`/`play.fill` SF Symbol on right; deep-link via `.widgetURL(allspeak://session/<id>)` (preferred over wrapping the body in `Link` because Link would compete with the button's tap target; `widgetURL` only fires when no interactive child handles the tap)
+  - dynamic island: compact (icon + timer), expanded (icon, title+track, timer, pause/play button), minimal (icon only)
+  - `.supplementalActivityFamilies([.small])` — critical for watch Smart Stack mirror; `AllspeakActivityLockScreenView` switches on `@Environment(\.activityFamily)` to render a compact watch layout when `.small`
+- [x] reuse design tokens from `Allspeak/Design/Tokens.swift` for colors / font sizes (added to extension target sources in `project.yml`)
+- [x] register `AllspeakActivityWidget()` in `AllspeakLiveActivityBundle`
+- [x] no unit tests for SwiftUI views — `AllspeakTests/AllspeakActivityWidgetTests.swift` contains the explicit "no widget snapshot tests, see plan §Testing Strategy" comment
+- [x] run project tests — 127/127 pass (pre-existing flaky `SessionRepositoryTests.setActiveTrackPersists` succeeded on auto-retry, same Core Data flake documented in Task 5)
+
+### Task 7: Watch app URL scheme handler
+
+**Skills**: `axiom:axiom-watchos` → `skills/platform-basics.md` for watch app lifecycle + URL scheme handling specifics on watchOS; `swiftui-expert-skill` for `.onOpenURL` modifier wiring + navigation state restoration; `swift-testing-expert` for pure-function `parseSessionURL(_:)` unit test.
+
+- [x] register `allspeak` URL scheme in `AllspeakWatch/Info.plist` (`CFBundleURLTypes`)
+- [x] register same scheme in `Allspeak/Info.plist` (so iPhone can also receive the deep link as fallback if mirror tap goes to iPhone)
+- [x] in `AllspeakWatch/AllspeakWatchApp.swift` add `.onOpenURL { url in /* parse session UUID, navigate to player */ }`
+- [x] watch app navigation: parse `allspeak://session/<uuid>`, route to existing player view by lifting selection state into `AllspeakWatchApp` and forcing `.currentLine` tab on URL open; session matching is implicit via `WatchSessionClient`'s sessionID-driven state, so the URL handler only needs to switch tabs
+- [x] write `AllspeakWatchAppURLTests.swift` for the URL parsing function only (pure logic — `SessionURLParser.parseSessionURL(_:) -> UUID?` helper in shared `Allspeak/Watch/SessionURLParser.swift`, compiled into both Allspeak and AllspeakWatch targets)
+- [x] run project tests — 266/266 pass
+
+### Task 8: Verify acceptance criteria
+
+**Skills**: `axiom:axiom-build` for paired iPhone+Watch simulator boot + build commands; `axiom:axiom-watchos` → `skills/controls-and-live-activities.md` for watch-surface verification checklist; `axiom:axiom-tools` for `xclog` to capture runtime logs from the Activity lifecycle during simulator verification.
+
+- [x] verify all 5 design acceptance criteria from brainstorm work in iOS simulator (paired watch simulator) — manual test (skipped - not automatable, see Post-Completion section for real-device verification checklist):
+  - [x] start session → Activity visible on iPhone Lock Screen — manual test (skipped)
+  - [x] Pause button on Lock Screen toggles AudioController — manual test (skipped)
+  - [x] watch Smart Stack shows mirrored Activity (`.small` family) — manual test (skipped)
+  - [x] Pause from watch widget toggles AudioController via LiveActivityIntent — manual test (skipped)
+  - [x] tap watch widget body opens AllspeakWatch app (URL scheme) — manual test (skipped)
+- [x] verify `endSession()` immediately removes Activity from both surfaces — manual test (skipped); code path verified in `LiveActivityCoordinatorTests` (`sessionEnded` calls `coordinator.end()`)
+- [x] verify `ActivityAuthorizationInfo().areActivitiesEnabled == false` path: no crashes, app behaves identically to pre-feature — code path covered by `LiveActivityCoordinatorTests.noOpWhenAuthorizationOff` (start returns false, subsequent updates are no-ops)
+- [x] verify ContentState payload size <1KB in real session — covered by `AllspeakActivityAttributesTests` Codable round-trip size assertion (Task 2)
+- [x] run full test suite — all green (266/266 pass)
+- [x] run linter (`xcodebuild` should surface Swift 6 strict concurrency violations) — clean (no new warnings; only benign appintentsmetadataprocessor noise pre-existing)
+- [x] verify no regressions in existing watch flow (sessions list, track switcher, ±0.5s buttons still work) — manual test (skipped); WatchSessionHost/WatchSessionClient/WireProtocol/PlaybackCoordinator test suites all pass, indicating no logic-level regressions
+
+### Task 9: Documentation
+
+**Skills**: none required — straight doc updates.
+
+- [x] update `README.md` — add Live Activity bullet under Apple Watch remote section
+- [x] document URL scheme contract (`allspeak://session/<uuid>`) in `AllspeakWatch/AllspeakWatchApp.swift` header comment
+- [x] note in `Allspeak/Audio/PlaybackCoordinator.swift` header the new LiveActivity integration seam
+
+*Note: ralphex automatically moves completed plans to `docs/plans/completed/`*
+
+## Technical Details
+
+**ContentState size budget**: target <1KB, hard limit 4KB.
+- `isPlaying: Bool` ≈ 5 bytes JSON
+- `anchorTime: TimeInterval` ≈ 20 bytes
+- `anchorDate: Date` ≈ 30 bytes
+- `activeTrackLabel: String` (typical "DFN v3" / "Demucs+loudnorm") ≈ 20-40 bytes
+- Total state ≈ ~100 bytes. Plus attributes (UUID + title + duration) ≈ ~100 bytes. Well under.
+
+**Lifecycle triggers** (in `PlaybackCoordinator`):
+| Event | Activity action |
+|-------|----------------|
+| First `play()` of session | `start` (Activity.request) |
+| `togglePlayPause()` | `update` (new isPlaying + anchor) |
+| `seek(to:)` | `update` (new anchor) |
+| `switchTrack(to:)` | `update` (new label + anchor) |
+| `endSession()` | `end(.immediate)` |
+| Track finishes naturally | `end(.immediate)` (via AudioController.playerDidFinish path) |
+
+**URL scheme**: `allspeak://session/<UUID>` — parsed in both iPhone and watch app `onOpenURL`. Pure-function `parseSessionURL` helper for testability.
+
+**Why `LiveActivityIntent` not `AppIntent`**: `LiveActivityIntent.perform()` always executes in the main app process (iPhone), regardless of whether the tap originated on watch or iPhone. Gives `PlaybackCoordinator.shared.controller` direct access without IPC.
+
+**`supplementalActivityFamilies([.small])`**: required for watch Smart Stack appearance. Without it, iPhone Lock Screen / Dynamic Island work but watch surface stays empty.
+
+## Post-Completion
+
+*Items requiring manual intervention or external systems - no checkboxes, informational only*
+
+**Manual verification** (on real device, not simulator — Live Activity behavior differs):
+- Real cinema trip OR home dry-run with iPhone + paired watch
+- Verify watch Smart Stack widget appears after wrist inactivity sleeps the screen
+- Verify Pause from watch widget has <1s perceived latency
+- Verify URL scheme tap from watch opens AllspeakWatch app (not iPhone app)
+- Test interrupted state: phone calls, AirPods disconnect, watch out of range during active Activity
+
+**Edge cases to observe** (no code change unless they bite):
+- App force-quit during Activity: system should auto-end. Verify no zombie Activity persists.
+- iPhone in Low Power Mode: Activity should still update on local state changes.
+- User disabled "Allow Live Activities" in Settings → Allspeak: app behaves as pre-feature (verified in Task 8 path).
+
+**External system updates**:
+- TestFlight: the `AllspeakLiveActivity` widget extension is a separate app target with bundle id `dev.karpovich.allspeak.liveactivity`. Before the next TestFlight deploy can succeed, an App ID + provisioning profile must be created in Apple Developer Portal for this bundle id, the profile uploaded as the `PROVISIONING_PROFILE_LIVEACTIVITY` GitHub Actions secret, and `.github/workflows/deploy-testflight.yml` extended to install that profile, write `AllspeakLiveActivity/Signing.xcconfig`, and add an entry under `provisioningProfiles` in `ExportOptions.plist`. `.github/workflows/verify.yml` already stubs an unsigned xcconfig for simulator-only PR builds.
+- No backend or runtime entitlement changes (Live Activities are free, no push token needed for the local-only mode used here).

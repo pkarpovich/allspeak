@@ -1,6 +1,18 @@
 import CoreData
 import Foundation
 
+// Owns the iPhone-side audio session lifecycle and broadcasts state to two
+// downstream surfaces: the paired watch app (via `WatchSessionHost`) and the
+// ActivityKit Live Activity (via `liveActivity`, a `LiveActivityCoordinator`).
+//
+// LiveActivity integration seam: every state-change emission point
+// (`handleControllerStateChange`, `switchTrack`, `endSession`) also forwards
+// into `liveActivity` so the Lock Screen / Dynamic Island / watch Smart Stack
+// widget stays in sync. The `liveActivity` property is `var` to allow tests
+// to inject a `MockActivityCoordinator`. Activity interaction (Pause/Play
+// from the widget) flows back in via `TogglePlaybackIntent.perform()`, which
+// calls `PlaybackCoordinator.shared.controller?.togglePlayPause()` directly
+// in the main app process.
 @MainActor
 final class PlaybackCoordinator {
     static let shared = PlaybackCoordinator()
@@ -31,6 +43,7 @@ final class PlaybackCoordinator {
     private var repository: SessionRepository?
     private var storage: DocumentsStorage = .default
     private var persistence: PersistenceController = .shared
+    var liveActivity: LiveActivityCoordinator = LiveActivityCoordinator()
 
     private init() {}
 
@@ -141,6 +154,7 @@ final class PlaybackCoordinator {
         }
         controller.onTick = { [weak self] in self?.handleControllerTick() }
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
+        controller.onFinish = { [weak self] in self?.handleControllerFinish() }
 
         self.controller = controller
         self.sessionID = sessionID
@@ -152,6 +166,12 @@ final class PlaybackCoordinator {
         self.storage = storage
         self.persistence = persistence
         self.revision += 1
+        liveActivity.sessionStarted(
+            id: snap.uuid,
+            title: snap.name,
+            totalDuration: controller.duration,
+            initialState: currentActivityState()
+        )
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -188,6 +208,7 @@ final class PlaybackCoordinator {
         }
         controller.onTick = { [weak self] in self?.handleControllerTick() }
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
+        controller.onFinish = { [weak self] in self?.handleControllerFinish() }
         self.controller = controller
         self.sessionID = nil
         self.sessionUUID = sessionUUID
@@ -195,6 +216,12 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.revision += 1
+        liveActivity.sessionStarted(
+            id: sessionUUID,
+            title: title,
+            totalDuration: controller.duration,
+            initialState: currentActivityState()
+        )
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -315,6 +342,9 @@ final class PlaybackCoordinator {
         if cuesChanged {
             revision += 1
         }
+        if previousActiveTrackID != activeTrackID {
+            emitActivityStateChange()
+        }
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -388,6 +418,7 @@ final class PlaybackCoordinator {
             try? await repository.setActiveTrack(sessionID: sessionID, trackID: trackID)
         }
         NotificationCenter.default.post(name: Self.activeTrackChangedNotification, object: self)
+        emitActivityStateChange()
         #if os(iOS)
         if let metadata = currentMetadata() {
             WatchSessionHost.shared.broadcast(metadata: metadata)
@@ -404,15 +435,48 @@ final class PlaybackCoordinator {
 
     private func handleControllerStateChange() {
         guard controller != nil else { return }
+        emitActivityStateChange()
         #if os(iOS)
         WatchSessionHost.shared.forceBroadcastSnapshot()
         #endif
+    }
+
+    private func handleControllerFinish() {
+        liveActivity.playbackFinished()
+    }
+
+    private func currentActivityState() -> AllspeakActivityAttributes.ContentState {
+        AllspeakActivityAttributes.ContentState(
+            isPlaying: controller?.isPlaying ?? false,
+            anchorTime: controller?.currentTime ?? 0,
+            anchorDate: Date(),
+            activeTrackLabel: currentTrackLabel()
+        )
+    }
+
+    private func currentTrackLabel() -> String {
+        guard tracks.count > 1,
+              let activeTrackID,
+              let track = tracks.first(where: { $0.id == activeTrackID }) else {
+            return ""
+        }
+        return track.label
+    }
+
+    private func emitActivityStateChange() {
+        guard let controller else { return }
+        liveActivity.stateChanged(
+            isPlaying: controller.isPlaying,
+            currentTime: controller.currentTime,
+            trackLabel: currentTrackLabel()
+        )
     }
 
     func endSession() {
         guard let controller else { return }
         controller.onTick = nil
         controller.onStateChange = nil
+        controller.onFinish = nil
         controller.pause()
         Task { await controller.persistPosition() }
         #if os(iOS) || os(tvOS) || os(visionOS)
@@ -426,6 +490,7 @@ final class PlaybackCoordinator {
         self.activeTrackID = nil
         self.repository = nil
         self.isSwitching = false
+        liveActivity.sessionEnded()
         #if os(iOS)
         WatchSessionHost.shared.broadcastSessionEnded()
         #endif
