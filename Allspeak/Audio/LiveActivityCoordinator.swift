@@ -115,6 +115,13 @@ final class LiveActivityCoordinator {
         attributes = nil
     }
 
+    func playbackFinished() {
+        if isActive {
+            coordinator.end()
+        }
+        isActive = false
+    }
+
     private func startIfPossible(with state: AllspeakActivityAttributes.ContentState) {
         guard let attributes else { return }
         isActive = coordinator.start(attributes: attributes, state: state)

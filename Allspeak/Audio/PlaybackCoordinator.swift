@@ -154,6 +154,7 @@ final class PlaybackCoordinator {
         }
         controller.onTick = { [weak self] in self?.handleControllerTick() }
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
+        controller.onFinish = { [weak self] in self?.handleControllerFinish() }
 
         self.controller = controller
         self.sessionID = sessionID
@@ -207,6 +208,7 @@ final class PlaybackCoordinator {
         }
         controller.onTick = { [weak self] in self?.handleControllerTick() }
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
+        controller.onFinish = { [weak self] in self?.handleControllerFinish() }
         self.controller = controller
         self.sessionID = nil
         self.sessionUUID = sessionUUID
@@ -436,6 +438,10 @@ final class PlaybackCoordinator {
         #endif
     }
 
+    private func handleControllerFinish() {
+        liveActivity.playbackFinished()
+    }
+
     private func currentActivityState() -> AllspeakActivityAttributes.ContentState {
         AllspeakActivityAttributes.ContentState(
             isPlaying: controller?.isPlaying ?? false,
@@ -465,6 +471,7 @@ final class PlaybackCoordinator {
         guard let controller else { return }
         controller.onTick = nil
         controller.onStateChange = nil
+        controller.onFinish = nil
         controller.pause()
         Task { await controller.persistPosition() }
         #if os(iOS) || os(tvOS) || os(visionOS)

@@ -262,6 +262,31 @@ struct LiveActivityCoordinatorTests {
         #expect(secondAttrs.sessionID == secondID)
     }
 
+    @Test("playbackFinished ends the activity but keeps attributes so stateChanged can restart it")
+    func playbackFinishedAllowsRestartViaStateChanged() {
+        let mock = MockActivityCoordinator()
+        let coordinator = makeCoordinator(mock: mock)
+
+        coordinator.sessionStarted(
+            id: Self.sessionID,
+            title: "Dune",
+            totalDuration: 9_000,
+            initialState: Self.initialState
+        )
+        coordinator.playbackFinished()
+
+        #expect(mock.endCount() == 1)
+
+        coordinator.stateChanged(isPlaying: true, currentTime: 0, trackLabel: "Original")
+
+        #expect(mock.startCount() == 2)
+        guard case let .start(attrs, _) = mock.calls.last else {
+            Issue.record("expected last call to be .start")
+            return
+        }
+        #expect(attrs.sessionID == Self.sessionID)
+    }
+
     @Test("stateChanged uses injected dateProvider for anchorDate")
     func stateChangedUsesInjectedDate() {
         let mock = MockActivityCoordinator()

@@ -371,6 +371,48 @@ struct PlaybackCoordinatorTests {
         #expect(recorder.calls.last == .end)
     }
 
+    @Test("natural track finish ends the Live Activity")
+    func naturalFinishEndsActivity() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let recorder = Self.attachRecorder(to: coordinator)
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Dune", audio: audio, subtitles: Self.cues)
+        defer { coordinator.endSession() }
+
+        let controller = try #require(coordinator.controller)
+        let endCountBefore = recorder.endCount
+
+        controller.onFinish?()
+
+        #expect(recorder.endCount == endCountBefore + 1)
+        #expect(recorder.calls.last == .end)
+    }
+
+    @Test("replaying after natural finish recreates the Live Activity")
+    func replayAfterNaturalFinishRestartsActivity() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let recorder = Self.attachRecorder(to: coordinator)
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Dune", audio: audio, subtitles: Self.cues)
+        defer { coordinator.endSession() }
+
+        let controller = try #require(coordinator.controller)
+        controller.onFinish?()
+
+        let startCountBefore = recorder.startCount
+        controller.onStateChange?()
+
+        #expect(recorder.startCount == startCountBefore + 1)
+    }
+
     @Test("starting a new session ends the prior Live Activity and starts a fresh one")
     func startReplacingPriorSessionEndsAndRestartsActivity() throws {
         let coordinator = PlaybackCoordinator.shared
