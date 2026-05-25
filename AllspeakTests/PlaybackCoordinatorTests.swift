@@ -385,7 +385,7 @@ struct PlaybackCoordinatorTests {
         defer { coordinator.endSession() }
 
         #expect(recorder.startCount == 2)
-        #expect(recorder.endCount >= 1)
+        #expect(recorder.endCount == 1)
     }
 
     @Test("switchTrack re-emits Live Activity state with the new track label")

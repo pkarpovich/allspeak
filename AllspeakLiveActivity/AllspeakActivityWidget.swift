@@ -10,7 +10,7 @@ struct AllspeakActivityWidget: Widget {
                 attributes: context.attributes,
                 state: context.state
             )
-            .widgetURL(URL(string: "allspeak://session/\(context.attributes.sessionID.uuidString)"))
+            .widgetURL(SessionURLParser.sessionURL(for: context.attributes.sessionID))
             .containerBackground(Tokens.bg, for: .widget)
         } dynamicIsland: { context in
             DynamicIsland {
@@ -58,7 +58,7 @@ struct AllspeakActivityWidget: Widget {
                 Image(systemName: context.state.isPlaying ? "waveform" : "pause.fill")
                     .foregroundStyle(Tokens.accent)
             }
-            .widgetURL(URL(string: "allspeak://session/\(context.attributes.sessionID.uuidString)"))
+            .widgetURL(SessionURLParser.sessionURL(for: context.attributes.sessionID))
         }
         .supplementalActivityFamilies([.small])
     }

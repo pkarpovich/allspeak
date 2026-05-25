@@ -216,4 +216,6 @@ round-trip needed.
 - iPhone in Low Power Mode: Activity should still update on local state changes.
 - User disabled "Allow Live Activities" in Settings → Allspeak: app behaves as pre-feature (verified in Task 8 path).
 
-**External system updates**: none. No backend, no Apple Developer Portal changes (Live Activities are free, no special entitlement for local push-less mode).
+**External system updates**:
+- TestFlight: the `AllspeakLiveActivity` widget extension is a separate app target with bundle id `dev.karpovich.allspeak.liveactivity`. Before the next TestFlight deploy can succeed, an App ID + provisioning profile must be created in Apple Developer Portal for this bundle id, the profile uploaded as the `PROVISIONING_PROFILE_LIVEACTIVITY` GitHub Actions secret, and `.github/workflows/deploy-testflight.yml` extended to install that profile, write `AllspeakLiveActivity/Signing.xcconfig`, and add an entry under `provisioningProfiles` in `ExportOptions.plist`. `.github/workflows/verify.yml` already stubs an unsigned xcconfig for simulator-only PR builds.
+- No backend or runtime entitlement changes (Live Activities are free, no push token needed for the local-only mode used here).

@@ -60,7 +60,7 @@ final class LiveActivityCoordinator {
     private let coordinator: ActivityCoordinating
     private var attributes: AllspeakActivityAttributes?
     private var isActive: Bool = false
-    private var dateProvider: @MainActor () -> Date
+    private let dateProvider: @MainActor () -> Date
 
     init(
         coordinator: ActivityCoordinating = RealActivityCoordinator(),
