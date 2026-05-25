@@ -96,6 +96,7 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: AllspeakLiveActivity
+      - path: Allspeak/Audio/AllspeakActivityAttributes.swift
     configFiles:
       Debug: AllspeakLiveActivity/Signing.xcconfig
       Release: AllspeakLiveActivity/Signing.xcconfig

@@ -81,12 +81,12 @@ round-trip needed.
 
 **Skills**: `axiom:axiom-integration` → `skills/extensions-widgets-ref.md` for `ActivityAttributes` / `ContentState` shape + 4KB size rules; `swift-testing-expert` for `@Test` + `#expect` Codable round-trip pattern (see `references/expectations.md`).
 
-- [ ] create `Allspeak/Audio/AllspeakActivityAttributes.swift` (membership: Allspeak target + AllspeakLiveActivity target via `project.yml` shared sources)
-- [ ] declare `struct AllspeakActivityAttributes: ActivityAttributes` with `sessionID: UUID`, `sessionTitle: String`, `totalDuration: TimeInterval`
-- [ ] declare nested `ContentState: Codable, Hashable` with `isPlaying: Bool`, `anchorTime: TimeInterval`, `anchorDate: Date`, `activeTrackLabel: String`
-- [ ] add `project.yml` config so the file is compiled into both targets
-- [ ] write `AllspeakActivityAttributesTests.swift` asserting Codable round-trip + total JSON size < 1024 bytes for a realistic state
-- [ ] run project tests — must pass before task 3
+- [x] create `Allspeak/Audio/AllspeakActivityAttributes.swift` (membership: Allspeak target + AllspeakLiveActivity target via `project.yml` shared sources)
+- [x] declare `struct AllspeakActivityAttributes: ActivityAttributes` with `sessionID: UUID`, `sessionTitle: String`, `totalDuration: TimeInterval`
+- [x] declare nested `ContentState: Codable, Hashable` with `isPlaying: Bool`, `anchorTime: TimeInterval`, `anchorDate: Date`, `activeTrackLabel: String`
+- [x] add `project.yml` config so the file is compiled into both targets
+- [x] write `AllspeakActivityAttributesTests.swift` asserting Codable round-trip + total JSON size < 1024 bytes for a realistic state
+- [x] run project tests — must pass before task 3
 
 ### Task 3: Implement `LiveActivityCoordinator` with mockable seam
 
