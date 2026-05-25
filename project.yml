@@ -25,6 +25,7 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: Allspeak
+      - path: AllspeakLiveActivity/TogglePlaybackIntent.swift
     dependencies:
       - target: AllspeakWatch
         embed: true
@@ -111,3 +112,4 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) WIDGET_EXTENSION"

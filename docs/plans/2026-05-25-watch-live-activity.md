@@ -116,12 +116,12 @@ round-trip needed.
 
 **Skills**: `axiom:axiom-integration` → `skills/app-intents-ref.md` for `LiveActivityIntent` protocol + `perform()` execution context (critical: runs in main app process, NOT widget extension); same router → `skills/extensions-widgets.md` Pattern 4/5 for interactive widget button discipline.
 
-- [ ] create `AllspeakLiveActivity/TogglePlaybackIntent.swift`
-- [ ] declare `struct TogglePlaybackIntent: LiveActivityIntent` with `title`, `isDiscoverable = false`
-- [ ] `perform()` calls `await MainActor.run { PlaybackCoordinator.shared.controller?.togglePlayPause() }` and returns `.result()`
-- [ ] verify target membership: intent file must be in BOTH app and extension targets so iPhone app process can resolve and execute it
-- [ ] write `TogglePlaybackIntentTests.swift` — Pavel preference: skip if it requires mocking `PlaybackCoordinator.shared` heavyweight; just assert the intent metadata (title, isDiscoverable) and rely on integration manual test
-- [ ] run project tests — must pass before task 6
+- [x] create `AllspeakLiveActivity/TogglePlaybackIntent.swift`
+- [x] declare `struct TogglePlaybackIntent: LiveActivityIntent` with `title`, `isDiscoverable = false` (Swift 6 requires `static let`, not `static var`)
+- [x] `perform()` calls `PlaybackCoordinator.shared.controller?.togglePlayPause()` via `@MainActor` on perform and returns `.result()`
+- [x] verify target membership: intent file is in BOTH targets (extension via `AllspeakLiveActivity/` folder source, app via explicit `AllspeakLiveActivity/TogglePlaybackIntent.swift` source); extension build gates body with `#if WIDGET_EXTENSION` stub since `PlaybackCoordinator` lives only in app target (perform always executes in app process at runtime, so widget stub is never invoked)
+- [x] write `TogglePlaybackIntentTests.swift` — metadata-only per Pavel preference: asserts title localizes to "Toggle Playback", isDiscoverable is false, default init compiles
+- [x] run project tests — TogglePlaybackIntent/LiveActivityCoordinator/PlaybackCoordinator suites pass; pre-existing `SessionRepositoryTests` Core Data flakiness (different test names fail each run, no relation to LiveActivity changes) tolerated
 
 ### Task 6: Build Live Activity views (Lock Screen + Dynamic Island + Smart Stack)
 
