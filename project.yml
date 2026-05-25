@@ -76,6 +76,7 @@ targets:
       - path: Allspeak/Watch/WatchMessageSender.swift
       - path: Allspeak/Watch/WatchSessionClient.swift
       - path: Allspeak/Watch/SkipCoalescer.swift
+      - path: Allspeak/Watch/SessionURLParser.swift
     configFiles:
       Debug: AllspeakWatch/Signing.xcconfig
       Release: AllspeakWatch/Signing.xcconfig

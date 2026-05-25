@@ -20,6 +20,17 @@
 	<string>1</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.karpovich.allspeak.session</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>allspeak</string>
+			</array>
+		</dict>
+	</array>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>

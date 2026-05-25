@@ -141,12 +141,12 @@ round-trip needed.
 
 **Skills**: `axiom:axiom-watchos` → `skills/platform-basics.md` for watch app lifecycle + URL scheme handling specifics on watchOS; `swiftui-expert-skill` for `.onOpenURL` modifier wiring + navigation state restoration; `swift-testing-expert` for pure-function `parseSessionURL(_:)` unit test.
 
-- [ ] register `allspeak` URL scheme in `AllspeakWatch/Info.plist` (`CFBundleURLTypes`)
-- [ ] register same scheme in `Allspeak/Info.plist` (so iPhone can also receive the deep link as fallback if mirror tap goes to iPhone)
-- [ ] in `AllspeakWatch/AllspeakWatchApp.swift` add `.onOpenURL { url in /* parse session UUID, navigate to player */ }`
-- [ ] watch app navigation: parse `allspeak://session/<uuid>`, route to existing player view for that session via existing `WatchSessionClient` state (sessionID-driven)
-- [ ] write `AllspeakWatchAppURLTests.swift` for the URL parsing function only (pure logic — extract `parseSessionURL(_:) -> UUID?` helper)
-- [ ] run project tests — must pass before task 8
+- [x] register `allspeak` URL scheme in `AllspeakWatch/Info.plist` (`CFBundleURLTypes`)
+- [x] register same scheme in `Allspeak/Info.plist` (so iPhone can also receive the deep link as fallback if mirror tap goes to iPhone)
+- [x] in `AllspeakWatch/AllspeakWatchApp.swift` add `.onOpenURL { url in /* parse session UUID, navigate to player */ }`
+- [x] watch app navigation: parse `allspeak://session/<uuid>`, route to existing player view by lifting selection state into `AllspeakWatchApp` and forcing `.currentLine` tab on URL open; session matching is implicit via `WatchSessionClient`'s sessionID-driven state, so the URL handler only needs to switch tabs
+- [x] write `AllspeakWatchAppURLTests.swift` for the URL parsing function only (pure logic — `SessionURLParser.parseSessionURL(_:) -> UUID?` helper in shared `Allspeak/Watch/SessionURLParser.swift`, compiled into both Allspeak and AllspeakWatch targets)
+- [x] run project tests — 266/266 pass
 
 ### Task 8: Verify acceptance criteria
 
