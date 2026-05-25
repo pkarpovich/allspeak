@@ -98,6 +98,7 @@ targets:
     sources:
       - path: AllspeakLiveActivity
       - path: Allspeak/Audio/AllspeakActivityAttributes.swift
+      - path: Allspeak/Design/Tokens.swift
     configFiles:
       Debug: AllspeakLiveActivity/Signing.xcconfig
       Release: AllspeakLiveActivity/Signing.xcconfig

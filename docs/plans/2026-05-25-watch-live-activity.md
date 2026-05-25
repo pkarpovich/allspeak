@@ -127,15 +127,15 @@ round-trip needed.
 
 **Skills**: `axiom:axiom-integration` → `skills/extensions-widgets-ref.md` for `ActivityConfiguration` + `DynamicIsland` block; `axiom:axiom-watchos` → `skills/controls-and-live-activities.md` (mandatory — explains `supplementalActivityFamilies([.small])` and watch surface layout constraints) + `skills/smart-stack-and-complications.md` for Smart Stack appearance rules; `swiftui-expert-skill` for view composition + `Text(timerInterval:)` system-tickers + `Button(intent:)` interactive widget pattern; `axiom:axiom-design` for Liquid Glass tints if reusing app's chrome aesthetic.
 
-- [ ] create `AllspeakLiveActivity/AllspeakActivityWidget.swift` with `Widget` conforming type
-- [ ] `ActivityConfiguration(for: AllspeakActivityAttributes.self)`:
-  - lock screen view: HStack — VStack (sessionTitle, trackLabel + `Text(timerInterval:)` for progress) on left, `Button(intent: TogglePlaybackIntent())` with `pause.fill`/`play.fill` SF Symbol on right, wrapped in `Link(destination:)` for body tap → `allspeak://session/<id>`
-  - dynamic island: compact (icon + timer), expanded (same as lock screen), minimal (icon only)
-  - `.supplementalActivityFamilies([.small])` — critical for watch Smart Stack mirror
-- [ ] reuse design tokens from `Allspeak/Design/Tokens.swift` for colors / font sizes
-- [ ] register `AllspeakActivityWidget()` in `AllspeakLiveActivityBundle`
-- [ ] no unit tests for SwiftUI views — call this out in the test file as explicit "no widget snapshot tests, see plan §Testing Strategy" comment
-- [ ] run project tests — must pass before task 7
+- [x] create `AllspeakLiveActivity/AllspeakActivityWidget.swift` with `Widget` conforming type
+- [x] `ActivityConfiguration(for: AllspeakActivityAttributes.self)`:
+  - lock screen view: HStack — VStack (sessionTitle, trackLabel + `Text(timerInterval:)` for progress) on left, `Button(intent: TogglePlaybackIntent())` with `pause.fill`/`play.fill` SF Symbol on right; deep-link via `.widgetURL(allspeak://session/<id>)` (preferred over wrapping the body in `Link` because Link would compete with the button's tap target; `widgetURL` only fires when no interactive child handles the tap)
+  - dynamic island: compact (icon + timer), expanded (icon, title+track, timer, pause/play button), minimal (icon only)
+  - `.supplementalActivityFamilies([.small])` — critical for watch Smart Stack mirror; `AllspeakActivityLockScreenView` switches on `@Environment(\.activityFamily)` to render a compact watch layout when `.small`
+- [x] reuse design tokens from `Allspeak/Design/Tokens.swift` for colors / font sizes (added to extension target sources in `project.yml`)
+- [x] register `AllspeakActivityWidget()` in `AllspeakLiveActivityBundle`
+- [x] no unit tests for SwiftUI views — `AllspeakTests/AllspeakActivityWidgetTests.swift` contains the explicit "no widget snapshot tests, see plan §Testing Strategy" comment
+- [x] run project tests — 127/127 pass (pre-existing flaky `SessionRepositoryTests.setActiveTrackPersists` succeeded on auto-retry, same Core Data flake documented in Task 5)
 
 ### Task 7: Watch app URL scheme handler
 
