@@ -253,6 +253,175 @@ struct PlaybackCoordinatorTests {
             try await coordinator.switchTrack(to: UUID())
         }
     }
+
+    @MainActor
+    private final class RecordingActivityCoordinator: ActivityCoordinating {
+        enum Call: Equatable {
+            case start(UUID, String, TimeInterval)
+            case update(Bool, TimeInterval, String)
+            case end
+        }
+
+        private(set) var calls: [Call] = []
+        var startSucceeds: Bool = true
+
+        func start(
+            attributes: AllspeakActivityAttributes,
+            state: AllspeakActivityAttributes.ContentState
+        ) -> Bool {
+            calls.append(.start(attributes.sessionID, attributes.sessionTitle, attributes.totalDuration))
+            return startSucceeds
+        }
+
+        func update(state: AllspeakActivityAttributes.ContentState) {
+            calls.append(.update(state.isPlaying, state.anchorTime, state.activeTrackLabel))
+        }
+
+        func end() {
+            calls.append(.end)
+        }
+
+        func reset() {
+            calls.removeAll()
+        }
+
+        var startCount: Int {
+            calls.reduce(0) { acc, c in if case .start = c { return acc + 1 } else { return acc } }
+        }
+        var updateCount: Int {
+            calls.reduce(0) { acc, c in if case .update = c { return acc + 1 } else { return acc } }
+        }
+        var endCount: Int {
+            calls.reduce(0) { acc, c in if case .end = c { return acc + 1 } else { return acc } }
+        }
+    }
+
+    @MainActor
+    private static func attachRecorder(to coordinator: PlaybackCoordinator) -> RecordingActivityCoordinator {
+        let recorder = RecordingActivityCoordinator()
+        coordinator.liveActivity = LiveActivityCoordinator(coordinator: recorder)
+        return recorder
+    }
+
+    @Test("startSession triggers Live Activity start with attributes")
+    func startSessionTriggersActivityStart() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let recorder = Self.attachRecorder(to: coordinator)
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let uuid = UUID()
+        try coordinator.startSession(sessionUUID: uuid, title: "Dune", audio: audio, subtitles: Self.cues)
+        defer { coordinator.endSession() }
+
+        #expect(recorder.startCount == 1)
+        guard case let .start(sessionID, title, duration) = recorder.calls.first else {
+            Issue.record("expected first call to be .start")
+            return
+        }
+        #expect(sessionID == uuid)
+        #expect(title == "Dune")
+        #expect(duration > 0)
+    }
+
+    @Test("controller state changes propagate to Live Activity as updates")
+    func controllerStateChangesEmitUpdates() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let recorder = Self.attachRecorder(to: coordinator)
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Dune", audio: audio, subtitles: Self.cues)
+        defer { coordinator.endSession() }
+
+        let controller = try #require(coordinator.controller)
+        let startCountBefore = recorder.startCount
+        let updateCountBefore = recorder.updateCount
+
+        controller.seek(to: 1.5)
+
+        #expect(recorder.startCount == startCountBefore)
+        #expect(recorder.updateCount > updateCountBefore)
+        if case let .update(isPlaying, anchor, _) = recorder.calls.last {
+            #expect(isPlaying == false)
+            #expect(abs(anchor - 1.5) < 0.1)
+        } else {
+            Issue.record("expected last call to be .update")
+        }
+    }
+
+    @Test("endSession ends the Live Activity")
+    func endSessionEndsActivity() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let recorder = Self.attachRecorder(to: coordinator)
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Dune", audio: audio, subtitles: Self.cues)
+        coordinator.endSession()
+
+        #expect(recorder.startCount == 1)
+        #expect(recorder.endCount == 1)
+        #expect(recorder.calls.last == .end)
+    }
+
+    @Test("starting a new session ends the prior Live Activity and starts a fresh one")
+    func startReplacingPriorSessionEndsAndRestartsActivity() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let recorder = Self.attachRecorder(to: coordinator)
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "A", audio: audio, subtitles: Self.cues)
+        try coordinator.startSession(sessionUUID: UUID(), title: "B", audio: audio, subtitles: Self.cues)
+        defer { coordinator.endSession() }
+
+        #expect(recorder.startCount == 2)
+        #expect(recorder.endCount >= 1)
+    }
+
+    @Test("switchTrack re-emits Live Activity state with the new track label")
+    func switchTrackEmitsActivityUpdateWithNewLabel() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        let recorder = RecordingActivityCoordinator()
+        let liveActivity = LiveActivityCoordinator(coordinator: recorder)
+        fixture.coordinator.liveActivity = liveActivity
+        let controller = try #require(fixture.coordinator.controller)
+        liveActivity.sessionStarted(
+            id: fixture.sessionUUID,
+            title: "Movie",
+            totalDuration: controller.duration,
+            initialState: AllspeakActivityAttributes.ContentState(
+                isPlaying: false,
+                anchorTime: 0,
+                anchorDate: Date(),
+                activeTrackLabel: "Loudnorm"
+            )
+        )
+        recorder.reset()
+
+        try await fixture.coordinator.switchTrack(to: fixture.track2UUID)
+
+        #expect(recorder.updateCount >= 1)
+        let lastLabel = recorder.calls.reversed().compactMap { call -> String? in
+            if case let .update(_, _, label) = call { return label }
+            return nil
+        }.first
+        #expect(lastLabel == "DFN")
+    }
 }
 
 #endif

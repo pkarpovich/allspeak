@@ -104,13 +104,13 @@ round-trip needed.
 
 **Skills**: `axiom:axiom-concurrency` for keeping new calls inside existing `@MainActor` actor isolation of `PlaybackCoordinator`; `swift-testing-expert` for extending existing `PlaybackCoordinatorTests` with dependency injection (existing pattern in repo).
 
-- [ ] add `private let liveActivity = LiveActivityCoordinator()` to `PlaybackCoordinator`
-- [ ] in `handleControllerStateChange()`: call `liveActivity.stateChanged(...)` with current AudioController state, mapping `controller.isPlaying`, `controller.currentTime`, `activeTrackLabel`
-- [ ] in `switchTrack(to:)`: re-emit `stateChanged` after switch completes (new track label, new anchor)
-- [ ] in `endSession()`: call `liveActivity.sessionEnded()`
-- [ ] in seek paths: ensure a state change emission happens so `anchorTime`/`anchorDate` resync (likely already happens via `handleControllerStateChange` — verify by tracing AudioController.seek call sites)
-- [ ] extend `PlaybackCoordinatorTests.swift` with `MockActivityCoordinator` (or via injecting `LiveActivityCoordinator` test seam) — verify activity start on first play, update on subsequent state changes, end on `endSession()`
-- [ ] run project tests — must pass before task 5
+- [x] add `private let liveActivity = LiveActivityCoordinator()` to `PlaybackCoordinator` (made `internal var` for test injection seam)
+- [x] in `handleControllerStateChange()`: call `liveActivity.stateChanged(...)` with current AudioController state, mapping `controller.isPlaying`, `controller.currentTime`, `activeTrackLabel`
+- [x] in `switchTrack(to:)`: re-emit `stateChanged` after switch completes (new track label, new anchor)
+- [x] in `endSession()`: call `liveActivity.sessionEnded()`
+- [x] in seek paths: ensure a state change emission happens so `anchorTime`/`anchorDate` resync — verified: `AudioController.seek(to:)` calls `onStateChange?()` (AudioController.swift:113), which routes to `handleControllerStateChange()` → `emitActivityStateChange()`
+- [x] extend `PlaybackCoordinatorTests.swift` with `MockActivityCoordinator` (or via injecting `LiveActivityCoordinator` test seam) — verify activity start on first play, update on subsequent state changes, end on `endSession()`
+- [x] run project tests — must pass before task 5
 
 ### Task 5: Build `TogglePlaybackIntent` (LiveActivityIntent)
 
