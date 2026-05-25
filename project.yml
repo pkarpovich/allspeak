@@ -28,6 +28,8 @@ targets:
     dependencies:
       - target: AllspeakWatch
         embed: true
+      - target: AllspeakLiveActivity
+        embed: true
     configFiles:
       Debug: Allspeak/Signing.xcconfig
       Release: Allspeak/Signing.xcconfig
@@ -88,3 +90,23 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
         SDKROOT: watchos
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+  AllspeakLiveActivity:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: AllspeakLiveActivity
+    configFiles:
+      Debug: AllspeakLiveActivity/Signing.xcconfig
+      Release: AllspeakLiveActivity/Signing.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak.liveactivity
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_FILE: AllspeakLiveActivity/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SUPPORTS_MACCATALYST: NO
+        SKIP_INSTALL: YES
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"

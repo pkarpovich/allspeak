@@ -69,13 +69,13 @@ round-trip needed.
 
 **Skills**: `axiom:axiom-build` (XcodeGen + target config + embed extensions); `axiom:axiom-integration` → `skills/extensions-widgets.md` for `NSSupportsLiveActivities` plist key and bundle structure.
 
-- [ ] add new `AllspeakLiveActivity` target block to `project.yml` (extensionPoint: com.apple.widgetkit-extension, iOS 26.0, embed in Allspeak app)
-- [ ] add `AllspeakLiveActivity/Info.plist` with `NSExtension` (point identifier, principal class) and `NSSupportsLiveActivitiesFrequentUpdates = false`
-- [ ] add `AllspeakLiveActivity/AllspeakLiveActivityBundle.swift` as `@main WidgetBundle` (initially empty, just registers extension)
-- [ ] add `NSSupportsLiveActivities = true` to `Allspeak/Info.plist`
-- [ ] run `xcodegen generate`, open project, confirm both targets build
-- [ ] add a placeholder unit test asserting bundle identifier matches `dev.karpovich.allspeak.liveactivity` in a new `AllspeakLiveActivityTests` target — OR skip if the target adds too much friction (Pavel preference: keep tests close to logic, scaffolding tests have low value)
-- [ ] run project tests — must pass before task 2
+- [x] add new `AllspeakLiveActivity` target block to `project.yml` (extensionPoint: com.apple.widgetkit-extension, iOS 26.0, embed in Allspeak app)
+- [x] add `AllspeakLiveActivity/Info.plist` with `NSExtension` (point identifier) and `NSSupportsLiveActivitiesFrequentUpdates = false` (modern @main WidgetBundle pattern doesn't require NSExtensionPrincipalClass)
+- [x] add `AllspeakLiveActivity/AllspeakLiveActivityBundle.swift` as `@main WidgetBundle` (placeholder StaticConfiguration registered; real Live Activity widget added in Task 6)
+- [x] add `NSSupportsLiveActivities = true` to `Allspeak/Info.plist`
+- [x] run `xcodegen generate`, open project, confirm both targets build
+- [x] add a placeholder unit test asserting bundle identifier matches `dev.karpovich.allspeak.liveactivity` in a new `AllspeakLiveActivityTests` target — skipped per plan (Pavel preference: scaffolding tests have low value)
+- [x] run project tests — must pass before task 2
 
 ### Task 2: Define `AllspeakActivityAttributes` shared between app and extension
 
