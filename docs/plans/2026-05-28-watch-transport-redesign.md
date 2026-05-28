@@ -125,10 +125,10 @@ and address the same use case "dark cinema, tactile control, no distraction".
 
 **Skills**: `swiftui-expert-skill` → `references/focus-patterns.md` for `@FocusState` and Crown focus routing in `TabView`; `axiom:axiom-watchos` → `skills/design-for-watchos.md` for the per-page Crown convention.
 
-- [ ] verify each `TabView` page owns its own Crown focus: `TransportView` (volume), `SubtitleListView` (scroll cue list — existing behaviour), `TrackListView` (scroll track list — existing behaviour)
-- [ ] inspect existing pages: if they use `List`/`ScrollView`, Crown attaches automatically and yields focus on swipe; otherwise add explicit `.focusable()` so `TransportView`'s `.digitalCrownRotation` doesn't bleed into other pages
-- [ ] no new tests (focus routing is OS-level behaviour, verified manually in Task 7)
-- [ ] run project tests — must pass before task 7
+- [x] verify each `TabView` page owns its own Crown focus: `TransportView` (volume), `SubtitleListView` (scroll cue list — existing behaviour), `TrackListView` (scroll track list — existing behaviour)
+- [x] inspect existing pages: if they use `List`/`ScrollView`, Crown attaches automatically and yields focus on swipe; otherwise add explicit `.focusable()` so `TransportView`'s `.digitalCrownRotation` doesn't bleed into other pages
+- [x] no new tests (focus routing is OS-level behaviour, verified manually in Task 7)
+- [x] run project tests — must pass before task 7
 
 ### Task 7: Verify acceptance criteria
 

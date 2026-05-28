@@ -26,6 +26,7 @@ struct SubtitleListView: View {
             .foregroundStyle(Tokens.text2)
             .multilineTextAlignment(.center)
             .padding(.horizontal, 12)
+            .focusable()
     }
 
     private var list: some View {
