@@ -108,6 +108,63 @@ struct WatchSessionHostTests {
         #expect(abs(snap.currentTime - 2.5) < 0.05)
     }
 
+    @Test("dispatch(.setVolume) writes the value through to the controller's player")
+    func dispatchSetVolume() async throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        let priorVolume = UserDefaults.standard.object(forKey: AudioController.volumeDefaultsKey)
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+            if let priorVolume {
+                UserDefaults.standard.set(priorVolume, forKey: AudioController.volumeDefaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: AudioController.volumeDefaultsKey)
+            }
+        }
+
+        _ = await host.dispatch(.setVolume(0.3))
+
+        let controller = try #require(coordinator.controller)
+        let mirror = Mirror(reflecting: controller)
+        let player = try #require(
+            mirror.children.first(where: { $0.label == "player" })?.value as? AVAudioPlayer
+        )
+        #expect(abs(player.volume - 0.3) < 0.0001)
+    }
+
+    @Test("dispatch(.setVolume) clamps out-of-range values before applying")
+    func dispatchSetVolumeClamps() async throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        let priorVolume = UserDefaults.standard.object(forKey: AudioController.volumeDefaultsKey)
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+            if let priorVolume {
+                UserDefaults.standard.set(priorVolume, forKey: AudioController.volumeDefaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: AudioController.volumeDefaultsKey)
+            }
+        }
+
+        _ = await host.dispatch(.setVolume(5.0))
+
+        let controller = try #require(coordinator.controller)
+        let mirror = Mirror(reflecting: controller)
+        let player = try #require(
+            mirror.children.first(where: { $0.label == "player" })?.value as? AVAudioPlayer
+        )
+        #expect(abs(player.volume - 1.0) < 0.0001)
+    }
+
+    @Test("dispatch(.setVolume) without active session returns empty snapshot")
+    func dispatchSetVolumeWithoutSession() async {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+        let snap = await host.dispatch(.setVolume(0.5))
+        #expect(snap == PlaybackSnapshot.empty)
+    }
+
     @Test("dispatch without active session returns empty snapshot")
     func dispatchWithoutSession() async {
         let coordinator = PlaybackCoordinator.shared
