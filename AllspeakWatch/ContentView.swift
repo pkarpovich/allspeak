@@ -15,7 +15,7 @@ struct ContentView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            CurrentLineView()
+            TransportView()
                 .tag(Page.currentLine)
             SubtitleListView()
                 .tag(Page.subtitleList)

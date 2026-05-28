@@ -107,19 +107,19 @@ and address the same use case "dark cinema, tactile control, no distraction".
 
 **Skills**: `swiftui-expert-skill` for the new layout (`HStack` rows, button styling, focus) — see `references/view-structure.md` + `references/focus-patterns.md`; `axiom:axiom-watchos` → `skills/design-for-watchos.md` for tap-target HIG and glanceable UI; `axiom:axiom-design` for SF Symbol selection (`goforward.3`, `gobackward.3` for ±3s, existing tokens for ±0.5s).
 
-- [ ] rename `AllspeakWatch/Views/CurrentLineView.swift` → `TransportView.swift`; rename `struct CurrentLineView` → `struct TransportView`
-- [ ] update reference in `AllspeakWatch/ContentView.swift:18`
-- [ ] delete the `currentLine` computed view and `currentCueText` helper (no longer rendered; `client.cues` / `interpolatedTime` still feed Page 2 unchanged)
-- [ ] replace body with: VStack of [sessionTitle Text (caption2, lineLimit 1), Spacer, HStack [SkipBackCoarse, PlayPause, SkipForwardCoarse], HStack [SkipBackFine, Spacer, SkipForwardFine], Spacer]
-- [ ] PlayPause stays at current size (`.glassProminent`, tint accent); coarse ±3s buttons are medium-sized (similar to current ±0.5); fine ±0.5s become small icon-only buttons at edges
-- [ ] add `@State private var volume: Double = 1.0` (init read from UserDefaults on first appear or via existing snapshot if present)
-- [ ] add `.focusable() .digitalCrownRotation($volume, from: 0, through: 1, by: 0.05, sensitivity: .low, isContinuous: false, isHapticFeedbackEnabled: true)` on the root VStack
-- [ ] add `.onChange(of: volume)` → `volumeThrottler.update(Float(volume))`
-- [ ] initialize `VolumeThrottler` as `@State` with send-closure → `WatchSessionClient.shared.send(.setVolume($0))`
-- [ ] both ±0.5 buttons and ±3 buttons call the existing `SkipCoalescer` with their respective deltas (one coalescer instance per view, deltas summed in 250ms window)
-- [ ] no SwiftUI snapshot tests; verify in Task 7 (acceptance)
-- [ ] update accessibility labels: "Skip back 3 seconds", "Skip forward 3 seconds" (fine ±0.5s labels unchanged)
-- [ ] run project tests — must pass before task 6
+- [x] rename `AllspeakWatch/Views/CurrentLineView.swift` → `TransportView.swift`; rename `struct CurrentLineView` → `struct TransportView`
+- [x] update reference in `AllspeakWatch/ContentView.swift:18`
+- [x] delete the `currentLine` computed view and `currentCueText` helper (no longer rendered; `client.cues` / `interpolatedTime` still feed Page 2 unchanged)
+- [x] replace body with: VStack of [sessionTitle Text (caption2, lineLimit 1), Spacer, HStack [SkipBackCoarse, PlayPause, SkipForwardCoarse], HStack [SkipBackFine, Spacer, SkipForwardFine], Spacer]
+- [x] PlayPause stays at current size (`.glassProminent`, tint accent); coarse ±3s buttons are medium-sized (similar to current ±0.5); fine ±0.5s become small icon-only buttons at edges
+- [x] add `@State private var volume: Double = 1.0` (init read from UserDefaults on first appear or via existing snapshot if present)
+- [x] add `.focusable() .digitalCrownRotation($volume, from: 0, through: 1, by: 0.05, sensitivity: .low, isContinuous: false, isHapticFeedbackEnabled: true)` on the root VStack
+- [x] add `.onChange(of: volume)` → `volumeThrottler.update(Float(volume))`
+- [x] initialize `VolumeThrottler` as `@State` with send-closure → `WatchSessionClient.shared.send(.setVolume($0))` (also writes to watch-local UserDefaults so Crown resumes at last value after relaunch)
+- [x] both ±0.5 buttons and ±3 buttons call the existing `SkipCoalescer` with their respective deltas (one coalescer instance per view, deltas summed in 250ms window)
+- [x] no SwiftUI snapshot tests; verify in Task 7 (acceptance)
+- [x] update accessibility labels: "Skip back 3 seconds", "Skip forward 3 seconds" (fine ±0.5s labels unchanged)
+- [x] run project tests — must pass before task 6
 
 ### Task 6: Wire Crown focus across TabView pages
 

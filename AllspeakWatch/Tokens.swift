@@ -20,10 +20,12 @@ enum Tokens {
     }
 
     enum Icon {
-        static let play         = "play.fill"
-        static let pause        = "pause.fill"
-        static let skipBack     = "gobackward"
-        static let skipForward  = "goforward"
+        static let play              = "play.fill"
+        static let pause             = "pause.fill"
+        static let skipBack          = "gobackward"
+        static let skipForward       = "goforward"
+        static let skipBackCoarse    = "gobackward.3"
+        static let skipForwardCoarse = "goforward.3"
     }
 }
 
