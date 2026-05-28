@@ -97,11 +97,11 @@ and address the same use case "dark cinema, tactile control, no distraction".
 
 **Skills**: `swift-testing-expert` for time-controlled tests via injected `Clock` (existing `SkipCoalescer` tests are the template); `axiom:axiom-concurrency` for `Sendable` correctness.
 
-- [ ] create `AllspeakWatch/VolumeThrottler.swift` — final class, holds `latest: Float?` and a `Clock`-injected debounce timer
-- [ ] API: `init(clock: any Clock<Duration>, window: Duration = .milliseconds(100), send: @escaping @Sendable (Float) -> Void)`, method `update(_ value: Float)` — schedules send after window if no newer value arrives; coalesces multiple rapid updates into one trailing send
-- [ ] mirror `SkipCoalescer`'s pattern (closure-based send, Clock-injected for tests, Sendable)
-- [ ] write `VolumeThrottlerTests.swift` covering: single update → sent after window; 5 rapid updates → only last value sent; no update → no send; value-equality skip (same value as previous → no send)
-- [ ] run project tests — must pass before task 5
+- [x] create `AllspeakWatch/VolumeThrottler.swift` — final class, holds `latest: Float?` and a `Clock`-injected debounce timer
+- [x] API: `init(clock: any Clock<Duration>, window: Duration = .milliseconds(100), send: @escaping @Sendable (Float) -> Void)`, method `update(_ value: Float)` — schedules send after window if no newer value arrives; coalesces multiple rapid updates into one trailing send
+- [x] mirror `SkipCoalescer`'s pattern (closure-based send, Clock-injected for tests, Sendable)
+- [x] write `VolumeThrottlerTests.swift` covering: single update → sent after window; 5 rapid updates → only last value sent; no update → no send; value-equality skip (same value as previous → no send)
+- [x] run project tests — must pass before task 5
 
 ### Task 5: Rename `CurrentLineView` → `TransportView` and rebuild Page 1
 
