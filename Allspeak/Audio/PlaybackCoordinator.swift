@@ -549,6 +549,8 @@ final class PlaybackCoordinator {
             Task { [weak self] in
                 try? await self?.switchTrack(to: id)
             }
+        case .setVolume:
+            break
         case .requestCueBundle:
             break
         }

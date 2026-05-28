@@ -67,12 +67,12 @@ and address the same use case "dark cinema, tactile control, no distraction".
 
 **Skills**: `axiom:axiom-watchos` → `skills/watch-connectivity.md` for command encoding patterns; `swift-testing-expert` for Codable round-trip test pattern (see existing `WireProtocolTests.swift`).
 
-- [ ] add `case setVolume(Float)` to `WatchCommand` enum in `Allspeak/Watch/WireProtocol.swift`
-- [ ] add `case setVolume` to the `Kind` discriminator
-- [ ] add `volume` to `CodingKeys`
-- [ ] extend `encode(to:)` and `init(from:)` to handle the new case (match shape of existing `.skip(seconds:)`)
-- [ ] extend `WireProtocolTests.swift` with `.setVolume(0.5)` round-trip + boundary tests (0.0, 1.0)
-- [ ] run project tests — must pass before task 2
+- [x] add `case setVolume(Float)` to `WatchCommand` enum in `Allspeak/Watch/WireProtocol.swift`
+- [x] add `case setVolume` to the `Kind` discriminator
+- [x] add `volume` to `CodingKeys`
+- [x] extend `encode(to:)` and `init(from:)` to handle the new case (match shape of existing `.skip(seconds:)`)
+- [x] extend `WireProtocolTests.swift` with `.setVolume(0.5)` round-trip + boundary tests (0.0, 1.0)
+- [x] run project tests — must pass before task 2
 
 ### Task 2: Add `setVolume` + persistence to `AudioController`
 

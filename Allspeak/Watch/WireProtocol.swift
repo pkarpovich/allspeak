@@ -13,11 +13,14 @@ import Foundation
 // Commands (Watch -> iPhone):
 //
 //   .play, .pause, .togglePlayPause   transport-style controls
-//   .skip(seconds:)                   ±0.5s coalesced taps
+//   .skip(seconds:)                   ±0.5s / ±3s coalesced taps
 //   .seek(time:)                      tap-on-cue jumps
 //   .switchTrack(id:)                 swap active AudioTrack on the host
 //                                     session (preserves currentTime +
 //                                     isPlaying; ~100-300ms reload gap)
+//   .setVolume(Float)                 watch Digital Crown -> AVAudioPlayer
+//                                     volume (0...1, clamped); throttled
+//                                     trailing-edge on the watch side
 //   .requestCueBundle(sessionID:,     watch-initiated resync after a cache
 //                     revision:)      miss (watch app reset / Application
 //                                     Support cleanup); host clears its
@@ -80,6 +83,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case skip(seconds: Double)
     case seek(time: Double)
     case switchTrack(id: UUID)
+    case setVolume(Float)
     case requestCueBundle(sessionID: UUID, revision: Int)
 
     private enum CodingKeys: String, CodingKey {
@@ -87,6 +91,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case seconds
         case time
         case trackID
+        case volume
         case sessionID
         case revision
     }
@@ -98,6 +103,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case skip
         case seek
         case switchTrack
+        case setVolume
         case requestCueBundle
     }
 
@@ -119,6 +125,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .switchTrack(let id):
             try container.encode(Kind.switchTrack, forKey: .kind)
             try container.encode(id, forKey: .trackID)
+        case .setVolume(let volume):
+            try container.encode(Kind.setVolume, forKey: .kind)
+            try container.encode(volume, forKey: .volume)
         case .requestCueBundle(let sessionID, let revision):
             try container.encode(Kind.requestCueBundle, forKey: .kind)
             try container.encode(sessionID, forKey: .sessionID)
@@ -142,6 +151,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .seek(time: try container.decode(Double.self, forKey: .time))
         case .switchTrack:
             self = .switchTrack(id: try container.decode(UUID.self, forKey: .trackID))
+        case .setVolume:
+            self = .setVolume(try container.decode(Float.self, forKey: .volume))
         case .requestCueBundle:
             self = .requestCueBundle(
                 sessionID: try container.decode(UUID.self, forKey: .sessionID),
