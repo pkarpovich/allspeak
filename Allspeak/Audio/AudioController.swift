@@ -7,6 +7,8 @@ import QuartzCore
 @MainActor
 @Observable
 final class AudioController {
+    static let volumeDefaultsKey = "playback.volume"
+
     private(set) var isPlaying: Bool = false
     private(set) var currentTime: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
@@ -19,14 +21,20 @@ final class AudioController {
     @ObservationIgnored private var playerDelegateProxy: PlayerDelegateProxy?
     @ObservationIgnored private let repository: SessionRepository?
     @ObservationIgnored private let sessionID: NSManagedObjectID?
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
     @ObservationIgnored var onTick: (@MainActor () -> Void)?
     @ObservationIgnored var onStateChange: (@MainActor () -> Void)?
     @ObservationIgnored var onFinish: (@MainActor () -> Void)?
 
-    init(repository: SessionRepository? = nil, sessionID: NSManagedObjectID? = nil) {
+    init(
+        repository: SessionRepository? = nil,
+        sessionID: NSManagedObjectID? = nil,
+        defaults: UserDefaults = .standard
+    ) {
         self.repository = repository
         self.sessionID = sessionID
+        self.defaults = defaults
     }
 
     func load(audio: URL, subtitles: [Subtitle], title: String, trackLabel: String? = nil) throws {
@@ -36,6 +44,8 @@ final class AudioController {
             self?.playerDidFinish()
         }
         player.delegate = delegateProxy
+        let storedVolume = defaults.object(forKey: Self.volumeDefaultsKey) as? Float
+        player.volume = Self.clampVolume(storedVolume ?? 1.0)
         self.player = player
         self.playerDelegateProxy = delegateProxy
         self.subtitles = subtitles
@@ -117,6 +127,17 @@ final class AudioController {
     func skip(by seconds: TimeInterval) {
         guard let player else { return }
         seek(to: player.currentTime + seconds)
+    }
+
+    func setVolume(_ value: Float) {
+        let clamped = Self.clampVolume(value)
+        player?.volume = clamped
+        defaults.set(clamped, forKey: Self.volumeDefaultsKey)
+    }
+
+    nonisolated static func clampVolume(_ value: Float) -> Float {
+        if value.isNaN { return 1.0 }
+        return max(0.0, min(1.0, value))
     }
 
     func persistPosition() async {

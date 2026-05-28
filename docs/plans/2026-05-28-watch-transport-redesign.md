@@ -78,11 +78,11 @@ and address the same use case "dark cinema, tactile control, no distraction".
 
 **Skills**: `axiom:axiom-concurrency` for `@MainActor` isolation on the new method (matches existing class); `swift-testing-expert` for the persistence test using ephemeral `UserDefaults(suiteName:)`.
 
-- [ ] add `private static let volumeDefaultsKey = "playback.volume"` to `Allspeak/Audio/AudioController.swift`
-- [ ] add `func setVolume(_ value: Float)` — clamps to 0...1, sets `player?.volume`, writes to `UserDefaults.standard`
-- [ ] in `load(audio:subtitles:title:trackLabel:)` after creating the `AVAudioPlayer`, restore volume: `player.volume = UserDefaults.standard.object(forKey: Self.volumeDefaultsKey) as? Float ?? 1.0`
-- [ ] write `AudioControllerTests` cases: clamping (negative → 0, >1 → 1), persistence (set → read UserDefaults), restore-on-load (set, recreate controller, expect player.volume restored). Use injected suite-named UserDefaults to avoid polluting standard defaults in tests.
-- [ ] run project tests — must pass before task 3
+- [x] add `private static let volumeDefaultsKey = "playback.volume"` to `Allspeak/Audio/AudioController.swift`
+- [x] add `func setVolume(_ value: Float)` — clamps to 0...1, sets `player?.volume`, writes to `UserDefaults.standard`
+- [x] in `load(audio:subtitles:title:trackLabel:)` after creating the `AVAudioPlayer`, restore volume: `player.volume = UserDefaults.standard.object(forKey: Self.volumeDefaultsKey) as? Float ?? 1.0`
+- [x] write `AudioControllerTests` cases: clamping (negative → 0, >1 → 1), persistence (set → read UserDefaults), restore-on-load (set, recreate controller, expect player.volume restored). Use injected suite-named UserDefaults to avoid polluting standard defaults in tests.
+- [x] run project tests — must pass before task 3
 
 ### Task 3: Route `setVolume` through `PlaybackCoordinator.apply`
 
