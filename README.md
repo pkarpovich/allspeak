@@ -64,8 +64,8 @@ on the Apple Watch as a third TabView page — see below.
 
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
 resync subtitles in a cinema without taking the iPhone out of your pocket.
-The watch is a thin remote: it sends commands (play/pause, skip ±0.5s,
-seek-to-cue) to the iPhone, which remains the audio host.
+The watch is a thin remote: it sends commands (play/pause, skip ±0.5s / ±3s,
+seek-to-cue, set volume) to the iPhone, which remains the audio host.
 
 ### Pairing
 
@@ -83,26 +83,32 @@ seek-to-cue) to the iPhone, which remains the audio host.
 
 ### Usage
 
-- **Page 1** (default): big current subtitle line, with play/pause and
-  ±0.5s skip buttons sized for blind tapping through a sleeve.
+- **Page 1** (default, transport): Apple Music canon layout — session
+  title on top, a large central Play/Pause flanked by ±3s coarse skip
+  buttons, and a thin row of ±0.5s fine skips beneath. The Digital Crown
+  is wired to playback volume (`AVAudioPlayer.volume`, 0...1, persisted
+  across launches) with the system volume HUD and haptic ticks; rapid
+  rotation coalesces into a single trailing-edge command.
 - **Page 2** (swipe up): scrollable list of all cues with the current line
   highlighted; tap any line to seek the iPhone audio to that timestamp.
 - **Page 3** (swipe up again): list of audio tracks on the current
   session, with a checkmark on the active one. Tap any track to switch
   the iPhone-side audio. Shows a `Single track` placeholder when the
   session has only one track.
-- Rapid ±0.5 taps coalesce inside a 250ms window so five quick taps send
-  a single `skip(+2.5)` command rather than five round-trips.
+- Rapid skip taps (fine or coarse) coalesce inside a 250ms window so five
+  quick ±0.5s taps send a single `skip(+2.5)` command rather than five
+  round-trips; mixed fine + coarse taps sum in the same window.
 - Between authoritative snapshots from the iPhone, the watch interpolates
   the displayed position locally (`currentTime + (now - serverDate)` while
   playing) so the UI never feels frozen.
 
-The six commands round-tripped over WatchConnectivity are: `play`,
-`pause`, `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, and
-`switchTrack(id:)`. Session metadata delivered to the watch carries a
-`tracks: [TrackInfo]` array plus the current `activeTrackID`. The wire
-contract lives in `Allspeak/Watch/WireProtocol.swift` — see the header
-comment there for the protocol summary.
+The commands round-tripped over WatchConnectivity are: `play`, `pause`,
+`togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
+`setVolume(_:)`, and `requestCueBundle(sessionID:revision:)`. Session
+metadata delivered to the watch carries a `tracks: [TrackInfo]` array
+plus the current `activeTrackID`. The wire contract lives in
+`Allspeak/Watch/WireProtocol.swift` — see the header comment there for
+the protocol summary.
 
 ### Live Activity (Smart Stack)
 

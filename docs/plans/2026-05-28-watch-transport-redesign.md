@@ -148,9 +148,9 @@ and address the same use case "dark cinema, tactile control, no distraction".
 
 **Skills**: none required — straight doc updates.
 
-- [ ] update `README.md` Apple Watch remote section: new transport layout, new commands (`setVolume`), Crown→volume on Page 1
-- [ ] update `Allspeak/Watch/WireProtocol.swift` header comment: list the 7 commands (was 6, plus `setVolume`)
-- [ ] update inline header comment in `TransportView.swift` to note the Apple Music canon layout decision
+- [x] update `README.md` Apple Watch remote section: new transport layout, new commands (`setVolume`), Crown→volume on Page 1
+- [x] update `Allspeak/Watch/WireProtocol.swift` header comment: list the 7 commands (was 6, plus `setVolume`) — already done in earlier tasks; header lists all 8 commands including `requestCueBundle`
+- [x] update inline header comment in `TransportView.swift` to note the Apple Music canon layout decision — already done in Task 5
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`*
 
