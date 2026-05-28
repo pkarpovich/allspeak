@@ -88,10 +88,10 @@ and address the same use case "dark cinema, tactile control, no distraction".
 
 **Skills**: `axiom:axiom-watchos` → `skills/watch-connectivity.md` for routing/dispatch patterns; `swift-testing-expert` for extending `WatchSessionHostTests` (or `PlaybackCoordinatorTests`) with the new case.
 
-- [ ] add `.setVolume(let v): controller?.setVolume(v)` arm to `PlaybackCoordinator.apply(_:)` switch in `Allspeak/Audio/PlaybackCoordinator.swift`
-- [ ] verify `WatchSessionHost.dispatch` default-arm routing carries `.setVolume` through unchanged (no host edit expected — confirm by reading existing dispatch)
-- [ ] extend `WatchSessionHostTests.swift` (or `PlaybackCoordinatorTests`) with a dispatch test: send `.setVolume(0.3)`, verify controller.player.volume == 0.3
-- [ ] run project tests — must pass before task 4
+- [x] add `.setVolume(let v): controller?.setVolume(v)` arm to `PlaybackCoordinator.apply(_:)` switch in `Allspeak/Audio/PlaybackCoordinator.swift`
+- [x] verify `WatchSessionHost.dispatch` default-arm routing carries `.setVolume` through unchanged (no host edit expected — confirm by reading existing dispatch)
+- [x] extend `WatchSessionHostTests.swift` (or `PlaybackCoordinatorTests`) with a dispatch test: send `.setVolume(0.3)`, verify controller.player.volume == 0.3
+- [x] run project tests — must pass before task 4
 
 ### Task 4: Add `VolumeThrottler` (pure logic, mirrors `SkipCoalescer`)
 
