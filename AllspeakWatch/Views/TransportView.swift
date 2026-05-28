@@ -2,9 +2,9 @@ import SwiftUI
 
 // Apple Music canon layout: large central Play/Pause flanked by ±3s coarse
 // skip buttons, with a thin row of ±0.5s fine skips beneath. Digital Crown
-// is wired to playback volume (system HUD + haptic ticks) — see VolumeThrottler
-// for the 100ms trailing-edge debounce that keeps WC traffic clean while the
-// Crown is spun rapidly.
+// is wired to playback volume with haptic ticks at each detent — see
+// VolumeThrottler for the 100ms trailing-edge debounce that keeps WC traffic
+// clean while the Crown is spun rapidly.
 struct TransportView: View {
     // Watch-local UserDefaults key — mirrors AudioController.volumeDefaultsKey on
     // the iOS side, but stored independently in the watch app's defaults so the

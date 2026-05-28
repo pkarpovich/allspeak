@@ -24,8 +24,8 @@ enum Tokens {
         static let pause             = "pause.fill"
         static let skipBack          = "gobackward"
         static let skipForward       = "goforward"
-        static let skipBackCoarse    = "gobackward.3"
-        static let skipForwardCoarse = "goforward.3"
+        static let skipBackCoarse    = "backward.fill"
+        static let skipForwardCoarse = "forward.fill"
     }
 }
 

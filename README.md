@@ -87,8 +87,8 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
   title on top, a large central Play/Pause flanked by ±3s coarse skip
   buttons, and a thin row of ±0.5s fine skips beneath. The Digital Crown
   is wired to playback volume (`AVAudioPlayer.volume`, 0...1, persisted
-  across launches) with the system volume HUD and haptic ticks; rapid
-  rotation coalesces into a single trailing-edge command.
+  across launches) with haptic ticks at each detent; rapid rotation
+  coalesces into a single trailing-edge command.
 - **Page 2** (swipe up): scrollable list of all cues with the current line
   highlighted; tap any line to seek the iPhone audio to that timestamp.
 - **Page 3** (swipe up again): list of audio tracks on the current
