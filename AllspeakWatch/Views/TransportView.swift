@@ -24,6 +24,13 @@ struct TransportView: View {
         let stored = UserDefaults.standard.object(forKey: Self.watchVolumeDefaultsKey) as? Float
         return Double(stored ?? 1.0)
     }()
+    // Raw Crown position, inverted into `volume` via CrownVolume so Crown-up =
+    // louder. Initialised from the stored volume through the same (symmetric)
+    // mapping so the wheel starts where the loudness left off.
+    @State private var crown: Double = {
+        let stored = UserDefaults.standard.object(forKey: Self.watchVolumeDefaultsKey) as? Float
+        return CrownVolume.volume(forCrown: Double(stored ?? 1.0))
+    }()
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
 
@@ -34,7 +41,7 @@ struct TransportView: View {
         }
         .focusable()
         .digitalCrownRotation(
-            $volume,
+            $crown,
             from: 0,
             through: 1,
             by: 0.05,
@@ -42,8 +49,10 @@ struct TransportView: View {
             isContinuous: false,
             isHapticFeedbackEnabled: true
         )
-        .onChange(of: volume) { _, newValue in
-            volumeThrottler.update(Float(newValue))
+        .onChange(of: crown) { _, newCrown in
+            let newVolume = CrownVolume.volume(forCrown: newCrown)
+            volume = newVolume
+            volumeThrottler.update(Float(newVolume))
             registerVolumeActivity()
         }
     }

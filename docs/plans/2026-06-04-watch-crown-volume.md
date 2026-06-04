@@ -52,9 +52,11 @@ feedback flagged).
 
 ## Testing Strategy
 
-- **Unit tests**: required only where pure logic is introduced. If a
-  Crown-to-volume mapping helper is added (see Task 2), unit-test its boundaries
-  (0 -> 0, 1 -> 1, midpoint) and clamping (< 0, > 1).
+- **Unit tests**: required only where pure logic is introduced. The
+  Crown-to-volume mapping helper added in Task 2 (`CrownVolume.volume(forCrown:)`)
+  is inverted (Crown-up = louder), so its boundaries are crown 0 -> volume 1,
+  crown 1 -> volume 0, midpoint 0.5 -> 0.5, with clamping for inputs < 0 (-> 1)
+  and > 1 (-> 0), plus a round-trip check (the transform is its own inverse).
 - **No SwiftUI view tests**: the volume bar and Crown direction are not unit
   testable here. They are verified visually in the simulator (Task 3) and on a
   real paired device (Post-Completion).
@@ -97,18 +99,23 @@ feedback flagged).
 
 ### Task 2: Correct the Crown rotation direction so up = louder
 
-- [ ] run the app on the watch simulator and confirm the current direction by
-      rotating the Crown and watching the indicator from Task 1.
-- [ ] ensure Crown-up increases `volume`: keep the direct binding if it is
-      already correct, otherwise invert the Crown-to-volume mapping. Keep the
-      value sent to the phone and the value shown by the indicator driven by the
-      same `volume` so they can never disagree.
-- [ ] if an inversion is needed, extract a pure `volume(forCrown:)` mapping
-      helper (clamped 0...1) so the direction is explicit and self-documenting,
-      and reference the In the Grey feedback in a short comment.
-- [ ] write unit tests for the mapping helper (0, 1, midpoint, clamp < 0 and
-      > 1) - only if the helper is introduced in this task.
-- [ ] run project tests - must pass before Task 3.
+- [x] manual sim direction-confirm (skipped - not interactively automatable;
+      requires an active WC session to render the transport plus physical Crown
+      rotation). Direction taken from the recorded "In the Grey" feedback
+      (Crown-down = louder today), which the Overview already establishes.
+- [x] ensure Crown-up increases `volume`: inverted the Crown-to-volume mapping.
+      The Crown now drives a separate `crown` @State; `volume` is derived from it
+      via `CrownVolume.volume(forCrown:)` and is the single value both shown by
+      the bar and sent to the phone, so they can never disagree.
+- [x] extracted a pure `CrownVolume.volume(forCrown:)` mapping helper (inverts
+      and clamps 0...1) in `Allspeak/Watch/VolumeThrottler.swift` - a file already
+      shared with both targets and reachable by the iOS test scheme (TransportView
+      is watch-only, so the helper could not live there and stay unit-testable).
+      Comment references the In the Grey feedback.
+- [x] wrote unit tests for the mapping helper in `AllspeakTests/VolumeThrottlerTests.swift`
+      (crown 0 -> 1, 1 -> 0, midpoint, monotonic up = louder, clamp < 0 and > 1,
+      round-trip).
+- [x] run project tests - pass (295 tests, 28 suites green).
 
 ### Task 3: Verify acceptance criteria
 
@@ -120,10 +127,13 @@ feedback flagged).
 
 ## Technical Details
 
-- Crown binding stays `digitalCrownRotation($volume, from: 0, through: 1,
+- Crown binding keeps the same `digitalCrownRotation(... from: 0, through: 1,
   by: 0.05, sensitivity: .low, isContinuous: false, isHapticFeedbackEnabled:
-  true)`. The fix is about which way `volume` moves, plus rendering our own
-  feedback, not about replacing the API.
+  true)` API but now binds a dedicated `crown` @State instead of `volume`
+  directly. `volume = CrownVolume.volume(forCrown: crown)` inverts the position
+  so Crown-up = louder; `volume` remains the single value the bar shows and the
+  throttler sends. The fix is which way `volume` moves plus our own feedback, not
+  replacing the API.
 - The indicator and the `.setVolume` payload both read the same `volume` state,
   so the on-screen scale always matches the loudness sent to the phone. This is
   what removes the "0 on the wheel = 100% on the phone" mismatch.
