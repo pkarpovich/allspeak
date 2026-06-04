@@ -79,17 +79,21 @@ feedback flagged).
 
 ### Task 1: Add a volume indicator to Page 1
 
-- [ ] in `AllspeakWatch/Views/TransportView.swift`, add a slim volume bar
+- [x] in `AllspeakWatch/Views/TransportView.swift`, add a slim volume bar
       (a `Capsule` track with a fill proportional to `volume`) pinned below the
       fine (±0.5s) row, using `Tokens.surface` for the track and `Tokens.accent`
       for the fill.
-- [ ] brighten the bar briefly while the Crown is moving (emphasis on `volume`
+- [x] brighten the bar briefly while the Crown is moving (emphasis on `volume`
       change) and let it settle to a dim resting state when idle.
-- [ ] add an accessibility value label of the form "Volume NN%" driven by the
+- [x] add an accessibility value label of the form "Volume NN%" driven by the
       current `volume`.
-- [ ] no unit tests (SwiftUI view) - verified visually in Task 3.
-- [ ] build `AllspeakWatch` for the Apple Watch Ultra 3 simulator and capture a
+- [x] no unit tests (SwiftUI view) - verified visually in Task 3.
+- [x] build `AllspeakWatch` for the Apple Watch Ultra 3 simulator and capture a
       screenshot to confirm placement and that the bar tracks `volume`.
+      (Verified: bar renders below the fine row, fully filled at volume 1.0 and
+      ~35% filled at volume 0.35 - fill is proportional, track = surface,
+      fill = accent, dim resting state. Transport view rendered via a temporary
+      env-gated metadata injection that was reverted afterward.)
 
 ### Task 2: Correct the Crown rotation direction so up = louder
 

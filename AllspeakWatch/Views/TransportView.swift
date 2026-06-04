@@ -24,6 +24,8 @@ struct TransportView: View {
         let stored = UserDefaults.standard.object(forKey: Self.watchVolumeDefaultsKey) as? Float
         return Double(stored ?? 1.0)
     }()
+    @State private var isAdjustingVolume = false
+    @State private var volumeActivityTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -42,6 +44,7 @@ struct TransportView: View {
         )
         .onChange(of: volume) { _, newValue in
             volumeThrottler.update(Float(newValue))
+            registerVolumeActivity()
         }
     }
 
@@ -54,6 +57,7 @@ struct TransportView: View {
                 coarseRow
                 playButton
                 fineRow
+                volumeBar
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -86,6 +90,42 @@ struct TransportView: View {
                 .accessibilityLabel("Skip forward half a second")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // Crown feedback bar. Fills left-to-right in proportion to `volume`, the same
+    // state the Crown drives and the value we send to the phone, so the on-screen
+    // scale can never disagree with the loudness. Brightens while the Crown is
+    // turning and settles dim when idle.
+    private var volumeBar: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Tokens.surface)
+                Capsule()
+                    .fill(Tokens.accent)
+                    .frame(width: max(0, geo.size.width * volume))
+            }
+        }
+        .frame(height: 4)
+        .opacity(isAdjustingVolume ? 1.0 : 0.4)
+        .padding(.horizontal, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Volume")
+        .accessibilityValue("\(Int((volume * 100).rounded()))%")
+    }
+
+    private func registerVolumeActivity() {
+        withAnimation(.easeOut(duration: 0.15)) {
+            isAdjustingVolume = true
+        }
+        volumeActivityTask?.cancel()
+        volumeActivityTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.4)) {
+                isAdjustingVolume = false
+            }
+        }
     }
 
     private var playButton: some View {
