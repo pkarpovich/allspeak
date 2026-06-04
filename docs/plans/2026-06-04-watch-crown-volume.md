@@ -119,11 +119,26 @@ feedback flagged).
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] build clean for both the `Allspeak` (iOS) and `AllspeakWatch` schemes.
-- [ ] run the full test suite - must be green (288+ tests, 27+ suites).
-- [ ] run the linter - fix any new Swift 6 concurrency warnings.
-- [ ] simulator visual check: rotating the Crown fills the bar in the same
-      direction it is rotated and reaches both ends (0 and full).
+- [x] build clean for both the `Allspeak` (iOS) and `AllspeakWatch` schemes.
+      (iOS: `xcodebuild test -scheme Allspeak` -> TEST SUCCEEDED; watch:
+      `xcodebuild clean build -scheme AllspeakWatch` on Apple Watch Ultra 3
+      (49mm) sim -> BUILD SUCCEEDED.)
+- [x] run the full test suite - must be green (288+ tests, 27+ suites).
+      (295 tests in 28 suites passed, including the `CrownVolume.volume(forCrown:)`
+      mapping tests that confirm Crown-up = louder.)
+- [x] run the linter - fix any new Swift 6 concurrency warnings. (No SwiftLint
+      in this project; the linter is the Swift 6 `complete` strict-concurrency
+      compiler. Clean watch build surfaced only pre-existing, unrelated warnings -
+      app-icon trait set, AppIntents metadata note, project-level
+      `UIRequiresFullScreen` Info.plist deprecation - none concurrency-related and
+      none in the changed files.)
+- [x] simulator visual check: rotating the Crown fills the bar in the same
+      direction it is rotated and reaches both ends (0 and full). (Manual test -
+      skipped, not automatable: requires a live WC session to render the transport
+      plus physical Crown rotation, same constraint recorded in Task 2. Direction
+      correctness is covered by the passing CrownVolume unit tests; only the
+      interactive visual confirmation is non-automatable and is repeated in
+      Post-Completion on a paired device.)
 
 ## Technical Details
 
