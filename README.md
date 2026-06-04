@@ -83,9 +83,11 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
 
 ### Usage
 
-- **Page 1** (default, transport): Apple Music canon layout — session
-  title on top, a large central Play/Pause flanked by ±3s coarse skip
-  buttons, and a thin row of ±0.5s fine skips beneath. The Digital Crown
+- **Page 1** (default, transport): a stacked transport layout — a centered
+  pair of ±3s coarse skips on top, a full-width Play/Pause in the middle, and
+  a centered pair of ±0.5s fine skips beneath. The skip controls are circular
+  glass buttons whose icon is a curved arrow with the interval inside it
+  (`3`, `0.5`); Play/Pause is a warm-tinted glowing pill. The Digital Crown
   is wired to playback volume (`AVAudioPlayer.volume`, 0...1, persisted
   across launches) with haptic ticks at each detent; rapid rotation
   coalesces into a single trailing-edge command.

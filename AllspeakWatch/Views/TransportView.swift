@@ -1,10 +1,11 @@
 import SwiftUI
 
-// Apple Music canon layout: large central Play/Pause flanked by ±3s coarse
-// skip buttons, with a thin row of ±0.5s fine skips beneath. Digital Crown
-// is wired to playback volume with haptic ticks at each detent — see
-// VolumeThrottler for the 100ms trailing-edge debounce that keeps WC traffic
-// clean while the Crown is spun rapidly.
+// Cinema transport, stacked layout: two coarse ±3s controls on top, a
+// full-width Play/Pause at center, two fine ±0.5s controls beneath. Tuned for
+// a dark hall — large round tap targets, the gold pill glowing as the obvious
+// primary action, no subtitle text to read. Digital Crown stays wired to
+// playback volume with haptic ticks at each detent; see VolumeThrottler for the
+// 100ms trailing-edge debounce that keeps WC traffic clean during a rapid spin.
 struct TransportView: View {
     // Watch-local UserDefaults key — mirrors AudioController.volumeDefaultsKey on
     // the iOS side, but stored independently in the watch app's defaults so the
@@ -49,14 +50,12 @@ struct TransportView: View {
         if client.metadata == nil {
             placeholder
         } else {
-            VStack(spacing: 6) {
-                sessionTitle
-                Spacer(minLength: 0)
+            VStack(spacing: 8) {
                 coarseRow
+                playButton
                 fineRow
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 8)
             .padding(.vertical, 4)
         }
     }
@@ -69,69 +68,65 @@ struct TransportView: View {
             .padding(.horizontal, 12)
     }
 
-    private var sessionTitle: some View {
-        Text(client.metadata?.title ?? " ")
-            .font(.caption2)
-            .foregroundStyle(Tokens.text2)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .center)
-    }
-
     private var coarseRow: some View {
-        HStack(spacing: 8) {
-            coarseSkipButton(systemName: Tokens.Icon.skipBackCoarse, action: handleSkipBackCoarse)
+        HStack(spacing: 14) {
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "3", prominent: true, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
-            playButton
-                .accessibilityLabel(isPlaying ? "Pause" : "Play")
-            coarseSkipButton(systemName: Tokens.Icon.skipForwardCoarse, action: handleSkipForwardCoarse)
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "3", prominent: true, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var fineRow: some View {
-        HStack {
-            fineSkipButton(systemName: Tokens.Icon.skipBack, action: handleSkipBackFine)
+        HStack(spacing: 14) {
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "0.5", prominent: false, action: handleSkipBackFine)
                 .accessibilityLabel("Skip back half a second")
-            Spacer(minLength: 0)
-            fineSkipButton(systemName: Tokens.Icon.skipForward, action: handleSkipForwardFine)
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "0.5", prominent: false, action: handleSkipForwardFine)
                 .accessibilityLabel("Skip forward half a second")
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var playButton: some View {
         Button(action: handlePlayPause) {
             Image(systemName: isPlaying ? Tokens.Icon.pause : Tokens.Icon.play)
-                .font(.system(size: 20, weight: .semibold))
-                .frame(maxWidth: .infinity, minHeight: 44)
-        }
-        .buttonStyle(.glassProminent)
-        .tint(Tokens.accent)
-    }
-
-    private func coarseSkipButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .regular))
-                .foregroundStyle(Tokens.text)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Tokens.accent)
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background {
+                    Capsule().fill(Tokens.accent.opacity(0.14))
+                }
+                .overlay {
+                    Capsule().strokeBorder(Tokens.accent.opacity(0.7), lineWidth: 1.5)
+                }
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .shadow(color: Tokens.accent.opacity(0.45), radius: 10)
+        .accessibilityLabel(isPlaying ? "Pause" : "Play")
     }
 
-    private func fineSkipButton(systemName: String, action: @escaping () -> Void) -> some View {
+    private func skipButton(
+        icon: String,
+        seconds: String,
+        prominent: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(Tokens.text2)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+            ZStack {
+                Image(systemName: icon)
+                    .font(.system(size: prominent ? 26 : 28, weight: .medium))
+                Text(seconds)
+                    .font(.system(size: prominent ? 11 : 9, weight: .bold))
+                    .offset(y: 2)
+            }
+            .foregroundStyle(prominent ? Tokens.text : Tokens.text2)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .frame(width: prominent ? 60 : 62, height: prominent ? 60 : 62)
     }
 
     private var isPlaying: Bool {

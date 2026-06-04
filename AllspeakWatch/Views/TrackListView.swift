@@ -4,10 +4,7 @@ struct TrackListView: View {
     @Environment(WatchSessionClient.self) private var client
 
     var body: some View {
-        ZStack {
-            Tokens.bg.ignoresSafeArea()
-            content
-        }
+        content
     }
 
     @ViewBuilder
@@ -22,29 +19,30 @@ struct TrackListView: View {
     }
 
     private func placeholder(_ text: String) -> some View {
-        Text(text)
-            .font(Tokens.Font.placeholder)
-            .foregroundStyle(Tokens.text2)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 12)
-            .focusable()
+        ZStack {
+            Tokens.bg.ignoresSafeArea()
+            Text(text)
+                .font(Tokens.Font.placeholder)
+                .foregroundStyle(Tokens.text2)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+                .focusable()
+        }
     }
 
     private var list: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 4) {
-                ForEach(client.tracks) { track in
-                    row(for: track)
-                }
+        List {
+            ForEach(client.tracks) { track in
+                row(for: track)
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 4)
         }
     }
 
     private func row(for track: TrackInfo) -> some View {
         let isActive = track.id == client.activeTrackID
-        return Button(action: { handleTap(track) }) {
+        return Button {
+            handleTap(track)
+        } label: {
             HStack(spacing: 8) {
                 Text(track.label)
                     .font(Tokens.Font.bodyEmphasized)
@@ -58,12 +56,9 @@ struct TrackListView: View {
                         .foregroundStyle(Tokens.accent)
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .accessibilityLabel(track.label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     private func handleTap(_ track: TrackInfo) {
