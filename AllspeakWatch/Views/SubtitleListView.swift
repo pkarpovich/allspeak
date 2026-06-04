@@ -33,10 +33,13 @@ struct SubtitleListView: View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 0) {
                 ForEach(client.cues) { cue in
-                    row(for: cue)
-                        .id(cue.index)
-                        .contentShape(Rectangle())
-                        .onTapGesture { handleTap(cue) }
+                    Button {
+                        handleTap(cue)
+                    } label: {
+                        row(for: cue)
+                    }
+                    .buttonStyle(.plain)
+                    .id(cue.index)
                 }
             }
             .scrollTargetLayout()
