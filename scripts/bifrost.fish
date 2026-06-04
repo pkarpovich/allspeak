@@ -2,12 +2,15 @@
 # bifrost.fish — universal knife for Allspeak audio prep.
 #
 # Default pipeline (any input → voice-only track timed for the cinema):
-#   1. Decode input to WAV (44.1k stereo)
-#   2. (If MKV/video) Retime audio source-FPS → cinema-FPS (default 24)
-#   3. Demucs (htdemucs_ft) — extract vocal stem (drop music & SFX)
-#   4. ffmpeg loudnorm — normalize loudness
-#   5. Sidon (sarulab-speech/sidon-v0.1) — speech restoration (for low-quality input)
-#   6. Encode to AAC mono 96k (.m4a) for the iPhone app
+#   1. Decode input to WAV (44.1k stereo) + optional FPS retime → cinema-FPS (default 24)
+#   2. Demucs (htdemucs_ft) — extract vocal stem (drop music & SFX)
+#   3. Sidon (sarulab-speech/sidon-v0.1) — speech restoration (for low-quality input)
+#   4. ffmpeg loudnorm (I=-14 TP=-2 LRA=20) + encode to AAC mono 96k (.m4a)
+#
+# Loudnorm runs LAST because Sidon does its own peak-normalize that overrides any
+# earlier loudnorm pass. Target -14 LUFS = podcast/radio loud (audible over cinema
+# ambient noise); -2 dBTP gives 2dB headroom for in-app volume boost; LRA=20 cap
+# preserves natural voice dynamics so dialogue stands out from silence.
 #
 # Why retime: BD/web-dl is usually 23.976 fps; cinemas project at 24 fps.
 # Over a 2h film that's ~7s of drift. We speed audio up by 24/23.976 ≈ 1.001 —
@@ -192,11 +195,17 @@ if set -q _flag_subs
     or echo "subs extraction failed (continuing)" >&2
 end
 
+# Encode WAV → app-ready file with loudnorm applied LAST. Cinema-targeted:
+# I=-14 (loud podcast/radio level), TP=-2 (2dB headroom for player boost),
+# LRA=20 (high cap = don't compress natural voice dynamics).
+# Loudnorm must come last because Sidon's internal peak-normalize would
+# otherwise override any earlier loudnorm pass.
 function _encode_for_app -a in_wav out_path
+    set -l af "loudnorm=I=-14:TP=-2:LRA=20"
     if string match -q '*.wav' $out_path
-        cp $in_wav $out_path
+        ffmpeg -y -hide_banner -loglevel warning -i $in_wav -af $af -ar 44100 -c:a pcm_s16le $out_path
     else
-        ffmpeg -y -hide_banner -loglevel warning -i $in_wav -c:a aac -b:a 96k -ac 1 -movflags +faststart $out_path
+        ffmpeg -y -hide_banner -loglevel warning -i $in_wav -af $af -c:a aac -b:a 96k -ac 1 -movflags +faststart $out_path
     end
 end
 
@@ -212,25 +221,14 @@ set -l vocals $work/sep/htdemucs_ft/in/vocals.wav
 test -f $vocals; or begin; echo "demucs vocals not found: $vocals" >&2; exit 1; end
 
 # ───────────────────────────────────────────────────────────────────────────
-# Step 3: loudnorm
+# Step 3: Sidon (skip with --no-sidon for already-clean inputs)
 # ───────────────────────────────────────────────────────────────────────────
 
-echo "[3] loudnorm..."
-# Force output back to 44.1k s16: loudnorm internally upsamples to 192k float,
-# default output keeps that (5.8GB for a 2h film, breaks WAV 4GB header limit).
-ffmpeg -y -hide_banner -loglevel warning -i $vocals -af loudnorm=I=-16:TP=-1.5:LRA=11 \
-    -ar 44100 -c:a pcm_s16le $work/vocals_norm.wav
-or begin; echo "loudnorm failed" >&2; exit 1; end
-
-# ───────────────────────────────────────────────────────────────────────────
-# Step 4: Sidon (skip with --no-sidon for already-clean inputs)
-# ───────────────────────────────────────────────────────────────────────────
-
-set -l final $work/vocals_norm.wav
+set -l final $vocals
 if not set -q _flag_no_sidon
-    echo "[4] sidon restoration..."
+    echo "[3] sidon restoration..."
     uv run --script $sidon_py \
-        --input $work/vocals_norm.wav \
+        --input $vocals \
         --output $work/sidon.wav \
         --chunk-seconds 30 --context-frames 25
     or begin; echo "sidon failed" >&2; exit 1; end
@@ -238,17 +236,16 @@ if not set -q _flag_no_sidon
 end
 
 # ───────────────────────────────────────────────────────────────────────────
-# Step 5: emit
+# Step 4: emit (loudnorm applied inside _encode_for_app)
 # ───────────────────────────────────────────────────────────────────────────
 
-echo "[5] encoding output(s)..."
+echo "[4] encoding output(s) with loudnorm..."
 if set -q _flag_multi_track
     set -l out_primary $outdir/$basename.sidon.$ext
     set -l out_vocals  $outdir/$basename.vocals.$ext
     set -l out_original $outdir/$basename.original.$ext
-    _encode_for_app $work/sidon.wav $out_primary 2>/dev/null
-    or _encode_for_app $work/vocals_norm.wav $out_primary  # if --no-sidon was set
-    _encode_for_app $work/vocals_norm.wav $out_vocals
+    _encode_for_app $final $out_primary
+    _encode_for_app $vocals $out_vocals
     _encode_for_app $work/in.wav $out_original
     echo "done. multi-track set:"
     echo "  primary : $out_primary"
