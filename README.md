@@ -84,13 +84,16 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
 ### Usage
 
 - **Page 1** (default, transport): a stacked transport layout — a centered
-  pair of ±3s coarse skips on top, a full-width Play/Pause in the middle, and
-  a centered pair of ±0.5s fine skips beneath. The skip controls are circular
-  glass buttons whose icon is a curved arrow with the interval inside it
-  (`3`, `0.5`); Play/Pause is a warm-tinted glowing pill. The Digital Crown
-  is wired to playback volume (`AVAudioPlayer.volume`, 0...1, persisted
-  across launches) with haptic ticks at each detent; rapid rotation
-  coalesces into a single trailing-edge command.
+  pair of ±3s coarse skips on top, a full-width Play/Pause in the middle, a
+  centered pair of ±0.5s fine skips beneath, and a slim volume bar at the
+  bottom. The skip controls are circular glass buttons whose icon is a curved
+  arrow with the interval inside it (`3`, `0.5`); Play/Pause is a warm-tinted
+  glowing pill. The Digital Crown is wired to playback volume
+  (`AVAudioPlayer.volume`, 0...1, persisted across launches) with haptic ticks
+  at each detent; rotating the Crown up raises the volume, and the bar fills in
+  proportion to the current level so the on-screen scale always matches the
+  loudness sent to the phone. The bar brightens while the Crown is turning and
+  dims when idle; rapid rotation coalesces into a single trailing-edge command.
 - **Page 2** (swipe up): scrollable list of all cues with the current line
   highlighted; tap any line to seek the iPhone audio to that timestamp.
 - **Page 3** (swipe up again): list of audio tracks on the current

@@ -110,3 +110,44 @@ struct VolumeThrottlerTests {
         #expect(throttler.pending == nil)
     }
 }
+
+@Suite("CrownVolume")
+struct CrownVolumeTests {
+
+    @Test("crown at rest (0) maps to full volume")
+    func crownZeroIsFullVolume() {
+        #expect(CrownVolume.volume(forCrown: 0) == 1)
+    }
+
+    @Test("crown at top (1) maps to silence")
+    func crownOneIsSilent() {
+        #expect(CrownVolume.volume(forCrown: 1) == 0)
+    }
+
+    @Test("midpoint maps to half volume")
+    func midpointIsHalf() {
+        #expect(CrownVolume.volume(forCrown: 0.5) == 0.5)
+    }
+
+    @Test("crown-up increases volume (monotonic inversion)")
+    func upIsLouder() {
+        #expect(CrownVolume.volume(forCrown: 0.25) > CrownVolume.volume(forCrown: 0.75))
+    }
+
+    @Test("input below 0 clamps to full volume")
+    func clampsBelowZero() {
+        #expect(CrownVolume.volume(forCrown: -0.3) == 1)
+    }
+
+    @Test("input above 1 clamps to silence")
+    func clampsAboveOne() {
+        #expect(CrownVolume.volume(forCrown: 1.4) == 0)
+    }
+
+    @Test("mapping is its own inverse so stored volume round-trips")
+    func mappingRoundTrips() {
+        let volume = 0.35
+        let crown = CrownVolume.volume(forCrown: volume)
+        #expect(CrownVolume.volume(forCrown: crown) == volume)
+    }
+}
