@@ -151,20 +151,24 @@ UTI — `com.apple.shazamkit.catalog` is the system identifier.
 
 ### Task 2: DocumentsStorage + SessionRepository support for catalogs
 
-- [ ] add `catalogURL(sessionID:filename:) -> URL` to `DocumentsStorage` —
-  mirror `audioURL(...)` shape
-- [ ] add `copyCatalog(srcURL:sessionID:as:) -> URL` (or extend existing
-  generic `copyIntoSession` if cleaner)
-- [ ] extend `SessionRepository.importSession(...)` with optional
+- [x] add `catalogURL(sessionID:filename:) -> URL` to `DocumentsStorage` —
+  mirror `audioURL(...)` shape; also added `removeCatalogFile(sessionID:filename:)`
+  mirroring `removeTrackFile` for the clear path
+- [x] add `copyCatalog(srcURL:sessionID:as:) -> URL` (or extend existing
+  generic `copyIntoSession` if cleaner) — reused the existing generic
+  `copyIntoSession` (tracks already use it directly; no redundant wrapper)
+- [x] extend `SessionRepository.importSession(...)` with optional
   `catalogSrc: URL?` parameter (default nil)
-- [ ] add `SessionRepository.setCatalog(sessionID:srcURL:)` —
-  copy → update entity → save context
-- [ ] add `SessionRepository.clearCatalog(sessionID:)` — delete file →
+- [x] add `SessionRepository.setCatalog(sessionID:srcURL:)` —
+  copy → update entity → save context (with old-file cleanup + rollback)
+- [x] add `SessionRepository.clearCatalog(sessionID:)` — delete file →
   null out attribute → save
-- [ ] write tests for storage helpers (URL shape, missing-file handling)
-- [ ] write tests for repository: import with catalog, set catalog later,
-  clear catalog, idempotent re-set
-- [ ] run tests — must pass before next task
+- [x] write tests for storage helpers (URL shape, missing-file handling)
+- [x] write tests for repository: import with catalog, set catalog later,
+  clear catalog, idempotent re-set (+ import-without-catalog nil,
+  replace-deletes-old-file, sessionNotFound, no-op clear)
+- [x] run tests — must pass before next task — 40/40 tests pass across
+  DocumentsStorage + SessionRepository suites on iPhone 17 Pro / iOS 26
 
 ### Task 3: UTType registration + mic permission
 

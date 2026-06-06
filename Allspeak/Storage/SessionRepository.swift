@@ -45,16 +45,20 @@ final class SessionRepository: @unchecked Sendable {
         self.storage = storage
     }
 
-    func importSession(name: String, audioSrc: URL, srtSrc: URL) async throws -> NSManagedObjectID {
+    func importSession(name: String, audioSrc: URL, srtSrc: URL, catalogSrc: URL? = nil) async throws -> NSManagedObjectID {
         let id = UUID()
         let audioName = audioSrc.lastPathComponent
         let srtName = srtSrc.lastPathComponent
+        let catalogName = catalogSrc?.lastPathComponent
         let createdAt = Date()
 
         let audioDest: URL
         do {
             audioDest = try storage.copyIntoSession(srcURL: audioSrc, sessionID: id, as: audioName)
             try storage.copyIntoSession(srcURL: srtSrc, sessionID: id, as: srtName)
+            if let catalogSrc, let catalogName {
+                try storage.copyIntoSession(srcURL: catalogSrc, sessionID: id, as: catalogName)
+            }
         } catch {
             try? storage.removeSessionDir(id)
             throw error
@@ -71,6 +75,9 @@ final class SessionRepository: @unchecked Sendable {
                 session.setValue(audioName, forKey: "audioFilename")
                 session.setValue(srtName, forKey: "srtFilename")
                 session.setValue(createdAt, forKey: "createdAt")
+                if let catalogName {
+                    session.setValue(catalogName, forKey: "catalogFilename")
+                }
                 if let durationSeconds {
                     session.setValue(durationSeconds, forKey: "durationSeconds")
                 }
@@ -80,6 +87,71 @@ final class SessionRepository: @unchecked Sendable {
         } catch {
             try? storage.removeSessionDir(id)
             throw error
+        }
+    }
+
+    func setCatalog(sessionID: NSManagedObjectID, srcURL: URL) async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+
+        let (sessionUUID, oldCatalog): (UUID, String?) = try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = session.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let prior = session.value(forKey: "catalogFilename") as? String
+            return (uuid, prior)
+        }
+
+        let catalogName = srcURL.lastPathComponent
+        let copiedURL = try storage.copyIntoSession(srcURL: srcURL, sessionID: sessionUUID, as: catalogName)
+
+        do {
+            try await context.perform {
+                let session = try context.existingObject(with: sessionID)
+                session.setValue(catalogName, forKey: "catalogFilename")
+                try context.save()
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: copiedURL)
+            throw error
+        }
+
+        if let oldCatalog, oldCatalog != catalogName {
+            try? storage.removeCatalogFile(sessionID: sessionUUID, filename: oldCatalog)
+        }
+    }
+
+    func clearCatalog(sessionID: NSManagedObjectID) async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+
+        let cleanup: (UUID, String)? = try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = session.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let filename = session.value(forKey: "catalogFilename") as? String
+            session.setValue(nil, forKey: "catalogFilename")
+            try context.save()
+            if let filename {
+                return (uuid, filename)
+            }
+            return nil
+        }
+
+        if let (sessionUUID, filename) = cleanup {
+            try? storage.removeCatalogFile(sessionID: sessionUUID, filename: filename)
         }
     }
 

@@ -57,6 +57,174 @@ struct SessionRepositoryTests {
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("movie.srt").path))
     }
 
+    @Test("importSession without a catalog leaves catalogFilename nil")
+    func importWithoutCatalogLeavesNil() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "movie.m4a", contents: "audio")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "subs")
+
+        let id = try await repo.importSession(name: "No Catalog", audioSrc: audio, srtSrc: srt)
+
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == nil)
+    }
+
+    @Test("importSession with a catalog copies the file and sets catalogFilename")
+    func importWithCatalogCopiesAndPersists() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "movie.m4a", contents: "audio")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: "subs")
+        let catalog = try writeSourceFile(in: srcDir, name: "movie.shazamcatalog", contents: "fingerprints")
+
+        let id = try await repo.importSession(
+            name: "With Catalog",
+            audioSrc: audio,
+            srtSrc: srt,
+            catalogSrc: catalog
+        )
+
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == "movie.shazamcatalog")
+        let uuid = try #require(row.value(forKey: "id") as? UUID)
+        let copied = storage.catalogURL(sessionID: uuid, filename: "movie.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: copied.path))
+        #expect(try String(contentsOf: copied, encoding: .utf8) == "fingerprints")
+    }
+
+    @Test("setCatalog copies the file and stores catalogFilename on the session")
+    func setCatalogCopiesAndPersists() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        let catalog = try writeSourceFile(in: srcDir, name: "later.shazamcatalog", contents: "fp")
+
+        try await repo.setCatalog(sessionID: id, srcURL: catalog)
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == "later.shazamcatalog")
+        let uuid = try #require(row.value(forKey: "id") as? UUID)
+        let copied = storage.catalogURL(sessionID: uuid, filename: "later.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: copied.path))
+    }
+
+    @Test("setCatalog replaces a prior catalog and deletes the old file")
+    func setCatalogReplacesOldFile() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let firstCatalog = try writeSourceFile(in: srcDir, name: "first.shazamcatalog", contents: "one")
+        let id = try await repo.importSession(
+            name: "S",
+            audioSrc: audio,
+            srtSrc: srt,
+            catalogSrc: firstCatalog
+        )
+        let uuid = try #require(persistence.viewContext.object(with: id).value(forKey: "id") as? UUID)
+        let firstURL = storage.catalogURL(sessionID: uuid, filename: "first.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: firstURL.path))
+
+        let secondCatalog = try writeSourceFile(in: srcDir, name: "second.shazamcatalog", contents: "two")
+        try await repo.setCatalog(sessionID: id, srcURL: secondCatalog)
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == "second.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: firstURL.path) == false)
+        let secondURL = storage.catalogURL(sessionID: uuid, filename: "second.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: secondURL.path))
+    }
+
+    @Test("setCatalog re-set with the same filename is idempotent and keeps the file")
+    func setCatalogIdempotentSameName() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        let catalog = try writeSourceFile(in: srcDir, name: "same.shazamcatalog", contents: "v1")
+
+        try await repo.setCatalog(sessionID: id, srcURL: catalog)
+        let updated = try writeSourceFile(in: srcDir, name: "same.shazamcatalog", contents: "v2")
+        try await repo.setCatalog(sessionID: id, srcURL: updated)
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == "same.shazamcatalog")
+        let uuid = try #require(row.value(forKey: "id") as? UUID)
+        let url = storage.catalogURL(sessionID: uuid, filename: "same.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        #expect(try String(contentsOf: url, encoding: .utf8) == "v2")
+    }
+
+    @Test("setCatalog throws sessionNotFound for an unknown objectID")
+    func setCatalogUnknownSession() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let catalog = try writeSourceFile(in: srcDir, name: "c.shazamcatalog", contents: "c")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        try await repo.delete(id: id)
+
+        await #expect(throws: SessionRepositoryError.sessionNotFound) {
+            try await repo.setCatalog(sessionID: id, srcURL: catalog)
+        }
+    }
+
+    @Test("clearCatalog deletes the file and nulls catalogFilename")
+    func clearCatalogRemovesFileAndAttribute() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let catalog = try writeSourceFile(in: srcDir, name: "c.shazamcatalog", contents: "c")
+        let id = try await repo.importSession(
+            name: "S",
+            audioSrc: audio,
+            srtSrc: srt,
+            catalogSrc: catalog
+        )
+        let uuid = try #require(persistence.viewContext.object(with: id).value(forKey: "id") as? UUID)
+        let url = storage.catalogURL(sessionID: uuid, filename: "c.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        try await repo.clearCatalog(sessionID: id)
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == nil)
+        #expect(FileManager.default.fileExists(atPath: url.path) == false)
+    }
+
+    @Test("clearCatalog is a safe no-op when no catalog is set")
+    func clearCatalogNoOpWhenAbsent() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+
+        try await repo.clearCatalog(sessionID: id)
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == nil)
+    }
+
     @Test("rename updates the name on the persisted row via objectID handoff")
     func renamePersists() async throws {
         let (repo, persistence, _, root) = makeFixture()
