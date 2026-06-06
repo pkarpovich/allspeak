@@ -56,6 +56,8 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Allspeak listens briefly to the cinema audio so it can sync the dub track to what's playing on screen.</string>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
@@ -78,6 +80,23 @@
 				<array>
 					<string>application/x-subrip</string>
 					<string>text/srt</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.apple.shazamcatalog</string>
+			<key>UTTypeDescription</key>
+			<string>ShazamKit Custom Catalog</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>shazamcatalog</string>
 				</array>
 			</dict>
 		</dict>

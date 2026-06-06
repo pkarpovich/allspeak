@@ -80,7 +80,9 @@ audio to sync the dub track to the current scene."
 
 **File type**: `.shazamcatalog` is a binary Apple file type. We register a
 custom UTType for the picker. We do **not** need to declare a new exported
-UTI — `com.apple.shazamkit.catalog` is the system identifier.
+UTI — the system identifier is `com.apple.shazamcatalog` (the runtime resolves
+the `.shazamcatalog` extension to this; the earlier guess of
+`com.apple.shazamkit.catalog` was wrong, corrected during Task 3).
 
 ## Development Approach
 
@@ -172,18 +174,21 @@ UTI — `com.apple.shazamkit.catalog` is the system identifier.
 
 ### Task 3: UTType registration + mic permission
 
-- [ ] register `.shazamcatalog` UTType in `Allspeak/Info.plist`:
-  declared type `com.apple.shazamkit.catalog` (system-known) with file
-  extension `shazamcatalog`
-- [ ] add `NSMicrophoneUsageDescription` to `Allspeak/Info.plist` with text:
+- [x] register `.shazamcatalog` UTType in `Allspeak/Info.plist`:
+  declared type `com.apple.shazamcatalog` (system-known) with file
+  extension `shazamcatalog` — ⚠️ corrected: the plan originally assumed
+  `com.apple.shazamkit.catalog`, but the runtime resolves `.shazamcatalog`
+  to the system identifier `com.apple.shazamcatalog` (verified via test).
+- [x] add `NSMicrophoneUsageDescription` to `Allspeak/Info.plist` with text:
   "Allspeak listens briefly to the cinema audio so it can sync the dub track
   to what's playing on screen."
-- [ ] expose a `UTType.shazamCatalog` extension in a small Swift helper
+- [x] expose a `UTType.shazamCatalog` extension in a small Swift helper
   (`Allspeak/Storage/UTType+Catalog.swift`) so views import a typed value,
   not a string
-- [ ] write a test verifying the UTType identifier resolves and matches
-  `.shazamcatalog` file extension
-- [ ] run tests — must pass before next task
+- [x] write a test verifying the UTType identifier resolves and matches
+  `.shazamcatalog` file extension (`UTTypeCatalogTests`)
+- [x] run tests — must pass before next task — 2/2 UTTypeCatalog tests pass
+  on iPhone 17 / iOS 26
 
 ### Task 4: Session create/edit form — catalog file picker
 
