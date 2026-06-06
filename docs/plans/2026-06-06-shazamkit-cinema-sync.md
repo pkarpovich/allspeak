@@ -326,26 +326,44 @@ the `.shazamcatalog` extension to this; the earlier guess of
 
 ### Task 8: PlayerTopBar button + PlayerView orchestration
 
-- [ ] add `hasCatalog: Bool` and `onSyncTap: () -> Void` params to
-  `PlayerTopBar`
-- [ ] render sync button (glass-pill, icon `waveform.badge.magnifyingglass`)
-  conditionally `if hasCatalog`, positioned between back button and title
-- [ ] accessibility label: "Sync with cinema audio"
-- [ ] in `PlayerView`: instantiate `CinemaSyncService` lazily on first sync tap,
-  using `catalogURL` resolved from session
-- [ ] `@State private var showSyncSheet: Bool`
-- [ ] sheet binding presents `CinemaSyncView`, captures result, calls
-  `controller.seek(to: offset)`, then dismisses
-- [ ] handle edge cases:
-  - session has no catalog → button hidden (top bar consumer passes
-    `hasCatalog: false`)
-  - sheet dismissed without match → no-op
-  - controller is nil (race condition) → no-op
-- [ ] write tests for `PlayerTopBar` button visibility (with/without catalog,
-  with/without onSyncTap)
-- [ ] write tests for orchestration: mock CinemaSyncService delivers
-  `.matched(offset: 1234.0)`, verify seek called with 1234.0
-- [ ] run tests — must pass before next task
+- [x] add `hasCatalog: Bool` and `onSyncTap: () -> Void` params to
+  `PlayerTopBar` — also exposed a pure `showsSyncButton` computed property so
+  visibility is unit-testable without rendering
+- [x] render sync button conditionally `if hasCatalog`, positioned between back
+  button and title — ⚠️ used `.glassEffect(.regular, in: .circle)` (icon
+  `Icons.catalog` = `waveform.badge.magnifyingglass`) to match the three sibling
+  44x44 icon buttons (back/track/cinema are all circular glass) rather than a
+  lone capsule "pill"; consistency with the existing top-bar idiom won
+- [x] accessibility label: "Sync with cinema audio"
+- [x] in `PlayerView`: instantiate `CinemaSyncService` lazily on first sync tap,
+  using `catalogURL` resolved from session — ⚠️ scope note: the catalog file is
+  resolved in `PlaybackCoordinator` (new `private(set) var catalogURL: URL?`,
+  populated from the Core Data `catalogFilename` in both `startSession(sessionID:)`
+  and `refreshIfActive`, cleared in `endSession` + the UUID-based start). PlayerView
+  reads `PlaybackCoordinator.shared.catalogURL` in `loadSession` and creates the
+  service on first `onSyncTap`.
+- [x] `@State private var showSyncSheet: Bool` — plus `@State private var
+  syncService: CinemaSyncService?`
+- [x] sheet binding presents `CinemaSyncView`, captures result, seeks, then
+  dismisses — ⚠️ scope note: the seek is routed through a new
+  `PlaybackCoordinator.applySyncOffset(_:)` (`controller?.seek(to:)`) instead of
+  the view touching the controller directly. This makes the wiring unit-testable
+  and nil-safe (covers the "controller is nil" edge case), mirroring the existing
+  `apply(_:)`/`controller.seek` idiom. `CinemaSyncView` auto-dismisses on match.
+- [x] handle edge cases:
+  - session has no catalog → button hidden (`hasCatalog: catalogURL != nil`)
+  - sheet dismissed without match → `CinemaSyncView.onDisappear` cancels the
+    service, no seek fires
+  - controller is nil (race condition) → `applySyncOffset` is a no-op
+- [x] write tests for `PlayerTopBar` button visibility (`PlayerTopBarTests`:
+  with/without catalog, and independent of track count)
+- [x] write tests for orchestration: `applySyncOffset` seeks the active
+  controller to the matched offset, is a no-op when idle; `startSession`
+  resolves/clears `catalogURL` from a session imported with/without a catalog
+  (added to `PlaybackCoordinatorTests`)
+- [x] run tests — must pass before next task — 39/39 tests pass across
+  PlayerTopBar, PlaybackCoordinator, CinemaSyncView, and CinemaSyncService
+  suites on iPhone 17 / iOS 26
 
 ### Task 9: Verify acceptance criteria
 

@@ -17,6 +17,9 @@ struct PlayerView: View {
     @State private var activeTrackID: UUID?
     @State private var loadError: String?
     @State private var cinema: CinemaMode = .off
+    @State private var catalogURL: URL?
+    @State private var syncService: CinemaSyncService?
+    @State private var showSyncSheet = false
 
     private let repository: SessionRepository
 
@@ -61,10 +64,12 @@ struct PlayerView: View {
                     PlayerTopBar(
                         sessionName: sessionName,
                         cinemaActive: cinema.isCinema,
+                        hasCatalog: catalogURL != nil,
                         tracks: tracks,
                         activeTrackID: activeTrackID,
                         onBack: { dismiss() },
                         onCinema: { applyCinema(.pill) },
+                        onSyncTap: startSync,
                         onSwitchTrack: switchTrack
                     )
                     .padding(.top, 18)
@@ -104,6 +109,13 @@ struct PlayerView: View {
         .toolbar(.hidden, for: .navigationBar)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        .sheet(isPresented: $showSyncSheet) {
+            if let syncService {
+                CinemaSyncView(service: syncService) { offset in
+                    PlaybackCoordinator.shared.applySyncOffset(offset)
+                }
+            }
+        }
         .task {
             AppAudioSession.activatePlayback()
             await loadSession()
@@ -139,6 +151,14 @@ struct PlayerView: View {
         }
     }
 
+    private func startSync() {
+        guard let catalogURL else { return }
+        if syncService == nil {
+            syncService = CinemaSyncService(catalogURL: catalogURL)
+        }
+        showSyncSheet = true
+    }
+
     private func switchTrack(_ trackID: UUID) {
         Task {
             try? await PlaybackCoordinator.shared.switchTrack(to: trackID)
@@ -159,6 +179,7 @@ struct PlayerView: View {
             sessionName = PlaybackCoordinator.shared.sessionTitle
             tracks = PlaybackCoordinator.shared.tracks
             activeTrackID = PlaybackCoordinator.shared.activeTrackID
+            catalogURL = PlaybackCoordinator.shared.catalogURL
         } catch PlaybackCoordinator.StartError.sessionNotFound {
             loadError = "Couldn't load session."
         } catch PlaybackCoordinator.StartError.noCues {

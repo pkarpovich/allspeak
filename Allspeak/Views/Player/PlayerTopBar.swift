@@ -3,11 +3,15 @@ import SwiftUI
 struct PlayerTopBar: View {
     let sessionName: String
     let cinemaActive: Bool
+    let hasCatalog: Bool
     let tracks: [TrackInfo]
     let activeTrackID: UUID?
     let onBack: () -> Void
     let onCinema: () -> Void
+    let onSyncTap: () -> Void
     let onSwitchTrack: (UUID) -> Void
+
+    var showsSyncButton: Bool { hasCatalog }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -19,6 +23,10 @@ struct PlayerTopBar: View {
             }
             .glassEffect(.regular, in: .circle)
             .accessibilityLabel("Back")
+
+            if showsSyncButton {
+                syncButton
+            }
 
             HStack {
                 Text(sessionName)
@@ -47,6 +55,17 @@ struct PlayerTopBar: View {
             .accessibilityLabel(cinemaActive ? "Exit cinema mode" : "Enter cinema mode")
         }
         .padding(.horizontal, 14)
+    }
+
+    private var syncButton: some View {
+        Button(action: onSyncTap) {
+            Image(systemName: Icons.catalog)
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(Tokens.accent)
+                .frame(width: 44, height: 44)
+        }
+        .glassEffect(.regular, in: .circle)
+        .accessibilityLabel("Sync with cinema audio")
     }
 
     private var trackMenu: some View {

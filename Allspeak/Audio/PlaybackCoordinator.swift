@@ -39,6 +39,7 @@ final class PlaybackCoordinator {
     private(set) var revision: Int = 0
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
+    private(set) var catalogURL: URL?
     private var isSwitching: Bool = false
     private var repository: SessionRepository?
     private var storage: DocumentsStorage = .default
@@ -71,6 +72,7 @@ final class PlaybackCoordinator {
             let name: String
             let audioFilename: String
             let srtFilename: String
+            let catalogFilename: String?
             let lastPosition: Double?
             let activeTrackID: UUID?
             let tracks: [TrackSnap]
@@ -84,6 +86,7 @@ final class PlaybackCoordinator {
                 let name = (object.value(forKey: "name") as? String) ?? ""
                 let audio = (object.value(forKey: "audioFilename") as? String) ?? ""
                 let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
+                let catalog = object.value(forKey: "catalogFilename") as? String
                 let pos = object.value(forKey: "lastPositionSeconds") as? Double
                 let activeID = object.value(forKey: "activeTrackID") as? UUID
                 let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
@@ -101,6 +104,7 @@ final class PlaybackCoordinator {
                     name: name,
                     audioFilename: audio,
                     srtFilename: srt,
+                    catalogFilename: catalog,
                     lastPosition: pos,
                     activeTrackID: activeID,
                     tracks: trackSnaps
@@ -162,6 +166,7 @@ final class PlaybackCoordinator {
         self.sessionTitle = snap.name
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
+        self.catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: snap.uuid, filename: $0) }
         self.repository = repository
         self.storage = storage
         self.persistence = persistence
@@ -215,6 +220,7 @@ final class PlaybackCoordinator {
         self.sessionTitle = title
         self.tracks = []
         self.activeTrackID = nil
+        self.catalogURL = nil
         self.revision += 1
         liveActivity.sessionStarted(
             id: sessionUUID,
@@ -242,6 +248,7 @@ final class PlaybackCoordinator {
         struct Snap: Sendable {
             let name: String
             let srtFilename: String
+            let catalogFilename: String?
             let activeTrackID: UUID?
             let tracks: [TrackSnap]
         }
@@ -252,6 +259,7 @@ final class PlaybackCoordinator {
                 let object = try context.existingObject(with: sessionID)
                 let name = (object.value(forKey: "name") as? String) ?? ""
                 let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
+                let catalog = object.value(forKey: "catalogFilename") as? String
                 let activeID = object.value(forKey: "activeTrackID") as? UUID
                 let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
                 let trackSnaps: [TrackSnap] = raw.compactMap { obj in
@@ -263,7 +271,7 @@ final class PlaybackCoordinator {
                     return TrackSnap(trackID: id, filename: fn, label: label, sortOrder: order, isDefault: isDefault)
                 }
                 .sorted { $0.sortOrder < $1.sortOrder }
-                return Snap(name: name, srtFilename: srt, activeTrackID: activeID, tracks: trackSnaps)
+                return Snap(name: name, srtFilename: srt, catalogFilename: catalog, activeTrackID: activeID, tracks: trackSnaps)
             }
         } catch {
             return
@@ -286,6 +294,7 @@ final class PlaybackCoordinator {
         let previousActiveTrackID = self.activeTrackID
         let previousTracks = self.tracks
         sessionTitle = snap.name
+        catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: sessionUUID, filename: $0) }
         tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         activeTrackID = selectedTrack?.trackID
         let tracksChanged = previousTracks.map(\.id) != tracks.map(\.id) || previousActiveTrackID != activeTrackID
@@ -488,6 +497,7 @@ final class PlaybackCoordinator {
         self.sessionTitle = ""
         self.tracks = []
         self.activeTrackID = nil
+        self.catalogURL = nil
         self.repository = nil
         self.isSwitching = false
         liveActivity.sessionEnded()
@@ -530,6 +540,10 @@ final class PlaybackCoordinator {
     func currentCueBundle() -> CueBundle? {
         guard let controller, let sessionUUID else { return nil }
         return CueBundle(sessionID: sessionUUID, revision: revision, cues: controller.subtitles)
+    }
+
+    func applySyncOffset(_ offset: TimeInterval) {
+        controller?.seek(to: offset)
     }
 
     func apply(_ command: WatchCommand) {
