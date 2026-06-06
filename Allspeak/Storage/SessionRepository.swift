@@ -158,7 +158,8 @@ final class SessionRepository: @unchecked Sendable {
     func importMultiTrackSession(
         name: String,
         audioSources: [PendingTrackImport],
-        srtSrc: URL
+        srtSrc: URL,
+        catalogSrc: URL? = nil
     ) async throws -> NSManagedObjectID {
         guard !audioSources.isEmpty else {
             throw SessionRepositoryError.noAudioSources
@@ -166,6 +167,7 @@ final class SessionRepository: @unchecked Sendable {
 
         let sessionUUID = UUID()
         let srtName = srtSrc.lastPathComponent
+        let catalogName = catalogSrc?.lastPathComponent
         let createdAt = Date()
 
         struct StagedTrack {
@@ -203,6 +205,9 @@ final class SessionRepository: @unchecked Sendable {
                 )
                 staged.append(StagedTrack(trackID: trackID, originalFilename: original, label: source.label))
             }
+            if let catalogSrc, let catalogName {
+                try storage.copyIntoSession(srcURL: catalogSrc, sessionID: sessionUUID, as: catalogName)
+            }
         } catch {
             try? storage.removeSessionDir(sessionUUID)
             throw error
@@ -227,6 +232,9 @@ final class SessionRepository: @unchecked Sendable {
                 session.setValue(primaryFilename, forKey: "audioFilename")
                 session.setValue(srtName, forKey: "srtFilename")
                 session.setValue(createdAt, forKey: "createdAt")
+                if let catalogName {
+                    session.setValue(catalogName, forKey: "catalogFilename")
+                }
                 if let duration {
                     session.setValue(duration, forKey: "durationSeconds")
                 }

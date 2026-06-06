@@ -44,6 +44,12 @@ struct CreateSessionView: View {
                         onChoose: { presentPicker(.subtitles) },
                         onClear: { form.srtURL = nil; form.existingSrtFilename = nil }
                     )
+                    FileSlotRow(
+                        kind: .catalog,
+                        filename: form.catalogDisplayName,
+                        onChoose: { presentPicker(.catalog) },
+                        onClear: { form.catalogURL = nil; form.existingCatalogFilename = nil }
+                    )
                 } header: {
                     Text("Files")
                 }
@@ -174,6 +180,11 @@ struct CreateSessionView: View {
                     form.srtURL = url
                     form.existingSrtFilename = nil
                 }
+            case .catalog:
+                if let url = urls.first {
+                    form.catalogURL = url
+                    form.existingCatalogFilename = nil
+                }
             case .none:
                 break
             }
@@ -219,7 +230,8 @@ struct CreateSessionView: View {
             _ = try await repository.importMultiTrackSession(
                 name: snapshot.trimmedName,
                 audioSources: sources,
-                srtSrc: srt
+                srtSrc: srt,
+                catalogSrc: snapshot.catalogURL
             )
         case .edit(let id):
             if let srt = snapshot.srtURL {
@@ -280,6 +292,7 @@ private struct PendingTrackRow: View {
 private enum ActivePicker: Hashable {
     case audio
     case subtitles
+    case catalog
 
     var allowedTypes: [UTType] {
         switch self {
@@ -290,6 +303,8 @@ private enum ActivePicker: Hashable {
                 return [srt, .plainText]
             }
             return [.plainText]
+        case .catalog:
+            return [.shazamCatalog]
         }
     }
 
@@ -297,6 +312,7 @@ private enum ActivePicker: Hashable {
         switch self {
         case .audio: return true
         case .subtitles: return false
+        case .catalog: return false
         }
     }
 }

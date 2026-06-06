@@ -192,22 +192,29 @@ the `.shazamcatalog` extension to this; the earlier guess of
 
 ### Task 4: Session create/edit form — catalog file picker
 
-- [ ] add `catalogURL: URL?` + `existingCatalogFilename: String?` to
+- [x] add `catalogURL: URL?` + `existingCatalogFilename: String?` to
   `CreateSessionFormState`
-- [ ] add `hasCatalog` computed property (returns true if either URL or
-  existing filename present)
-- [ ] add catalog `FileSlotView` row in `CreateSessionView` under the SRT row,
-  labeled "Cinema sync catalog (optional)"
-- [ ] picker uses `.fileImporter` with `[UTType.shazamCatalog]` allowed types
-- [ ] add clear button on the row (existing pattern)
-- [ ] hook save path: pass `catalogURL` to
-  `SessionRepository.importSession(...)`
-- [ ] `canSave` unchanged — catalog is optional, does not gate save
-- [ ] write tests for form state: catalog set/clear, `hasCatalog` correctness,
-  save path passes catalog through
-- [ ] manual UI smoke (simulator): create session with catalog,
-  edit and clear, save without catalog
-- [ ] run tests — must pass before next task
+- [x] add `hasCatalog` computed property (returns true if either URL or
+  existing filename present) — also added `catalogDisplayName`
+- [x] add catalog `FileSlotView` row in `CreateSessionView` under the SRT row,
+  labeled "Cinema sync catalog (optional)" — added `.catalog` case to
+  `FileSlotKind` (icon `waveform.badge.magnifyingglass`, hint `.shazamcatalog`)
+- [x] picker uses `.fileImporter` with `[UTType.shazamCatalog]` allowed types —
+  new `.catalog` case in `ActivePicker`
+- [x] add clear button on the row (existing pattern) — `FileSlotRow` renders the
+  clear button when a filename is present; `onClear` resets URL + existing name
+- [x] hook save path: pass `catalogURL` to import — ⚠️ scope note: the new
+  session create path routes through `importMultiTrackSession`, not the single
+  `importSession`, so the catalog is threaded through `importMultiTrackSession`
+  (new optional `catalogSrc: URL?`). Edit-mode catalog wiring is Task 5.
+- [x] `canSave` unchanged — catalog is optional, does not gate save
+- [x] write tests for form state: catalog set/clear, `hasCatalog` correctness,
+  save path passes catalog through (form-state tests + repository-level
+  `importMultiTrackSession`/`performSave` catalog tests)
+- [x] manual UI smoke (simulator): create session with catalog, edit and clear,
+  save without catalog — skipped (not automatable in this loop)
+- [x] run tests — must pass before next task — 46/46 tests pass across
+  CreateSessionViewModel + SessionRepository suites on iPhone 17 / iOS 26
 
 ### Task 5: SessionEditView surfaces catalog
 

@@ -15,6 +15,7 @@ struct CreateSessionViewModelTests {
     private static let audio = URL(fileURLWithPath: "/tmp/example.m4a")
     private static let audio2 = URL(fileURLWithPath: "/tmp/example2.m4a")
     private static let srt = URL(fileURLWithPath: "/tmp/example.srt")
+    private static let catalog = URL(fileURLWithPath: "/tmp/example.shazamcatalog")
 
     @Test(
         "canSave reflects trimmed name + both files",
@@ -136,5 +137,74 @@ struct CreateSessionViewModelTests {
         var state = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
         state.appendPendingTracks(from: [Self.audio, Self.audio2])
         #expect(state.canSave)
+    }
+
+    @Test("hasCatalog is false when neither a URL nor an existing filename is set")
+    func hasCatalogFalseWhenAbsent() {
+        let state = CreateSessionFormState(name: "Heat", audioURL: Self.audio, srtURL: Self.srt)
+        #expect(state.hasCatalog == false)
+        #expect(state.catalogDisplayName == nil)
+    }
+
+    @Test("hasCatalog is true when a newly-picked catalog URL is set")
+    func hasCatalogTrueWithPickedURL() {
+        let state = CreateSessionFormState(
+            name: "Heat",
+            audioURL: Self.audio,
+            srtURL: Self.srt,
+            catalogURL: Self.catalog
+        )
+        #expect(state.hasCatalog)
+        #expect(state.catalogDisplayName == "example.shazamcatalog")
+    }
+
+    @Test("hasCatalog is true when only an existing catalog filename is present")
+    func hasCatalogTrueWithExistingFilename() {
+        var state = CreateSessionFormState(name: "Heat")
+        state.existingCatalogFilename = "heat.shazamcatalog"
+        #expect(state.hasCatalog)
+        #expect(state.catalogDisplayName == "heat.shazamcatalog")
+    }
+
+    @Test("a newly-picked catalog URL takes display priority over the existing filename")
+    func pickedCatalogOverridesExisting() {
+        var state = CreateSessionFormState(name: "Heat")
+        state.existingCatalogFilename = "old.shazamcatalog"
+        state.catalogURL = Self.catalog
+        #expect(state.catalogDisplayName == "example.shazamcatalog")
+    }
+
+    @Test("clearing the catalog resets both the URL and the existing filename")
+    func clearCatalogResetsBoth() {
+        var state = CreateSessionFormState(
+            name: "Heat",
+            audioURL: Self.audio,
+            srtURL: Self.srt,
+            catalogURL: Self.catalog,
+            existingCatalogFilename: "old.shazamcatalog"
+        )
+        state.catalogURL = nil
+        state.existingCatalogFilename = nil
+        #expect(state.hasCatalog == false)
+        #expect(state.catalogDisplayName == nil)
+    }
+
+    @Test("catalog is optional: canSave is unaffected by catalog presence or absence")
+    func catalogDoesNotGateSave() {
+        var withCatalog = CreateSessionFormState(name: "Heat", srtURL: Self.srt, catalogURL: Self.catalog)
+        withCatalog.appendPendingTracks(from: [Self.audio])
+        #expect(withCatalog.canSave)
+
+        var withoutCatalog = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        withoutCatalog.appendPendingTracks(from: [Self.audio])
+        #expect(withoutCatalog.canSave)
+
+        var missingAudioWithCatalog = CreateSessionFormState(
+            name: "Heat",
+            srtURL: Self.srt,
+            catalogURL: Self.catalog
+        )
+        missingAudioWithCatalog.pendingTracks = []
+        #expect(missingAudioWithCatalog.canSave == false)
     }
 }

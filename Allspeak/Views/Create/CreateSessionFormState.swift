@@ -29,23 +29,29 @@ struct CreateSessionFormState: Equatable {
     var pendingTracks: [PendingAudioTrack]
     var audioURL: URL?
     var srtURL: URL?
+    var catalogURL: URL?
     var existingAudioFilename: String?
     var existingSrtFilename: String?
+    var existingCatalogFilename: String?
 
     init(
         name: String = "",
         pendingTracks: [PendingAudioTrack] = [],
         audioURL: URL? = nil,
         srtURL: URL? = nil,
+        catalogURL: URL? = nil,
         existingAudioFilename: String? = nil,
-        existingSrtFilename: String? = nil
+        existingSrtFilename: String? = nil,
+        existingCatalogFilename: String? = nil
     ) {
         self.name = name
         self.pendingTracks = pendingTracks
         self.audioURL = audioURL
         self.srtURL = srtURL
+        self.catalogURL = catalogURL
         self.existingAudioFilename = existingAudioFilename
         self.existingSrtFilename = existingSrtFilename
+        self.existingCatalogFilename = existingCatalogFilename
     }
 
     var trimmedName: String {
@@ -58,6 +64,10 @@ struct CreateSessionFormState: Equatable {
 
     var hasSubtitle: Bool {
         srtURL != nil || existingSrtFilename != nil
+    }
+
+    var hasCatalog: Bool {
+        catalogURL != nil || existingCatalogFilename != nil
     }
 
     var allTrackLabelsValid: Bool {
@@ -74,6 +84,10 @@ struct CreateSessionFormState: Equatable {
 
     var srtDisplayName: String? {
         srtURL?.lastPathComponent ?? existingSrtFilename
+    }
+
+    var catalogDisplayName: String? {
+        catalogURL?.lastPathComponent ?? existingCatalogFilename
     }
 
     mutating func appendPendingTracks(from urls: [URL]) {

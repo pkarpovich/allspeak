@@ -513,6 +513,48 @@ struct SessionRepositoryTests {
         }
     }
 
+    @Test("importMultiTrackSession without a catalog leaves catalogFilename nil")
+    func importMultiTrackWithoutCatalogLeavesNil() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "loud.m4a", contents: "a1")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
+
+        let id = try await repo.importMultiTrackSession(
+            name: "No Catalog",
+            audioSources: [PendingTrackImport(url: a1, label: "Loudnorm")],
+            srtSrc: srt
+        )
+
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == nil)
+    }
+
+    @Test("importMultiTrackSession with a catalog copies the file and sets catalogFilename")
+    func importMultiTrackWithCatalogCopiesAndPersists() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "loud.m4a", contents: "a1")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
+        let catalog = try writeSourceFile(in: srcDir, name: "movie.shazamcatalog", contents: "fp")
+
+        let id = try await repo.importMultiTrackSession(
+            name: "With Catalog",
+            audioSources: [PendingTrackImport(url: a1, label: "Loudnorm")],
+            srtSrc: srt,
+            catalogSrc: catalog
+        )
+
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == "movie.shazamcatalog")
+        let uuid = try #require(row.value(forKey: "id") as? UUID)
+        let copied = storage.catalogURL(sessionID: uuid, filename: "movie.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: copied.path))
+        #expect(try String(contentsOf: copied, encoding: .utf8) == "fp")
+    }
+
     @Test("importMultiTrackSession throws noAudioSources for empty input")
     func importMultiTrackSessionRejectsEmpty() async throws {
         let (repo, _, _, root) = makeFixture()
@@ -554,6 +596,52 @@ struct SessionRepositoryTests {
         let snaps = try await repo.tracks(for: session.objectID)
         #expect(snaps.map(\.label) == ["Primary", "Alt"])
         #expect(snaps.first?.isDefault == true)
+    }
+
+    @Test("CreateSessionView.performSave (new mode) passes the catalog through to import")
+    @MainActor
+    func performSaveNewModePassesCatalog() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "primary.m4a", contents: "1")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
+        let catalog = try writeSourceFile(in: srcDir, name: "movie.shazamcatalog", contents: "fp")
+
+        var form = CreateSessionFormState(name: "Synced", srtURL: srt, catalogURL: catalog)
+        form.appendPendingTracks(from: [a1])
+        form.updateLabel(for: form.pendingTracks[0].id, to: "Primary")
+        #expect(form.hasCatalog)
+        #expect(form.canSave)
+
+        try await CreateSessionView.performSave(snapshot: form, mode: .new, repository: repo)
+
+        let rows = try fetchAllSessions(in: persistence)
+        let session = try #require(rows.first)
+        #expect(session.value(forKey: "catalogFilename") as? String == "movie.shazamcatalog")
+        let uuid = try #require(session.value(forKey: "id") as? UUID)
+        let copied = storage.catalogURL(sessionID: uuid, filename: "movie.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: copied.path))
+    }
+
+    @Test("CreateSessionView.performSave (new mode) without a catalog leaves catalogFilename nil")
+    @MainActor
+    func performSaveNewModeWithoutCatalogLeavesNil() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "primary.m4a", contents: "1")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
+
+        var form = CreateSessionFormState(name: "Plain", srtURL: srt)
+        form.appendPendingTracks(from: [a1])
+        form.updateLabel(for: form.pendingTracks[0].id, to: "Primary")
+        #expect(form.hasCatalog == false)
+
+        try await CreateSessionView.performSave(snapshot: form, mode: .new, repository: repo)
+
+        let session = try #require(try fetchAllSessions(in: persistence).first)
+        #expect(session.value(forKey: "catalogFilename") as? String == nil)
     }
 
     @Test("objectID from import resolves cleanly on the view context (handoff smoke)")
