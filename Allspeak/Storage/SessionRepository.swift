@@ -110,7 +110,33 @@ final class SessionRepository: @unchecked Sendable {
         }
 
         let catalogName = srcURL.lastPathComponent
-        let copiedURL = try storage.copyIntoSession(srcURL: srcURL, sessionID: sessionUUID, as: catalogName)
+        let dir = storage.sessionDir(for: sessionUUID)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let finalURL = dir.appendingPathComponent(catalogName)
+
+        let stagedURL = dir.appendingPathComponent("staged-\(UUID().uuidString)")
+        let scoped = srcURL.startAccessingSecurityScopedResource()
+        do {
+            try FileManager.default.copyItem(at: srcURL, to: stagedURL)
+        } catch {
+            if scoped { srcURL.stopAccessingSecurityScopedResource() }
+            throw error
+        }
+        if scoped { srcURL.stopAccessingSecurityScopedResource() }
+
+        let backupName = "backup-\(UUID().uuidString)"
+        var backupURL: URL?
+        do {
+            if FileManager.default.fileExists(atPath: finalURL.path) {
+                _ = try FileManager.default.replaceItemAt(finalURL, withItemAt: stagedURL, backupItemName: backupName, options: [.withoutDeletingBackupItem])
+                backupURL = dir.appendingPathComponent(backupName)
+            } else {
+                try FileManager.default.moveItem(at: stagedURL, to: finalURL)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: stagedURL)
+            throw error
+        }
 
         do {
             try await context.perform {
@@ -119,10 +145,18 @@ final class SessionRepository: @unchecked Sendable {
                 try context.save()
             }
         } catch {
-            try? FileManager.default.removeItem(at: copiedURL)
+            if let backupURL, FileManager.default.fileExists(atPath: backupURL.path) {
+                try? FileManager.default.removeItem(at: finalURL)
+                try? FileManager.default.moveItem(at: backupURL, to: finalURL)
+            } else {
+                try? FileManager.default.removeItem(at: finalURL)
+            }
             throw error
         }
 
+        if let backupURL {
+            try? FileManager.default.removeItem(at: backupURL)
+        }
         if let oldCatalog, oldCatalog != catalogName {
             try? storage.removeCatalogFile(sessionID: sessionUUID, filename: oldCatalog)
         }

@@ -112,12 +112,13 @@ final class CinemaSyncService {
         self.session = session
         delegateProxy = proxy
 
-        let saved = SavedAudioConfig(
-            category: audioSession.category,
-            mode: audioSession.mode,
-            options: audioSession.categoryOptions
-        )
-        savedConfiguration = saved
+        if savedConfiguration == nil {
+            savedConfiguration = SavedAudioConfig(
+                category: audioSession.category,
+                mode: audioSession.mode,
+                options: audioSession.categoryOptions
+            )
+        }
         do {
             try audioSession.setCategory(
                 .playAndRecord,
@@ -189,7 +190,11 @@ final class CinemaSyncService {
 
     private func restoreAudioSession() {
         guard let saved = savedConfiguration else { return }
-        try? audioSession.setCategory(saved.category, mode: saved.mode, options: saved.options)
+        do {
+            try audioSession.setCategory(saved.category, mode: saved.mode, options: saved.options)
+        } catch {
+            return
+        }
         savedConfiguration = nil
     }
 
@@ -239,6 +244,7 @@ final class MatchDelegateProxy: NSObject, SHSessionDelegate, @unchecked Sendable
 
 final class AVAudioEngineCapture: AudioInputCapturing {
     private let engine = AVAudioEngine()
+    private var tapInstalled = false
 
     func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime?) -> Void) throws {
         let input = engine.inputNode
@@ -250,13 +256,16 @@ final class AVAudioEngineCapture: AudioInputCapturing {
         input.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { buffer, when in
             onBuffer(buffer, when)
         }
+        tapInstalled = true
         engine.prepare()
         try engine.start()
     }
 
     func stop() {
         engine.stop()
+        guard tapInstalled else { return }
         engine.inputNode.removeTap(onBus: 0)
+        tapInstalled = false
     }
 }
 

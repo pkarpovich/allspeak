@@ -14,6 +14,7 @@ struct CinemaSyncServiceTests {
         var categoryOptions: AVAudioSession.CategoryOptions = []
         var setCategoryError: Error?
         var setActiveError: Error?
+        var restoreError: Error?
         private(set) var setCategoryCalls:
             [(AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)] = []
         private(set) var setActiveCalls: [Bool] = []
@@ -24,6 +25,7 @@ struct CinemaSyncServiceTests {
             options: AVAudioSession.CategoryOptions
         ) throws {
             if let setCategoryError { throw setCategoryError }
+            if category != .playAndRecord, let restoreError { throw restoreError }
             setCategoryCalls.append((category, mode, options))
             self.category = category
             self.mode = mode
@@ -41,6 +43,7 @@ struct CinemaSyncServiceTests {
         private(set) var startCalled = false
         private(set) var startCount = 0
         private(set) var stopCalled = false
+        private(set) var stopCount = 0
         var bufferHandler: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)?
 
         func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime?) -> Void) throws {
@@ -52,6 +55,7 @@ struct CinemaSyncServiceTests {
 
         func stop() {
             stopCalled = true
+            stopCount += 1
             bufferHandler = nil
         }
     }
@@ -303,6 +307,82 @@ struct CinemaSyncServiceTests {
 
         #expect(service.state == .error(CinemaSyncService.audioSessionMessage))
         #expect(!capture.startCalled)
+        #expect(audio.category == .playback)
+    }
+
+    @Test("a failed restore keeps the saved configuration so a later teardown can retry")
+    func failedRestoreRetainsConfigForRetry() async throws {
+        let audio = MockAudioSession()
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            audioSession: audio,
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        #expect(audio.category == .playAndRecord)
+
+        audio.restoreError = NSError(domain: "test", code: 3)
+        service.cancel()
+        #expect(service.state == .idle)
+        #expect(audio.category == .playAndRecord)
+
+        audio.restoreError = nil
+        service.cancel()
+        #expect(audio.category == .playback)
+    }
+
+    @Test("retrying via start after a failed restore still restores the original configuration")
+    func retryViaStartPreservesOriginalConfig() async throws {
+        let audio = MockAudioSession()
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            audioSession: audio,
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        #expect(audio.category == .playAndRecord)
+
+        audio.restoreError = NSError(domain: "test", code: 7)
+        service.cancel()
+        #expect(audio.category == .playAndRecord)
+
+        audio.restoreError = nil
+        await service.start()
+        #expect(audio.category == .playAndRecord)
+
+        service.cancel()
+        #expect(audio.category == .playback)
+        #expect(audio.mode == .spokenAudio)
+    }
+
+    @Test("a match followed by sheet dismissal tears down twice and stays consistent")
+    func matchThenDismissTearsDownIdempotently() async throws {
+        let audio = MockAudioSession()
+        let capture = MockCapture()
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            audioSession: audio,
+            capture: capture,
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        service.ingestMatch(offset: 42)
+        #expect(service.state == .matched(offset: 42))
+
+        service.cancel()
+
+        #expect(capture.stopCount >= 2)
         #expect(audio.category == .playback)
     }
 }

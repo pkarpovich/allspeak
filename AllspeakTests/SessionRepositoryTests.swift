@@ -3,6 +3,7 @@ import Foundation
 import Testing
 @testable import Allspeak
 
+@MainActor
 @Suite("SessionRepository", .serialized, .tags(.coreData, .storage))
 struct SessionRepositoryTests {
 
