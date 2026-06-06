@@ -16,6 +16,7 @@ struct CreateSessionView: View {
     @State private var isPickerPresented = false
     @State private var isSaving = false
     @State private var loadError: String?
+    @State private var loadedCatalogFilename: String?
 
     private let repository: SessionRepository
 
@@ -154,6 +155,8 @@ struct CreateSessionView: View {
             form.name = snapshot.name
             form.existingAudioFilename = snapshot.audioFilename
             form.existingSrtFilename = snapshot.srtFilename
+            form.existingCatalogFilename = snapshot.catalogFilename
+            loadedCatalogFilename = snapshot.catalogFilename
         } catch {
             loadError = "Couldn't load session: \(error.localizedDescription)"
         }
@@ -199,9 +202,15 @@ struct CreateSessionView: View {
         let snapshot = form
         let mode = self.mode
         let repo = repository
+        let originalCatalog = loadedCatalogFilename
         Task {
             do {
-                try await Self.performSave(snapshot: snapshot, mode: mode, repository: repo)
+                try await Self.performSave(
+                    snapshot: snapshot,
+                    mode: mode,
+                    repository: repo,
+                    originalCatalogFilename: originalCatalog
+                )
                 await MainActor.run {
                     isSaving = false
                     dismiss()
@@ -218,7 +227,8 @@ struct CreateSessionView: View {
     static func performSave(
         snapshot: CreateSessionFormState,
         mode: CreateSessionMode,
-        repository: SessionRepository
+        repository: SessionRepository,
+        originalCatalogFilename: String? = nil
     ) async throws {
         switch mode {
         case .new:
@@ -236,6 +246,11 @@ struct CreateSessionView: View {
         case .edit(let id):
             if let srt = snapshot.srtURL {
                 try await repository.replaceSubtitle(id: id, srcURL: srt)
+            }
+            if let catalog = snapshot.catalogURL {
+                try await repository.setCatalog(sessionID: id, srcURL: catalog)
+            } else if originalCatalogFilename != nil, snapshot.existingCatalogFilename == nil {
+                try await repository.clearCatalog(sessionID: id)
             }
             var renameError: Error?
             do {

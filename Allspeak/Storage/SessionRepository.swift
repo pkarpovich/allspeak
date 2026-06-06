@@ -7,6 +7,7 @@ struct SessionSnapshot: Equatable, Sendable {
     let name: String
     let audioFilename: String
     let srtFilename: String
+    let catalogFilename: String?
 }
 
 struct TrackSnapshot: Equatable, Sendable {
@@ -284,7 +285,8 @@ final class SessionRepository: @unchecked Sendable {
             let name = object.value(forKey: "name") as? String ?? ""
             let audio = object.value(forKey: "audioFilename") as? String ?? ""
             let srt = object.value(forKey: "srtFilename") as? String ?? ""
-            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt)
+            let catalog = object.value(forKey: "catalogFilename") as? String
+            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt, catalogFilename: catalog)
         }
     }
 

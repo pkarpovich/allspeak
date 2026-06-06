@@ -218,15 +218,34 @@ the `.shazamcatalog` extension to this; the earlier guess of
 
 ### Task 5: SessionEditView surfaces catalog
 
-- [ ] locate the edit flow (CreateSessionView in `.edit` mode per Explore
-  report — single view, not separate file)
-- [ ] in edit mode populate `existingCatalogFilename` from session entity
-- [ ] catalog row shows existing filename when set, or picker when empty
-- [ ] tapping clear → calls `SessionRepository.clearCatalog(sessionID:)`
-- [ ] tapping pick → calls `SessionRepository.setCatalog(sessionID:srcURL:)`
-- [ ] write tests: edit existing session adds catalog, removes catalog,
-  replaces catalog
-- [ ] run tests — must pass before next task
+- [x] locate the edit flow (CreateSessionView in `.edit` mode per Explore
+  report — single view, not separate file). ⚠️ note: a separate
+  `SessionEditView.swift` exists but only manages *tracks*; catalog edit
+  belongs in `CreateSessionView` `.edit` mode as the plan anticipated.
+- [x] in edit mode populate `existingCatalogFilename` from session entity —
+  added `catalogFilename` to `SessionSnapshot`, read it in `fetchSnapshot`,
+  and set `form.existingCatalogFilename` (plus capture
+  `loadedCatalogFilename`) in `loadIfEditing()`
+- [x] catalog row shows existing filename when set, or picker when empty —
+  already present from Task 4; the row reads `form.catalogDisplayName`, which
+  now resolves from the populated `existingCatalogFilename` in edit mode
+- [x] tapping clear → calls `SessionRepository.clearCatalog(sessionID:)` —
+  ⚠️ scope note: the CreateSessionView edit flow is save-based (subtitle
+  replace + rename also persist on Save, not on tap), so the clear is wired
+  through `performSave` — when a catalog was loaded and then cleared,
+  `clearCatalog` runs on Save. Net behavior identical to on-tap.
+- [x] tapping pick → calls `SessionRepository.setCatalog(sessionID:srcURL:)` —
+  same save-based wiring: a newly-picked `catalogURL` triggers `setCatalog`
+  in `performSave` (handles both add-to-none and replace-existing)
+- [x] write tests: edit existing session adds catalog, removes catalog,
+  replaces catalog — added 4 edit-mode `performSave` tests (add/remove/
+  replace/keep-untouched) plus `fetchSnapshot carries catalogFilename`
+- [x] run tests — must pass before next task — SessionRepository (35),
+  CreateSessionViewModel, and SessionEditViewModel suites green on
+  iPhone 17 / iOS 26.5. ⚠️ marked `SessionRepository` suite `.serialized`:
+  the file-I/O `setCatalog*` tests flaked intermittently under parallel
+  Swift Testing once the new edit tests added concurrent file I/O; the
+  suite is deterministic serialized (idiomatic for file-I/O + Core Data).
 
 ### Task 6: CinemaSyncService — SHSession + AVAudioEngine wrapper
 
