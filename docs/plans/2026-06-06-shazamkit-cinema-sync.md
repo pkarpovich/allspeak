@@ -429,10 +429,17 @@ the `.shazamcatalog` extension to this; the earlier guess of
 
 ### Task 10: Update documentation
 
-- [ ] update `README.md` with a one-paragraph note about the catalog field
-  and sync button under the "Sessions" / "Playback" section
-- [ ] update or add `docs/cinema-sync.md` if helpful (short — how to attach
-  a catalog, what the button does, mic permission expectation)
+- [x] update `README.md` with a one-paragraph note about the catalog field
+  and sync button under the "Sessions" / "Playback" section — added an
+  opt-in catalog note to the "Preparing files" section and a new
+  "### Cinema sync (ShazamKit)" subsection after "Switching tracks at runtime"
+  (listen → match → seek flow, no-match path, mic permission, non-disruptive
+  audio-session swap, button-hidden-without-catalog)
+- [x] update or add `docs/cinema-sync.md` if helpful (short — how to attach
+  a catalog, what the button does, mic permission expectation) — created
+  `docs/cinema-sync.md`: attach/replace/clear workflow, sync button behavior,
+  `NSMicrophoneUsageDescription` expectation, and a pointer to the out-of-scope
+  Mac-side catalog generation step
 
 ## Technical Details
 

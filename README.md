@@ -52,6 +52,13 @@ location after import. To add more tracks to an existing session (e.g.
 drop in a new dub when it becomes available), use the `Tracks` action in
 the session row's context menu.
 
+Each session can also carry an optional `.shazamcatalog` file (the
+`Cinema sync catalog` row in the create / edit form). It is opt-in: sessions
+without one behave exactly as before. When attached, the catalog is copied
+alongside the audio and subtitles and enables the cinema sync button in the
+player — see [Cinema sync](#cinema-sync-shazamkit) below and
+[`docs/cinema-sync.md`](docs/cinema-sync.md) for the full workflow.
+
 ### Switching tracks at runtime
 
 In `PlayerView`, a toolbar `Menu` appears when a session has more than one
@@ -59,6 +66,22 @@ track. Tapping it lists every track with a checkmark on the active one;
 selecting another switches the playing audio while preserving the current
 position (~100-300ms gap during reload, no crossfade). The same list lives
 on the Apple Watch as a third TabView page — see below.
+
+### Cinema sync (ShazamKit)
+
+When a session has a `.shazamcatalog` attached, the player top bar shows a sync
+button (a waveform-with-magnifier glyph) between the back button and the title.
+Tapping it opens a modal that listens through the iPhone mic for a few seconds,
+matches the room's cinema audio against the catalog via ShazamKit, and seeks the
+prepared dub track to the matched on-screen position — replacing the manual
+subtitle-tap resync. On a match the modal shows the matched timecode and
+auto-dismisses; with no match within ~6 seconds it offers Try Again / Close. The
+first tap prompts for microphone access (`NSMicrophoneUsageDescription`).
+Playback is not interrupted during the listen — the audio session swaps to
+`.playAndRecord` with `.mixWithOthers` for the sync window and restores
+afterward. The button is hidden for sessions without a catalog. Generating the
+catalog file itself is a separate Mac-side step; see
+[`docs/cinema-sync.md`](docs/cinema-sync.md).
 
 ## Apple Watch remote
 
