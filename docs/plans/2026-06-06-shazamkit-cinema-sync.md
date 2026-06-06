@@ -298,23 +298,31 @@ the `.shazamcatalog` extension to this; the earlier guess of
 
 ### Task 7: CinemaSyncView modal — "Listening / Matched / Error" UI
 
-- [ ] new file `Allspeak/Views/Player/CinemaSyncView.swift`
-- [ ] modal sheet that takes `CinemaSyncService` as `@Bindable` parameter +
+- [x] new file `Allspeak/Views/Player/CinemaSyncView.swift`
+- [x] modal sheet that takes `CinemaSyncService` as `@Bindable` parameter +
   `onSyncResult: (TimeInterval) -> Void` callback
-- [ ] three visual states matching service state:
-  - **Listening**: large mic icon + animated waveform + "Listening to
-    the cinema…" caption + Cancel button
-  - **Matched**: checkmark + formatted timecode (`PlayerTime.formatHHMMSS`) +
-    auto-dismiss after 600ms, fires `onSyncResult(offset)`
-  - **No match / Error**: warning icon + plain-language message + Try Again +
-    Close buttons
-- [ ] respects cinema mode aesthetic (dark, low-light friendly — reuse
-  `Tokens.bgDeep`, no harsh contrasts)
-- [ ] dismiss gestures wired to `service.cancel()`
-- [ ] write tests for the view's state-to-content mapping
-  (`@MainActor` test using `Inspector` or by checking state of `@Bindable`
-  service after taps)
-- [ ] run tests — must pass before next task
+- [x] three visual states matching service state — extracted a pure,
+  `Equatable` `CinemaSyncDisplay` struct that maps `CinemaSyncState` →
+  (phase, icon, title, detail) so the state-to-content logic is unit-testable
+  without rendering:
+  - **Listening**: large pulsing `mic.fill` + variable-color `waveform` +
+    "Listening to the cinema" caption + Cancel button
+  - **Matched**: `checkmark.circle.fill` + formatted timecode
+    (`PlayerTime.formatHHMMSS`) + auto-dismiss after 600ms via `.task(id:)`,
+    fires `onSyncResult(offset)`
+  - **No match / Error**: `exclamationmark.triangle.fill` + plain-language
+    message (noMatch copy, or the service's verbatim error message) +
+    Try Again + Close buttons
+- [x] respects cinema mode aesthetic (dark, low-light friendly — `Tokens.bgDeep`
+  background + `presentationBackground`, `.medium` detent, warm/accent symbols)
+- [x] dismiss gestures wired to `service.cancel()` — `.onDisappear` calls
+  `service.cancel()`, covering swipe-down and button-driven `dismiss()`
+- [x] write tests for the view's state-to-content mapping — `CinemaSyncViewTests`
+  asserts `CinemaSyncDisplay` mapping for every state (listening trio via
+  parameterized args, matched offset + formatted timecode, noMatch copy,
+  error message passthrough, plus `showsCancel`/`showsRetry`/`matchedOffset`)
+- [x] run tests — must pass before next task — 4/4 CinemaSyncView tests pass on
+  iPhone 17 / iOS 26.5; full app target compiles as a build dependency
 
 ### Task 8: PlayerTopBar button + PlayerView orchestration
 
