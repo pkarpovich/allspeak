@@ -16,6 +16,7 @@ struct CinemaSyncServiceTests {
         var setActiveError: Error?
         private(set) var setCategoryCalls:
             [(AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)] = []
+        private(set) var setActiveCalls: [Bool] = []
 
         func setCategory(
             _ category: AVAudioSession.Category,
@@ -31,18 +32,21 @@ struct CinemaSyncServiceTests {
 
         func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {
             if let setActiveError { throw setActiveError }
+            setActiveCalls.append(active)
         }
     }
 
     final class MockCapture: AudioInputCapturing, @unchecked Sendable {
         var startError: Error?
         private(set) var startCalled = false
+        private(set) var startCount = 0
         private(set) var stopCalled = false
         var bufferHandler: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)?
 
         func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime?) -> Void) throws {
             if let startError { throw startError }
             startCalled = true
+            startCount += 1
             bufferHandler = onBuffer
         }
 
@@ -95,6 +99,26 @@ struct CinemaSyncServiceTests {
         #expect(audio.categoryOptions.contains(.mixWithOthers))
         #expect(audio.categoryOptions.contains(.allowBluetoothHFP))
         #expect(audio.setCategoryCalls.first?.0 == .playAndRecord)
+        #expect(audio.setActiveCalls == [true])
+    }
+
+    @Test("calling start while already listening does not start capture twice")
+    func startIgnoredWhileListening() async throws {
+        let capture = MockCapture()
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            audioSession: MockAudioSession(),
+            capture: capture,
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        await service.start()
+
+        #expect(service.state == .listening)
+        #expect(capture.startCount == 1)
     }
 
     @Test("buffer flows to the session, then a match delivers the offset and restores the session")

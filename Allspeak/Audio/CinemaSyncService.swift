@@ -242,8 +242,12 @@ final class AVAudioEngineCapture: AudioInputCapturing {
 
     func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime?) -> Void) throws {
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, when in
+        let hardwareFormat = input.outputFormat(forBus: 0)
+        let tapFormat = AVAudioFormat(
+            standardFormatWithSampleRate: hardwareFormat.sampleRate,
+            channels: 1
+        ) ?? hardwareFormat
+        input.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { buffer, when in
             onBuffer(buffer, when)
         }
         engine.prepare()

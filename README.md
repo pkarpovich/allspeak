@@ -160,7 +160,10 @@ when the session ends or the track finishes.
   (one-to-many, cascade delete). Persistent history tracking is enabled;
   lightweight migration carries pre-multitrack sessions forward by
   back-filling a single `AudioTrack(label: "Original", isDefault: true)`
-  from the legacy `Session.audioFilename` field. File payloads (audio +
+  from the legacy `Session.audioFilename` field. The current model version,
+  `Allspeak v3`, adds an optional `catalogFilename` to `Session` for the
+  cinema-sync ShazamKit catalog; the v2 to v3 migration is lightweight
+  (existing sessions carry forward with no catalog). File payloads (audio +
   srt) are not stored in Core Data — only filenames.
 - **Audio**: Single `AVAudioPlayer` per player session, `.playback` category,
   `.spokenAudio` mode. Background audio is permitted via the `audio` entry in
@@ -186,8 +189,8 @@ xcodebuild test -scheme Allspeak \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`) so subsets
-can be run with the `--filter` flag.
+Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`,
+`.cinemaSync`) so subsets can be run with the `--filter` flag.
 
 ## Project-local agent skills
 
