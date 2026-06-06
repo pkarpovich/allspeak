@@ -7,6 +7,7 @@ struct SessionSnapshot: Equatable, Sendable {
     let name: String
     let audioFilename: String
     let srtFilename: String
+    let catalogFilename: String?
 }
 
 struct TrackSnapshot: Equatable, Sendable {
@@ -45,16 +46,20 @@ final class SessionRepository: @unchecked Sendable {
         self.storage = storage
     }
 
-    func importSession(name: String, audioSrc: URL, srtSrc: URL) async throws -> NSManagedObjectID {
+    func importSession(name: String, audioSrc: URL, srtSrc: URL, catalogSrc: URL? = nil) async throws -> NSManagedObjectID {
         let id = UUID()
         let audioName = audioSrc.lastPathComponent
         let srtName = srtSrc.lastPathComponent
+        let catalogName = catalogSrc?.lastPathComponent
         let createdAt = Date()
 
         let audioDest: URL
         do {
             audioDest = try storage.copyIntoSession(srcURL: audioSrc, sessionID: id, as: audioName)
             try storage.copyIntoSession(srcURL: srtSrc, sessionID: id, as: srtName)
+            if let catalogSrc, let catalogName {
+                try storage.copyIntoSession(srcURL: catalogSrc, sessionID: id, as: catalogName)
+            }
         } catch {
             try? storage.removeSessionDir(id)
             throw error
@@ -71,6 +76,9 @@ final class SessionRepository: @unchecked Sendable {
                 session.setValue(audioName, forKey: "audioFilename")
                 session.setValue(srtName, forKey: "srtFilename")
                 session.setValue(createdAt, forKey: "createdAt")
+                if let catalogName {
+                    session.setValue(catalogName, forKey: "catalogFilename")
+                }
                 if let durationSeconds {
                     session.setValue(durationSeconds, forKey: "durationSeconds")
                 }
@@ -83,10 +91,110 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func setCatalog(sessionID: NSManagedObjectID, srcURL: URL) async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+
+        let (sessionUUID, oldCatalog): (UUID, String?) = try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = session.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let prior = session.value(forKey: "catalogFilename") as? String
+            return (uuid, prior)
+        }
+
+        let catalogName = srcURL.lastPathComponent
+        let dir = storage.sessionDir(for: sessionUUID)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let finalURL = dir.appendingPathComponent(catalogName)
+
+        let stagedURL = dir.appendingPathComponent("staged-\(UUID().uuidString)")
+        let scoped = srcURL.startAccessingSecurityScopedResource()
+        do {
+            try FileManager.default.copyItem(at: srcURL, to: stagedURL)
+        } catch {
+            if scoped { srcURL.stopAccessingSecurityScopedResource() }
+            throw error
+        }
+        if scoped { srcURL.stopAccessingSecurityScopedResource() }
+
+        let backupName = "backup-\(UUID().uuidString)"
+        var backupURL: URL?
+        do {
+            if FileManager.default.fileExists(atPath: finalURL.path) {
+                _ = try FileManager.default.replaceItemAt(finalURL, withItemAt: stagedURL, backupItemName: backupName, options: [.withoutDeletingBackupItem])
+                backupURL = dir.appendingPathComponent(backupName)
+            } else {
+                try FileManager.default.moveItem(at: stagedURL, to: finalURL)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: stagedURL)
+            throw error
+        }
+
+        do {
+            try await context.perform {
+                let session = try context.existingObject(with: sessionID)
+                session.setValue(catalogName, forKey: "catalogFilename")
+                try context.save()
+            }
+        } catch {
+            if let backupURL, FileManager.default.fileExists(atPath: backupURL.path) {
+                try? FileManager.default.removeItem(at: finalURL)
+                try? FileManager.default.moveItem(at: backupURL, to: finalURL)
+            } else {
+                try? FileManager.default.removeItem(at: finalURL)
+            }
+            throw error
+        }
+
+        if let backupURL {
+            try? FileManager.default.removeItem(at: backupURL)
+        }
+        if let oldCatalog, oldCatalog != catalogName {
+            try? storage.removeCatalogFile(sessionID: sessionUUID, filename: oldCatalog)
+        }
+    }
+
+    func clearCatalog(sessionID: NSManagedObjectID) async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+
+        let cleanup: (UUID, String)? = try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = session.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let filename = session.value(forKey: "catalogFilename") as? String
+            session.setValue(nil, forKey: "catalogFilename")
+            try context.save()
+            if let filename {
+                return (uuid, filename)
+            }
+            return nil
+        }
+
+        if let (sessionUUID, filename) = cleanup {
+            try? storage.removeCatalogFile(sessionID: sessionUUID, filename: filename)
+        }
+    }
+
     func importMultiTrackSession(
         name: String,
         audioSources: [PendingTrackImport],
-        srtSrc: URL
+        srtSrc: URL,
+        catalogSrc: URL? = nil
     ) async throws -> NSManagedObjectID {
         guard !audioSources.isEmpty else {
             throw SessionRepositoryError.noAudioSources
@@ -94,6 +202,7 @@ final class SessionRepository: @unchecked Sendable {
 
         let sessionUUID = UUID()
         let srtName = srtSrc.lastPathComponent
+        let catalogName = catalogSrc?.lastPathComponent
         let createdAt = Date()
 
         struct StagedTrack {
@@ -131,6 +240,9 @@ final class SessionRepository: @unchecked Sendable {
                 )
                 staged.append(StagedTrack(trackID: trackID, originalFilename: original, label: source.label))
             }
+            if let catalogSrc, let catalogName {
+                try storage.copyIntoSession(srcURL: catalogSrc, sessionID: sessionUUID, as: catalogName)
+            }
         } catch {
             try? storage.removeSessionDir(sessionUUID)
             throw error
@@ -155,6 +267,9 @@ final class SessionRepository: @unchecked Sendable {
                 session.setValue(primaryFilename, forKey: "audioFilename")
                 session.setValue(srtName, forKey: "srtFilename")
                 session.setValue(createdAt, forKey: "createdAt")
+                if let catalogName {
+                    session.setValue(catalogName, forKey: "catalogFilename")
+                }
                 if let duration {
                     session.setValue(duration, forKey: "durationSeconds")
                 }
@@ -204,7 +319,8 @@ final class SessionRepository: @unchecked Sendable {
             let name = object.value(forKey: "name") as? String ?? ""
             let audio = object.value(forKey: "audioFilename") as? String ?? ""
             let srt = object.value(forKey: "srtFilename") as? String ?? ""
-            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt)
+            let catalog = object.value(forKey: "catalogFilename") as? String
+            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt, catalogFilename: catalog)
         }
     }
 

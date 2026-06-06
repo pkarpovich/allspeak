@@ -16,6 +16,7 @@ struct CreateSessionView: View {
     @State private var isPickerPresented = false
     @State private var isSaving = false
     @State private var loadError: String?
+    @State private var loadedCatalogFilename: String?
 
     private let repository: SessionRepository
 
@@ -43,6 +44,12 @@ struct CreateSessionView: View {
                         filename: form.srtDisplayName,
                         onChoose: { presentPicker(.subtitles) },
                         onClear: { form.srtURL = nil; form.existingSrtFilename = nil }
+                    )
+                    FileSlotRow(
+                        kind: .catalog,
+                        filename: form.catalogDisplayName,
+                        onChoose: { presentPicker(.catalog) },
+                        onClear: { form.catalogURL = nil; form.existingCatalogFilename = nil }
                     )
                 } header: {
                     Text("Files")
@@ -148,6 +155,8 @@ struct CreateSessionView: View {
             form.name = snapshot.name
             form.existingAudioFilename = snapshot.audioFilename
             form.existingSrtFilename = snapshot.srtFilename
+            form.existingCatalogFilename = snapshot.catalogFilename
+            loadedCatalogFilename = snapshot.catalogFilename
         } catch {
             loadError = "Couldn't load session: \(error.localizedDescription)"
         }
@@ -174,6 +183,11 @@ struct CreateSessionView: View {
                     form.srtURL = url
                     form.existingSrtFilename = nil
                 }
+            case .catalog:
+                if let url = urls.first {
+                    form.catalogURL = url
+                    form.existingCatalogFilename = nil
+                }
             case .none:
                 break
             }
@@ -188,9 +202,15 @@ struct CreateSessionView: View {
         let snapshot = form
         let mode = self.mode
         let repo = repository
+        let originalCatalog = loadedCatalogFilename
         Task {
             do {
-                try await Self.performSave(snapshot: snapshot, mode: mode, repository: repo)
+                try await Self.performSave(
+                    snapshot: snapshot,
+                    mode: mode,
+                    repository: repo,
+                    originalCatalogFilename: originalCatalog
+                )
                 await MainActor.run {
                     isSaving = false
                     dismiss()
@@ -207,7 +227,8 @@ struct CreateSessionView: View {
     static func performSave(
         snapshot: CreateSessionFormState,
         mode: CreateSessionMode,
-        repository: SessionRepository
+        repository: SessionRepository,
+        originalCatalogFilename: String? = nil
     ) async throws {
         switch mode {
         case .new:
@@ -219,11 +240,17 @@ struct CreateSessionView: View {
             _ = try await repository.importMultiTrackSession(
                 name: snapshot.trimmedName,
                 audioSources: sources,
-                srtSrc: srt
+                srtSrc: srt,
+                catalogSrc: snapshot.catalogURL
             )
         case .edit(let id):
             if let srt = snapshot.srtURL {
                 try await repository.replaceSubtitle(id: id, srcURL: srt)
+            }
+            if let catalog = snapshot.catalogURL {
+                try await repository.setCatalog(sessionID: id, srcURL: catalog)
+            } else if originalCatalogFilename != nil, snapshot.existingCatalogFilename == nil {
+                try await repository.clearCatalog(sessionID: id)
             }
             var renameError: Error?
             do {
@@ -280,6 +307,7 @@ private struct PendingTrackRow: View {
 private enum ActivePicker: Hashable {
     case audio
     case subtitles
+    case catalog
 
     var allowedTypes: [UTType] {
         switch self {
@@ -290,6 +318,8 @@ private enum ActivePicker: Hashable {
                 return [srt, .plainText]
             }
             return [.plainText]
+        case .catalog:
+            return [.shazamCatalog]
         }
     }
 
@@ -297,6 +327,7 @@ private enum ActivePicker: Hashable {
         switch self {
         case .audio: return true
         case .subtitles: return false
+        case .catalog: return false
         }
     }
 }

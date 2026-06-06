@@ -107,6 +107,40 @@ struct DocumentsStorageTests {
         #expect(url == storage.sessionDir(for: id).appendingPathComponent("audio.m4a"))
     }
 
+    @Test("catalogURL composes session-dir filename path")
+    func catalogURLComposition() {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let url = storage.catalogURL(sessionID: id, filename: "movie.shazamcatalog")
+        #expect(url == storage.sessionDir(for: id).appendingPathComponent("movie.shazamcatalog"))
+    }
+
+    @Test("removeCatalogFile deletes the catalog file")
+    func removeCatalogFileDeletes() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let srcDir = root.appendingPathComponent("src", isDirectory: true)
+        let src = try writeFile(in: srcDir, name: "movie.shazamcatalog", contents: "catalog-bytes")
+        _ = try storage.copyIntoSession(srcURL: src, sessionID: id, as: "movie.shazamcatalog")
+        let url = storage.catalogURL(sessionID: id, filename: "movie.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        try storage.removeCatalogFile(sessionID: id, filename: "movie.shazamcatalog")
+
+        #expect(FileManager.default.fileExists(atPath: url.path) == false)
+    }
+
+    @Test("removeCatalogFile is idempotent for a missing file")
+    func removeCatalogFileIdempotent() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        try storage.removeCatalogFile(sessionID: id, filename: "missing.shazamcatalog")
+        try storage.removeCatalogFile(sessionID: id, filename: "missing.shazamcatalog")
+    }
+
     @Test("trackURL formats as track-<trackID>-<originalFilename>")
     func trackURLFormat() {
         let (storage, root) = makeTempStorage()

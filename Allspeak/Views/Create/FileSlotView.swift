@@ -3,11 +3,13 @@ import SwiftUI
 enum FileSlotKind {
     case audio
     case subtitles
+    case catalog
 
     var iconSymbol: String {
         switch self {
         case .audio: return Icons.audio
         case .subtitles: return Icons.caption
+        case .catalog: return Icons.catalog
         }
     }
 
@@ -15,6 +17,7 @@ enum FileSlotKind {
         switch self {
         case .audio: return "Choose audio file"
         case .subtitles: return "Choose subtitles file"
+        case .catalog: return "Cinema sync catalog (optional)"
         }
     }
 
@@ -22,6 +25,7 @@ enum FileSlotKind {
         switch self {
         case .audio: return ".m4a"
         case .subtitles: return ".srt"
+        case .catalog: return ".shazamcatalog"
         }
     }
 }

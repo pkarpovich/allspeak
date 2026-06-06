@@ -464,6 +464,132 @@ struct PlaybackCoordinatorTests {
         }.first
         #expect(lastLabel == "DFN")
     }
+
+    @Test("applySyncOffset seeks the active controller to the matched offset")
+    func applySyncOffsetSeeksController() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Sync", audio: audio, subtitles: Self.cues)
+        defer { coordinator.endSession() }
+        let controller = try #require(coordinator.controller)
+
+        coordinator.applySyncOffset(2.5)
+
+        #expect(abs(controller.currentTime - 2.5) < 0.05)
+    }
+
+    @Test("applySyncOffset with no active session is a no-op")
+    func applySyncOffsetIdleIsNoOp() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+
+        coordinator.applySyncOffset(123.0)
+
+        #expect(coordinator.controller == nil)
+    }
+
+    private struct CatalogFixture {
+        let coordinator: PlaybackCoordinator
+        let storage: DocumentsStorage
+        let sessionUUID: UUID
+        let catalogName: String?
+        let root: URL
+    }
+
+    private static func makeCatalogSessionFixture(withCatalog: Bool) async throws -> CatalogFixture {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-coord-catalog-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storage = DocumentsStorage(documentsURL: root)
+        let persistence = PersistenceController.makeInMemory()
+        let repo = SessionRepository(persistence: persistence, storage: storage)
+
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let initialAudio = try makeSilenceFile(seconds: 5)
+        let movedAudio = srcDir.appendingPathComponent("source.caf")
+        try FileManager.default.moveItem(at: initialAudio, to: movedAudio)
+        let srtURL = srcDir.appendingPathComponent("subs.srt")
+        let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
+        try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
+
+        var catalogSrc: URL?
+        var catalogName: String?
+        if withCatalog {
+            let url = srcDir.appendingPathComponent("film.shazamcatalog")
+            try Data([0x01, 0x02, 0x03]).write(to: url)
+            catalogSrc = url
+            catalogName = url.lastPathComponent
+        }
+
+        let sessionID = try await repo.importSession(
+            name: "Movie",
+            audioSrc: movedAudio,
+            srtSrc: srtURL,
+            catalogSrc: catalogSrc
+        )
+        persistence.viewContext.refreshAllObjects()
+        let sessionUUID = try #require(
+            persistence.viewContext.existingObject(with: sessionID).value(forKey: "id") as? UUID
+        )
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        try await coordinator.startSession(
+            sessionID: sessionID,
+            repository: repo,
+            persistence: persistence,
+            storage: storage
+        )
+
+        return CatalogFixture(
+            coordinator: coordinator,
+            storage: storage,
+            sessionUUID: sessionUUID,
+            catalogName: catalogName,
+            root: root
+        )
+    }
+
+    @Test("startSession resolves catalogURL when the session has a catalog")
+    func startSessionResolvesCatalogURL() async throws {
+        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        let catalogName = try #require(fixture.catalogName)
+        let expected = fixture.storage.catalogURL(sessionID: fixture.sessionUUID, filename: catalogName)
+        #expect(fixture.coordinator.catalogURL == expected)
+        #expect(FileManager.default.fileExists(atPath: try #require(fixture.coordinator.catalogURL).path))
+    }
+
+    @Test("startSession leaves catalogURL nil when the session has no catalog")
+    func startSessionWithoutCatalogIsNil() async throws {
+        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        #expect(fixture.coordinator.catalogURL == nil)
+    }
+
+    @Test("endSession clears the catalogURL")
+    func endSessionClearsCatalogURL() async throws {
+        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.coordinator.catalogURL != nil)
+
+        fixture.coordinator.endSession()
+
+        #expect(fixture.coordinator.catalogURL == nil)
+    }
 }
 
 #endif

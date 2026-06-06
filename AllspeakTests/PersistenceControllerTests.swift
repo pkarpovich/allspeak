@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import Allspeak
 
-@Suite("PersistenceController", .tags(.coreData))
+@Suite("PersistenceController", .tags(.coreData), .serialized)
 struct PersistenceControllerTests {
 
     @Test("in-memory store boots successfully")
@@ -166,6 +166,146 @@ struct PersistenceControllerTests {
         #expect(track.value(forKey: "isDefault") as? Bool == true)
         #expect(track.value(forKey: "sortOrder") as? Int16 == 0)
         #expect(track.value(forKey: "id") as? UUID != nil)
+    }
+
+    @Test("Session has optional catalogFilename attribute in v3 schema")
+    func sessionV3CatalogAttribute() throws {
+        let controller = PersistenceController.makeInMemory()
+        let model = controller.container.managedObjectModel
+        let entity = try #require(model.entitiesByName["Session"])
+
+        let catalog = try #require(entity.attributesByName["catalogFilename"])
+        #expect(catalog.attributeType == .stringAttributeType)
+        #expect(catalog.isOptional == true)
+    }
+
+    @Test("catalogFilename defaults to nil and persists once set")
+    func catalogFilenamePersists() throws {
+        let controller = PersistenceController.makeInMemory()
+        let ctx = controller.viewContext
+        let sessionID = UUID()
+
+        let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: ctx)
+        session.setValue(sessionID, forKey: "id")
+        session.setValue("With Catalog", forKey: "name")
+        session.setValue("audio.m4a", forKey: "audioFilename")
+        session.setValue("subs.srt", forKey: "srtFilename")
+        session.setValue(Date(), forKey: "createdAt")
+        try ctx.save()
+
+        #expect(session.value(forKey: "catalogFilename") as? String == nil)
+
+        session.setValue("film.shazamcatalog", forKey: "catalogFilename")
+        try ctx.save()
+        ctx.refreshAllObjects()
+
+        let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
+        request.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+        let reloaded = try #require(try ctx.fetch(request).first)
+        #expect(reloaded.value(forKey: "catalogFilename") as? String == "film.shazamcatalog")
+    }
+
+    private func versionedModels() throws -> (v2: NSManagedObjectModel, v3: NSManagedObjectModel) {
+        let momdURL = try #require(
+            Bundle(for: PersistenceController.self).url(forResource: "Allspeak", withExtension: "momd")
+        )
+        let momURLs = try FileManager.default
+            .contentsOfDirectory(at: momdURL, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "mom" }
+
+        var v2: NSManagedObjectModel?
+        var v3: NSManagedObjectModel?
+        for url in momURLs {
+            guard let model = NSManagedObjectModel(contentsOf: url) else { continue }
+            let session = model.entitiesByName["Session"]
+            let hasCatalog = session?.attributesByName["catalogFilename"] != nil
+            let hasTracks = session?.relationshipsByName["tracks"] != nil
+            if hasCatalog {
+                v3 = model
+            } else if hasTracks {
+                v2 = model
+            }
+        }
+        return (try #require(v2), try #require(v3))
+    }
+
+    @Test("a v2 SQLite store migrates to v3 lightweight, preserving sessions and defaulting catalogFilename to nil")
+    func v2StoreMigratesToV3() throws {
+        let (v2Model, v3Model) = try versionedModels()
+        #expect(v2Model.entitiesByName["Session"]?.attributesByName["catalogFilename"] == nil)
+
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-migration-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storeURL = dir.appendingPathComponent("Allspeak.sqlite")
+        let sessionID = UUID()
+
+        let v2Coordinator = NSPersistentStoreCoordinator(managedObjectModel: v2Model)
+        try v2Coordinator.addPersistentStore(
+            ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL, options: nil
+        )
+        let v2Context = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        v2Context.persistentStoreCoordinator = v2Coordinator
+        try v2Context.performAndWait {
+            let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: v2Context)
+            session.setValue(sessionID, forKey: "id")
+            session.setValue("Pre-migration", forKey: "name")
+            session.setValue("a.m4a", forKey: "audioFilename")
+            session.setValue("a.srt", forKey: "srtFilename")
+            session.setValue(Date(), forKey: "createdAt")
+            try v2Context.save()
+        }
+        for store in v2Coordinator.persistentStores {
+            try v2Coordinator.remove(store)
+        }
+
+        let v3Coordinator = NSPersistentStoreCoordinator(managedObjectModel: v3Model)
+        try v3Coordinator.addPersistentStore(
+            ofType: NSSQLiteStoreType,
+            configurationName: nil,
+            at: storeURL,
+            options: [
+                NSMigratePersistentStoresAutomaticallyOption: true,
+                NSInferMappingModelAutomaticallyOption: true
+            ]
+        )
+        let v3Context = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        v3Context.persistentStoreCoordinator = v3Coordinator
+        try v3Context.performAndWait {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
+            request.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+            let rows = try v3Context.fetch(request)
+            #expect(rows.count == 1)
+            let row = try #require(rows.first)
+            #expect(row.value(forKey: "name") as? String == "Pre-migration")
+            #expect(row.value(forKey: "audioFilename") as? String == "a.m4a")
+            #expect(row.value(forKey: "catalogFilename") as? String == nil)
+            #expect(row.entity.attributesByName["catalogFilename"] != nil)
+        }
+    }
+
+    @Test("sessions with nil catalogFilename behave identically to legacy sessions")
+    func nilCatalogBackwardCompatible() throws {
+        let controller = PersistenceController.makeInMemory()
+        let ctx = controller.viewContext
+
+        let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: ctx)
+        session.setValue(UUID(), forKey: "id")
+        session.setValue("Legacy", forKey: "name")
+        session.setValue("legacy.m4a", forKey: "audioFilename")
+        session.setValue("legacy.srt", forKey: "srtFilename")
+        session.setValue(Date(), forKey: "createdAt")
+        try ctx.save()
+
+        #expect(session.value(forKey: "catalogFilename") as? String == nil)
+
+        PersistenceController.backfillDefaultTracks(in: controller.container)
+        ctx.refreshAllObjects()
+
+        let tracks = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+        #expect(tracks.count == 1)
+        #expect(session.value(forKey: "catalogFilename") as? String == nil)
     }
 
     @Test("backfillDefaultTracks is idempotent and skips sessions that already have tracks")
