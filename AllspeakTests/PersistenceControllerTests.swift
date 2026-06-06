@@ -168,6 +168,66 @@ struct PersistenceControllerTests {
         #expect(track.value(forKey: "id") as? UUID != nil)
     }
 
+    @Test("Session has optional catalogFilename attribute in v3 schema")
+    func sessionV3CatalogAttribute() throws {
+        let controller = PersistenceController.makeInMemory()
+        let model = controller.container.managedObjectModel
+        let entity = try #require(model.entitiesByName["Session"])
+
+        let catalog = try #require(entity.attributesByName["catalogFilename"])
+        #expect(catalog.attributeType == .stringAttributeType)
+        #expect(catalog.isOptional == true)
+    }
+
+    @Test("catalogFilename defaults to nil and persists once set")
+    func catalogFilenamePersists() throws {
+        let controller = PersistenceController.makeInMemory()
+        let ctx = controller.viewContext
+        let sessionID = UUID()
+
+        let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: ctx)
+        session.setValue(sessionID, forKey: "id")
+        session.setValue("With Catalog", forKey: "name")
+        session.setValue("audio.m4a", forKey: "audioFilename")
+        session.setValue("subs.srt", forKey: "srtFilename")
+        session.setValue(Date(), forKey: "createdAt")
+        try ctx.save()
+
+        #expect(session.value(forKey: "catalogFilename") as? String == nil)
+
+        session.setValue("film.shazamcatalog", forKey: "catalogFilename")
+        try ctx.save()
+        ctx.refreshAllObjects()
+
+        let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
+        request.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+        let reloaded = try #require(try ctx.fetch(request).first)
+        #expect(reloaded.value(forKey: "catalogFilename") as? String == "film.shazamcatalog")
+    }
+
+    @Test("sessions with nil catalogFilename behave identically to legacy sessions")
+    func nilCatalogBackwardCompatible() throws {
+        let controller = PersistenceController.makeInMemory()
+        let ctx = controller.viewContext
+
+        let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: ctx)
+        session.setValue(UUID(), forKey: "id")
+        session.setValue("Legacy", forKey: "name")
+        session.setValue("legacy.m4a", forKey: "audioFilename")
+        session.setValue("legacy.srt", forKey: "srtFilename")
+        session.setValue(Date(), forKey: "createdAt")
+        try ctx.save()
+
+        #expect(session.value(forKey: "catalogFilename") as? String == nil)
+
+        PersistenceController.backfillDefaultTracks(in: controller.container)
+        ctx.refreshAllObjects()
+
+        let tracks = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+        #expect(tracks.count == 1)
+        #expect(session.value(forKey: "catalogFilename") as? String == nil)
+    }
+
     @Test("backfillDefaultTracks is idempotent and skips sessions that already have tracks")
     func backfillIdempotent() throws {
         let controller = PersistenceController.makeInMemory()

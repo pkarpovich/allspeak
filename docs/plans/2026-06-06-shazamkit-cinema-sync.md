@@ -133,17 +133,21 @@ UTI — `com.apple.shazamkit.catalog` is the system identifier.
 
 ### Task 1: Core Data migration v2 → v3 with `catalogFilename`
 
-- [ ] add new model version `Allspeak v3.xcdatamodel` under
+- [x] add new model version `Allspeak v3.xcdatamodel` under
   `Allspeak/Allspeak.xcdatamodeld/`
-- [ ] add `catalogFilename: String?` (optional) to Session entity in v3
-- [ ] update `.xccurrentversion` to point to v3
-- [ ] verify lightweight migration works (Core Data infers automatic mapping
-  for optional add)
-- [ ] write `PersistenceControllerTests` case: load store with v2 sessions,
+- [x] add `catalogFilename: String?` (optional) to Session entity in v3
+- [x] update `.xccurrentversion` to point to v3
+- [x] verify lightweight migration works (Core Data infers automatic mapping
+  for optional add) — store boots with v3 as currentVersion and
+  `shouldInferMappingModelAutomatically = true`; optional-attribute add is the
+  canonical inferred lightweight migration
+- [x] write `PersistenceControllerTests` case: load store with v2 sessions,
   verify catalogFilename starts nil, set+save, reload, verify persisted
-- [ ] write test: rollback safety — sessions with nil catalogFilename behave
-  identically to existing
-- [ ] run tests — must pass before next task
+  (`catalogFilenamePersists`)
+- [x] write test: rollback safety — sessions with nil catalogFilename behave
+  identically to existing (`nilCatalogBackwardCompatible`)
+- [x] run tests — must pass before next task — 13/13 PersistenceController
+  tests pass on iPhone 17 / iOS 26.5
 
 ### Task 2: DocumentsStorage + SessionRepository support for catalogs
 
