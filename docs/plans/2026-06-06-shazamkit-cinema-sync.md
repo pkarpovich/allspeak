@@ -249,32 +249,52 @@ the `.shazamcatalog` extension to this; the earlier guess of
 
 ### Task 6: CinemaSyncService — SHSession + AVAudioEngine wrapper
 
-- [ ] new file `Allspeak/Audio/CinemaSyncService.swift`
-- [ ] type `CinemaSyncService` — `@MainActor` `@Observable`
-- [ ] state enum: `.idle, .preparing, .listening, .matched(offset: TimeInterval),
-  .noMatch, .error(String)`
-- [ ] dependencies injected: `catalogURL: URL`, plus protocol seams for
-  `SHSessionMatching` and `AVAudioSessionConfigurable` (for testability)
-- [ ] `start()` flow:
-  1. load `SHCustomCatalog` from URL
+- [x] new file `Allspeak/Audio/CinemaSyncService.swift`
+- [x] type `CinemaSyncService` — `@MainActor` `@Observable`
+- [x] state enum: `.idle, .preparing, .listening, .matched(offset: TimeInterval),
+  .noMatch, .error(String)` — implemented as `CinemaSyncState: Equatable`
+- [x] dependencies injected: `catalogURL: URL`, plus protocol seams for
+  `SHSessionMatching` and `AVAudioSessionConfigurable` (for testability) —
+  ⚠️ scope note: added two more injectable seams the plan implied but did not
+  name, both required to make `start()` deterministically testable without a
+  real mic: `AudioInputCapturing` (wraps `AVAudioEngine`; `AVAudioEngineCapture`
+  is the production impl) and `checkPermission: () async -> Bool` (production
+  uses `AVAudioApplication.requestRecordPermission`). Catalog loading is folded
+  into the injectable `makeSession: (URL) throws -> SHSessionMatching` factory
+  so the happy path needs no real `.shazamcatalog` file.
+- [x] `start()` flow (made `async` to await the mic-permission check):
+  1. load `SHCustomCatalog` from URL (inside `makeSession`)
   2. create `SHSession` with custom catalog
   3. swap audio session to `.playAndRecord, .spokenAudio, [.mixWithOthers,
-     .allowBluetooth, .defaultToSpeaker]` — verify playback continues
+     .allowBluetoothHFP, .defaultToSpeaker]` — ⚠️ `.allowBluetooth` is
+     deprecated/renamed to `.allowBluetoothHFP` on the iOS 26 SDK; used the
+     current name. Original config is saved first and restored on every exit.
   4. install tap on AVAudioEngine input node, feed buffers to
-     `session.matchStreamingBuffer(_:at:)`
-  5. set 6-sec timeout: if no match → `.noMatch`
-- [ ] `cancel()` — invalidate engine, restore audio session category
-- [ ] match callback: extract `predictedCurrentMatchOffset` from first
-  `SHMatchedMediaItem`, deliver via state `.matched(offset:)`
-- [ ] error mapping: file load errors, mic permission denied, engine init
-  failure
-- [ ] write tests with mocked `SHSessionMatching` + `AVAudioSessionConfigurable`:
+     `session.matchStreamingBuffer(_:at:)` (via the `AudioInputCapturing` seam;
+     buffers cross to the session through an `@unchecked Sendable` box)
+  5. set 6-sec timeout (injectable `Duration`): if no match → `.noMatch`
+- [x] `cancel()` — invalidate engine, restore audio session category (idempotent
+  teardown → `.idle`)
+- [x] match callback: extract `predictedCurrentMatchOffset` from first
+  `SHMatchedMediaItem`, deliver via state `.matched(offset:)` — a private
+  `MatchDelegateProxy` (`SHSessionDelegate`) extracts the offset and hops to the
+  MainActor `ingestMatch(offset:)`. Per-buffer `didNotFindMatchFor` is
+  intentionally ignored (it fires continuously); the 6-sec timeout is the only
+  `.noMatch` trigger.
+- [x] error mapping: file load errors (`catalogLoadMessage`), mic permission
+  denied (`microphoneDeniedMessage`), engine/capture init failure
+  (`captureMessage`), audio-session swap failure (`audioSessionMessage`) —
+  distinct static message constants so tests assert the specific case
+- [x] write tests with mocked `SHSessionMatching` + `AVAudioSessionConfigurable`:
   - happy path: input buffer → match → `.matched` state, correct offset
   - timeout path: no match in 6s → `.noMatch`
   - cancel mid-listen → `.idle`, session restored
   - bad catalog file → `.error`
   - permission denied → `.error` with specific case
-- [ ] run tests — must pass before next task
+  - (plus: no-offset match → `.noMatch`, late-match-after-cancel ignored,
+    capture failure restores session, audio-session swap failure restores)
+- [x] run tests — must pass before next task — 10/10 CinemaSyncService tests
+  pass on iPhone 17 / iOS 26.5; full app target compiles as a build dependency
 
 ### Task 7: CinemaSyncView modal — "Listening / Matched / Error" UI
 
