@@ -1,7 +1,7 @@
 import SwiftUI
 
 // Cinema transport, stacked layout: two coarse ±3s controls on top, a
-// full-width Play/Pause at center, two fine ±0.5s controls beneath. Tuned for
+// full-width Play/Pause at center, two fine ±1s controls beneath. Tuned for
 // a dark hall — large round tap targets, the gold pill glowing as the obvious
 // primary action, no subtitle text to read. Digital Crown stays wired to
 // playback volume with haptic ticks at each detent; see VolumeThrottler for the
@@ -13,9 +13,12 @@ struct TransportView: View {
     private static let watchVolumeDefaultsKey = "playback.volume"
 
     @Environment(WatchSessionClient.self) private var client
-    @State private var skipCoalescer = SkipCoalescer { delta in
-        WatchSessionClient.shared.send(.skip(seconds: delta))
-    }
+    @State private var skipper = TransportSkipper(
+        coalescer: SkipCoalescer { delta in
+            WatchSessionClient.shared.send(.skip(seconds: delta))
+        },
+        haptics: WatchDeviceHaptics()
+    )
     @State private var volumeThrottler = VolumeThrottler { value in
         UserDefaults.standard.set(value, forKey: TransportView.watchVolumeDefaultsKey)
         WatchSessionClient.shared.send(.setVolume(value))
@@ -123,10 +126,10 @@ struct TransportView: View {
 
     private var fineRow: some View {
         HStack(spacing: 14) {
-            skipButton(icon: Tokens.Icon.skipBack, seconds: "0.5", prominent: false, action: handleSkipBackFine)
-                .accessibilityLabel("Skip back half a second")
-            skipButton(icon: Tokens.Icon.skipForward, seconds: "0.5", prominent: false, action: handleSkipForwardFine)
-                .accessibilityLabel("Skip forward half a second")
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "1", prominent: false, action: handleSkipBackFine)
+                .accessibilityLabel("Skip back 1 second")
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "1", prominent: false, action: handleSkipForwardFine)
+                .accessibilityLabel("Skip forward 1 second")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -236,18 +239,18 @@ struct TransportView: View {
     }
 
     private func handleSkipBackFine() {
-        skipCoalescer.accumulate(-0.5)
+        skipper.backFine()
     }
 
     private func handleSkipForwardFine() {
-        skipCoalescer.accumulate(0.5)
+        skipper.forwardFine()
     }
 
     private func handleSkipBackCoarse() {
-        skipCoalescer.accumulate(-3.0)
+        skipper.backCoarse()
     }
 
     private func handleSkipForwardCoarse() {
-        skipCoalescer.accumulate(3.0)
+        skipper.forwardCoarse()
     }
 }

@@ -41,6 +41,7 @@ enum WatchCinemaSyncState: Equatable {
 enum WatchSyncHaptic: Equatable {
     case success
     case failure
+    case click
 }
 
 protocol WatchSyncHapticsPlaying {
@@ -55,6 +56,8 @@ struct WatchDeviceHaptics: WatchSyncHapticsPlaying {
             WKInterfaceDevice.current().play(.success)
         case .failure:
             WKInterfaceDevice.current().play(.failure)
+        case .click:
+            WKInterfaceDevice.current().play(.click)
         }
     }
 }

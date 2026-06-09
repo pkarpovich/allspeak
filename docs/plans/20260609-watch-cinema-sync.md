@@ -222,18 +222,24 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 8: Skip-button haptics + fine skip 0.5s -> 1s
 
-- [ ] in `AllspeakWatch/Views/TransportView.swift` change the fine skip step
+- [x] in `AllspeakWatch/Views/TransportView.swift` change the fine skip step
       from +/-0.5s to +/-1s: `handleSkipBackFine` / `handleSkipForwardFine`
       accumulate -1.0 / 1.0, button labels change from "0.5" to "1"
-- [ ] play a `.click` haptic on every skip button tap (all four: coarse +/-3s
+- [x] play a `.click` haptic on every skip button tap (all four: coarse +/-3s
       and fine +/-1s) via the same injectable haptics abstraction introduced
       for `WatchCinemaSync` in Task 6 - do NOT call `WKInterfaceDevice`
       directly in the view if the handlers are extracted/testable
-- [ ] verify `SkipCoalescer` tests still pass (it is value-agnostic; update any
-      test fixtures that assume 0.5 steps)
-- [ ] write/update tests for any extracted handler logic (step size, haptic
+- [x] verify `SkipCoalescer` tests still pass (it is value-agnostic; update any
+      test fixtures that assume 0.5 steps - none did, fixtures use 0.5 only as
+      arbitrary deltas)
+- [x] write/update tests for any extracted handler logic (step size, haptic
       fired per tap)
-- [ ] run tests - must pass before task 9
+- [x] run tests - must pass before task 9 (448 tests, all green; AllspeakWatch
+      scheme builds clean)
+- + skip handlers extracted into `TransportSkipper` (in shared
+      `SkipCoalescer.swift`, AllspeakTests coverage): owns the +/-1 / +/-3 step
+      constants, plays `.click` (new `WatchSyncHaptic` case) before
+      accumulating; view handlers delegate to it, accessibility labels updated
 
 ### Task 9: Verify acceptance criteria
 
