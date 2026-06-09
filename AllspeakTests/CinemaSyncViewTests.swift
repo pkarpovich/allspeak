@@ -33,6 +33,15 @@ struct CinemaSyncViewTests {
         #expect(!display.showsRetry)
     }
 
+    @Test("matched display reflects the ruOffset (the seek target), not the enOffset")
+    func matchedStateUsesRuOffset() {
+        let display = CinemaSyncDisplay(state: .matched(enOffset: 2_960, ruOffset: 2_937))
+        #expect(display.phase == .matched(offset: 2_937))
+        #expect(display.matchedOffset == 2_937)
+        #expect(display.detail == PlayerTime.formatHHMMSS(2_937))
+        #expect(display.detail != PlayerTime.formatHHMMSS(2_960))
+    }
+
     @Test("noMatch maps to the problem phase with the no-match copy and retry buttons")
     func noMatchMapsToProblemPhase() {
         let display = CinemaSyncDisplay(state: .noMatch)

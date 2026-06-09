@@ -27,11 +27,11 @@ struct CinemaSyncDisplay: Equatable {
             iconName = "mic.fill"
             title = Self.listeningTitle
             detail = Self.listeningDetail
-        case let .matched(enOffset, _):
-            phase = .matched(offset: enOffset)
+        case let .matched(_, ruOffset):
+            phase = .matched(offset: ruOffset)
             iconName = "checkmark.circle.fill"
             title = Self.matchedTitle
-            detail = PlayerTime.formatHHMMSS(enOffset)
+            detail = PlayerTime.formatHHMMSS(ruOffset)
         case .noMatch:
             phase = .problem
             iconName = "exclamationmark.triangle.fill"

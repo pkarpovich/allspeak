@@ -132,13 +132,13 @@ This is Phase 2 — Phase 1 (offline assets: `.shazamcatalog` + `.dtwmap.json`) 
 
 ### Task 6: PlaybackCoordinator + CinemaSyncView wire seek to AVPlayer
 
-- [ ] in PlaybackCoordinator, add `dtwMapURL: URL?` resolved from snapshot (mirroring `catalogURL` — see SessionRepository.swift line 169 and 297)
-- [ ] load DTWMapping when `dtwMapURL` becomes non-nil; pass to CinemaSyncService on construction
-- [ ] when CinemaSyncService transitions to `.matched(enOffset:, ruOffset:)`, call `AVPlayer.seek(to: CMTime(seconds: ruOffset, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)`
-- [ ] update CinemaSyncView's "Matched" text to display the ruOffset (the timecode the player jumped to), not enOffset
-- [ ] write PlaybackCoordinatorTests asserting seek is called with `ruOffset` (use a test double for AVPlayer or assert via an observable property)
-- [ ] write CinemaSyncViewTests asserting the displayed text shows ruOffset formatted as hh:mm:ss
-- [ ] run tests — must pass before Task 7
+- [x] in PlaybackCoordinator, add `dtwMapURL: URL?` resolved from snapshot (mirroring `catalogURL`) — added to both `startSession(sessionID:)` and `refreshIfActive` Snap structs, cleared in `endSession` and the `startSession(sessionUUID:)` overload
+- [x] load DTWMapping when `dtwMapURL` becomes non-nil; pass to CinemaSyncService on construction — coordinator exposes `private(set) var dtwMapping: DTWMapping?` (loaded via `try? DTWMapping(jsonURL:)`); PlayerView reads it into `@State mapping` and passes `CinemaSyncService(catalogURL:, mapping:)`
+- [x] when CinemaSyncService transitions to `.matched(enOffset:, ruOffset:)`, seek to ruOffset — NOTE: the project plays via `AudioController` (AVAudioPlayer), not raw AVPlayer. The seek flows through the existing `CinemaSyncView.onSyncResult` → `PlaybackCoordinator.applySyncOffset(_:)` → `AudioController.seek(to:)` path; the offset carried by the matched phase is now ruOffset, so the seek lands on the DTW-mapped RU time. No CMTime/AVPlayer introduced.
+- [x] update CinemaSyncView's "Matched" text to display the ruOffset (the timecode the player jumped to), not enOffset — `CinemaSyncDisplay` matched case now binds ruOffset for both `.matched(offset:)` and the formatted detail
+- [x] write PlaybackCoordinatorTests asserting seek targets `ruOffset` — `applySyncOffsetSeeksToRuOffset` loads a DTW-map fixture, computes ruOffset from the loaded mapping (differs from enOffset by >0.5s), applies it, asserts `controller.currentTime ≈ ruOffset`; plus dtwMapURL resolve / nil / endSession-clears tests mirroring the catalog tests
+- [x] write CinemaSyncViewTests asserting the displayed text shows ruOffset formatted as hh:mm:ss — `matchedStateUsesRuOffset` asserts detail/offset reflect ruOffset (2937) and differ from enOffset (2960)
+- [x] run tests — must pass before Task 7 (full suite: 391 tests in 33 suites pass on iPhone 17)
 
 ### Task 7: Verify acceptance criteria
 

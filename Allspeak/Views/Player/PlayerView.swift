@@ -18,6 +18,7 @@ struct PlayerView: View {
     @State private var loadError: String?
     @State private var cinema: CinemaMode = .off
     @State private var catalogURL: URL?
+    @State private var mapping: DTWMapping?
     @State private var syncService: CinemaSyncService?
     @State private var showSyncSheet = false
 
@@ -154,7 +155,7 @@ struct PlayerView: View {
     private func startSync() {
         guard let catalogURL else { return }
         if syncService == nil {
-            syncService = CinemaSyncService(catalogURL: catalogURL)
+            syncService = CinemaSyncService(catalogURL: catalogURL, mapping: mapping)
         }
         showSyncSheet = true
     }
@@ -180,6 +181,7 @@ struct PlayerView: View {
             tracks = PlaybackCoordinator.shared.tracks
             activeTrackID = PlaybackCoordinator.shared.activeTrackID
             catalogURL = PlaybackCoordinator.shared.catalogURL
+            mapping = PlaybackCoordinator.shared.dtwMapping
         } catch PlaybackCoordinator.StartError.sessionNotFound {
             loadError = "Couldn't load session."
         } catch PlaybackCoordinator.StartError.noCues {
