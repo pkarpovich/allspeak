@@ -77,6 +77,7 @@ targets:
       - path: Allspeak/Watch/CatalogStore.swift
       - path: Allspeak/Watch/WatchMessageSender.swift
       - path: Allspeak/Watch/WatchSessionClient.swift
+      - path: Allspeak/Watch/WatchCinemaSync.swift
       - path: Allspeak/Watch/SkipCoalescer.swift
       - path: Allspeak/Watch/VolumeThrottler.swift
       - path: Allspeak/Watch/SessionURLParser.swift

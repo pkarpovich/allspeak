@@ -173,24 +173,31 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 6: Watch cinema sync controller (SHManagedSession wrapper)
 
-- [ ] create `AllspeakWatch/WatchCinemaSync.swift`: `@MainActor @Observable`
+- [x] create `AllspeakWatch/WatchCinemaSync.swift`: `@MainActor @Observable`
       controller with states `idle / listening / sent / failed`, injectable
       protocols for the matching session (wrap `SHManagedSession(catalog:)`,
       single `result()` call), command sending (reuse `WatchMessageSender`),
       and haptics (`WKInterfaceDevice.play`)
-- [ ] flow on tap: load catalog via `SHCustomCatalog().add(from:)` ->
+- [x] flow on tap: load catalog via `SHCustomCatalog().add(from:)` ->
       `result()` with an 8s timeout guard -> on `.match` compute
       `CinemaMatch.absStart(fromSubtitle:) + predictedCurrentMatchOffset`,
       send `WatchCommand.cinemaMatch(enTime:)`, play `.success` haptic ->
       on `.noMatch` / `.error` / timeout play `.failure` haptic and surface
       `failed`; always `cancel()` the managed session afterward (mic must stop
       immediately - HIG + manual-only rule)
-- [ ] second tap while listening cancels (back to idle, no haptic)
-- [ ] write tests with mocked session/sender/haptics: match -> command sent
+- [x] second tap while listening cancels (back to idle, no haptic)
+- [x] write tests with mocked session/sender/haptics: match -> command sent
       with correct enTime + success haptic, noMatch -> failure haptic + no
       command, timeout -> failure, cancel -> no command, catalog load error ->
       failed state
-- [ ] run tests - must pass before task 7
+- [x] run tests - must pass before task 7 (437 tests, all green; AllspeakWatch
+      scheme builds clean)
+- + controller placed at `Allspeak/Watch/WatchCinemaSync.swift` (shared into
+      the AllspeakWatch target via project.yml) instead of `AllspeakWatch/` -
+      no watch unit-test target exists, so the CatalogStore/CueCache shared-file
+      precedent applies for AllspeakTests coverage; also covers send-failure ->
+      failed (Task 9 edge case) since the command send awaits the WCSession
+      reply/error
 
 ### Task 7: Sync button on TransportView + mic permission
 

@@ -1,0 +1,226 @@
+import Foundation
+import Testing
+@testable import Allspeak
+
+@MainActor
+@Suite("WatchCinemaSync", .tags(.cinemaSync), .serialized)
+struct WatchCinemaSyncTests {
+
+    final class MockMatchingSession: WatchCinemaMatching, @unchecked Sendable {
+        private let outcome: WatchCinemaMatchOutcome?
+        private(set) var cancelCount = 0
+
+        // nil outcome = never resolves (until task cancellation)
+        init(outcome: WatchCinemaMatchOutcome?) {
+            self.outcome = outcome
+        }
+
+        func result() async -> WatchCinemaMatchOutcome {
+            if let outcome { return outcome }
+            try? await Task.sleep(for: .seconds(60))
+            return .error
+        }
+
+        func cancel() {
+            cancelCount += 1
+        }
+    }
+
+    final class MockSender: WatchMessageSender, @unchecked Sendable {
+        var isReachable: Bool = true
+        var nextError: Error?
+        private(set) var sentMessages: [[String: Any]] = []
+
+        func send(
+            message: [String: Any],
+            replyHandler: @escaping @Sendable ([String: Any]) -> Void,
+            errorHandler: @escaping @Sendable (Error) -> Void
+        ) {
+            sentMessages.append(message)
+            if let nextError {
+                errorHandler(nextError)
+            } else {
+                replyHandler([:])
+            }
+        }
+    }
+
+    final class MockHaptics: WatchSyncHapticsPlaying {
+        private(set) var played: [WatchSyncHaptic] = []
+
+        func play(_ haptic: WatchSyncHaptic) {
+            played.append(haptic)
+        }
+    }
+
+    private func catalogURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).shazamcatalog")
+    }
+
+    private func makeSync(
+        session: MockMatchingSession,
+        sender: MockSender = MockSender(),
+        haptics: MockHaptics = MockHaptics(),
+        timeout: Duration = .seconds(60)
+    ) -> WatchCinemaSync {
+        WatchCinemaSync(
+            makeSession: { _ in session },
+            sender: sender,
+            haptics: haptics,
+            timeout: timeout
+        )
+    }
+
+    private func sentCommands(_ sender: MockSender) -> [WatchCommand] {
+        sender.sentMessages.compactMap { try? WatchCommand(propertyList: $0) }
+    }
+
+    @Test("match sends cinemaMatch with abs_start + offset and plays success haptic")
+    func matchSendsCommandWithEnTime() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=1800", offset: 42.5))
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = makeSync(session: session, sender: sender, haptics: haptics)
+
+        sync.tap(catalogURL: catalogURL())
+        await sync.listenTask?.value
+
+        #expect(sync.state == .sent)
+        #expect(sentCommands(sender) == [.cinemaMatch(enTime: 1842.5)])
+        #expect(haptics.played == [.success])
+        #expect(session.cancelCount >= 1)
+    }
+
+    @Test("match without abs_start marker sends the raw offset")
+    func matchWithoutAbsStartSendsRawOffset() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: nil, offset: 99.25))
+        let sender = MockSender()
+        let sync = makeSync(session: session, sender: sender)
+
+        sync.tap(catalogURL: catalogURL())
+        await sync.listenTask?.value
+
+        #expect(sentCommands(sender) == [.cinemaMatch(enTime: 99.25)])
+    }
+
+    @Test("noMatch plays failure haptic, sends no command, surfaces failed")
+    func noMatchFailsWithoutCommand() async throws {
+        let session = MockMatchingSession(outcome: .noMatch)
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = makeSync(session: session, sender: sender, haptics: haptics)
+
+        sync.tap(catalogURL: catalogURL())
+        await sync.listenTask?.value
+
+        #expect(sync.state == .failed)
+        #expect(sender.sentMessages.isEmpty)
+        #expect(haptics.played == [.failure])
+        #expect(session.cancelCount >= 1)
+    }
+
+    @Test("session error surfaces failed with failure haptic")
+    func errorOutcomeFails() async throws {
+        let session = MockMatchingSession(outcome: .error)
+        let haptics = MockHaptics()
+        let sync = makeSync(session: session, haptics: haptics)
+
+        sync.tap(catalogURL: catalogURL())
+        await sync.listenTask?.value
+
+        #expect(sync.state == .failed)
+        #expect(haptics.played == [.failure])
+    }
+
+    @Test("timeout cancels the session and surfaces failed")
+    func timeoutFails() async throws {
+        let session = MockMatchingSession(outcome: nil)
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = makeSync(session: session, sender: sender, haptics: haptics, timeout: .milliseconds(50))
+
+        sync.tap(catalogURL: catalogURL())
+        #expect(sync.state == .listening)
+        await sync.listenTask?.value
+
+        #expect(sync.state == .failed)
+        #expect(sender.sentMessages.isEmpty)
+        #expect(haptics.played == [.failure])
+        #expect(session.cancelCount >= 1)
+    }
+
+    @Test("second tap while listening cancels back to idle with no command and no haptic")
+    func secondTapCancels() async throws {
+        let session = MockMatchingSession(outcome: nil)
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = makeSync(session: session, sender: sender, haptics: haptics)
+
+        sync.tap(catalogURL: catalogURL())
+        #expect(sync.state == .listening)
+        let task = sync.listenTask
+
+        sync.tap(catalogURL: catalogURL())
+
+        #expect(sync.state == .idle)
+        #expect(session.cancelCount >= 1)
+
+        await task?.value
+
+        #expect(sync.state == .idle)
+        #expect(sender.sentMessages.isEmpty)
+        #expect(haptics.played.isEmpty)
+    }
+
+    @Test("catalog load error surfaces failed with failure haptic and no listening")
+    func catalogLoadErrorFails() async throws {
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = WatchCinemaSync(
+            makeSession: { _ in throw NSError(domain: "test", code: 1) },
+            sender: sender,
+            haptics: haptics
+        )
+
+        sync.tap(catalogURL: catalogURL())
+
+        #expect(sync.state == .failed)
+        #expect(sync.listenTask == nil)
+        #expect(sender.sentMessages.isEmpty)
+        #expect(haptics.played == [.failure])
+    }
+
+    @Test("command send failure surfaces failed with failure haptic")
+    func sendFailureFails() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=60", offset: 5))
+        let sender = MockSender()
+        sender.nextError = NSError(domain: "test", code: 2)
+        let haptics = MockHaptics()
+        let sync = makeSync(session: session, sender: sender, haptics: haptics)
+
+        sync.tap(catalogURL: catalogURL())
+        await sync.listenTask?.value
+
+        #expect(sync.state == .failed)
+        #expect(haptics.played == [.failure])
+    }
+
+    @Test("tap after a failed attempt starts a fresh listen")
+    func tapAfterFailureRestarts() async throws {
+        let failing = MockMatchingSession(outcome: .noMatch)
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = makeSync(session: failing, sender: sender, haptics: haptics)
+
+        sync.tap(catalogURL: catalogURL())
+        await sync.listenTask?.value
+        #expect(sync.state == .failed)
+
+        sync.tap(catalogURL: catalogURL())
+        #expect(sync.state == .listening)
+        await sync.listenTask?.value
+        #expect(sync.state == .failed)
+        #expect(haptics.played == [.failure, .failure])
+    }
+}
