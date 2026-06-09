@@ -74,13 +74,18 @@ button (a waveform-with-magnifier glyph) between the back button and the title.
 Tapping it opens a modal that listens through the iPhone mic for a few seconds,
 matches the room's cinema audio against the catalog via ShazamKit, and seeks the
 prepared dub track to the matched on-screen position — replacing the manual
-subtitle-tap resync. On a match the modal shows the matched timecode and
-auto-dismisses; with no match within ~6 seconds it offers Try Again / Close. The
-first tap prompts for microphone access (`NSMicrophoneUsageDescription`).
+subtitle-tap resync. The ShazamKit match is an *English* timecode; when the
+session also carries an optional `.dtwmap.json` mapping (the
+`Cinema sync mapping` row in the create / edit form), that English time is
+converted to the corresponding Russian-dub timecode before the seek, correcting
+playback drift between the two masters. Without a mapping the English offset is
+used as-is (identity). On a match the modal shows the dub timecode it jumped to
+and auto-dismisses; with no match within ~6 seconds it offers Try Again / Close.
+The first tap prompts for microphone access (`NSMicrophoneUsageDescription`).
 Playback is not interrupted during the listen — the audio session swaps to
 `.playAndRecord` with `.mixWithOthers` for the sync window and restores
 afterward. The button is hidden for sessions without a catalog. Generating the
-catalog file itself is a separate Mac-side step; see
+catalog and mapping files is a separate Mac-side step; see
 [`docs/cinema-sync.md`](docs/cinema-sync.md).
 
 ## Apple Watch remote
@@ -161,10 +166,12 @@ when the session ends or the track finishes.
   lightweight migration carries pre-multitrack sessions forward by
   back-filling a single `AudioTrack(label: "Original", isDefault: true)`
   from the legacy `Session.audioFilename` field. The current model version,
-  `Allspeak v3`, adds an optional `catalogFilename` to `Session` for the
-  cinema-sync ShazamKit catalog; the v2 to v3 migration is lightweight
-  (existing sessions carry forward with no catalog). File payloads (audio +
-  srt) are not stored in Core Data — only filenames.
+  `Allspeak v4`, adds two optional `Session` fields for cinema sync:
+  `catalogFilename` (the ShazamKit catalog, added in v3) and `dtwMapFilename`
+  (the DTW English-to-Russian timecode mapping, added in v4). Both the v2 to v3
+  and v3 to v4 migrations are lightweight (existing sessions carry forward with
+  no catalog and no mapping). File payloads (audio + srt) are not stored in
+  Core Data — only filenames.
 - **Audio**: Single `AVAudioPlayer` per player session, `.playback` category,
   `.spokenAudio` mode. Background audio is permitted via the `audio` entry in
   `UIBackgroundModes`.

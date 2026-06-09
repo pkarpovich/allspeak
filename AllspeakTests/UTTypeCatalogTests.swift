@@ -16,4 +16,9 @@ struct UTTypeCatalogTests {
             || (UTType.shazamCatalog.tags[.filenameExtension]?.contains("shazamcatalog") ?? false)
         #expect(recognized)
     }
+
+    @Test("dtwMap is the JSON system type so .dtwmap.json files surface in the picker")
+    func dtwMapIsJSON() {
+        #expect(UTType.dtwMap == .json)
+    }
 }

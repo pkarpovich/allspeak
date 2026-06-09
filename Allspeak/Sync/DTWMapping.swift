@@ -1,7 +1,7 @@
 import Foundation
 
 struct DTWMapping: Sendable, Equatable {
-    struct Pair: Sendable, Equatable, Codable {
+    struct Pair: Sendable, Equatable, Decodable {
         let enT: Double
         let ruT: Double
 
@@ -14,12 +14,6 @@ struct DTWMapping: Sendable, Equatable {
             var container = try decoder.unkeyedContainer()
             enT = try container.decode(Double.self)
             ruT = try container.decode(Double.self)
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.unkeyedContainer()
-            try container.encode(enT)
-            try container.encode(ruT)
         }
     }
 

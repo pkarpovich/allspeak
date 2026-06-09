@@ -148,8 +148,8 @@ struct CinemaSyncIntegrationTests {
 
         coordinator.applySyncOffset(ruOffset)
         let controller = try #require(coordinator.controller)
-        #expect(abs(ruOffset - 2_937.6) < 0.1)
-        #expect(controller.currentTime > 0)
+        let expectedSeek = min(ruOffset, controller.duration)
+        #expect(abs(controller.currentTime - expectedSeek) < 0.05)
     }
 
     @Test("loaded DTW mapping resolves the anchor directly through the coordinator")
