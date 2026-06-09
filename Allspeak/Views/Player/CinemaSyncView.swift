@@ -27,11 +27,11 @@ struct CinemaSyncDisplay: Equatable {
             iconName = "mic.fill"
             title = Self.listeningTitle
             detail = Self.listeningDetail
-        case let .matched(offset):
-            phase = .matched(offset: offset)
+        case let .matched(_, ruOffset):
+            phase = .matched(offset: ruOffset)
             iconName = "checkmark.circle.fill"
             title = Self.matchedTitle
-            detail = PlayerTime.formatHHMMSS(offset)
+            detail = PlayerTime.formatHHMMSS(ruOffset)
         case .noMatch:
             phase = .problem
             iconName = "exclamationmark.triangle.fill"
@@ -77,9 +77,9 @@ struct CinemaSyncView: View {
         .task { await service.start() }
         .task(id: display) {
             guard case let .matched(offset) = display.phase else { return }
+            onSyncResult(offset)
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
-            onSyncResult(offset)
             dismiss()
         }
         .onDisappear { service.cancel() }

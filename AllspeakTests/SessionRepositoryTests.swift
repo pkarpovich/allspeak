@@ -663,6 +663,96 @@ struct SessionRepositoryTests {
         #expect(withoutSnap.catalogFilename == nil)
     }
 
+    @Test("importSession persists both catalogFilename and dtwMapFilename; round-trips through fetchSnapshot")
+    func importSessionRoundTripsBothFilenames() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let catalog = try writeSourceFile(in: srcDir, name: "movie.shazamcatalog", contents: "fp")
+        let dtwMap = try writeSourceFile(in: srcDir, name: "movie.dtwmap.json", contents: "{}")
+
+        let id = try await repo.importSession(
+            name: "Synced",
+            audioSrc: audio,
+            srtSrc: srt,
+            catalogSrc: catalog,
+            dtwMapSrc: dtwMap
+        )
+
+        let snap = try await repo.fetchSnapshot(id: id)
+        #expect(snap.catalogFilename == "movie.shazamcatalog")
+        #expect(snap.dtwMapFilename == "movie.dtwmap.json")
+
+        let row = try persistence.viewContext.existingObject(with: id)
+        let uuid = try #require(row.value(forKey: "id") as? UUID)
+        let copiedCatalog = storage.catalogURL(sessionID: uuid, filename: "movie.shazamcatalog")
+        let copiedMap = storage.dtwMapURL(sessionID: uuid, filename: "movie.dtwmap.json")
+        #expect(FileManager.default.fileExists(atPath: copiedCatalog.path))
+        #expect(FileManager.default.fileExists(atPath: copiedMap.path))
+        #expect(try String(contentsOf: copiedMap, encoding: .utf8) == "{}")
+    }
+
+    @Test("setDTWMap stores dtwMapFilename and copies the file")
+    func setDTWMapCopiesAndPersists() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        let dtwMap = try writeSourceFile(in: srcDir, name: "later.dtwmap.json", contents: "{}")
+
+        try await repo.setDTWMap(sessionID: id, srcURL: dtwMap)
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "dtwMapFilename") as? String == "later.dtwmap.json")
+        let uuid = try #require(row.value(forKey: "id") as? UUID)
+        let copied = storage.dtwMapURL(sessionID: uuid, filename: "later.dtwmap.json")
+        #expect(FileManager.default.fileExists(atPath: copied.path))
+    }
+
+    @Test("clearing dtwMapFilename leaves catalogFilename intact and vice versa")
+    func clearingOneFilenameDoesNotClearTheOther() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let catalog = try writeSourceFile(in: srcDir, name: "c.shazamcatalog", contents: "c")
+        let dtwMap = try writeSourceFile(in: srcDir, name: "m.dtwmap.json", contents: "{}")
+
+        let first = try await repo.importSession(
+            name: "First",
+            audioSrc: audio,
+            srtSrc: srt,
+            catalogSrc: catalog,
+            dtwMapSrc: dtwMap
+        )
+        let firstSnap = try await repo.fetchSnapshot(id: first)
+        #expect(firstSnap.catalogFilename == "c.shazamcatalog")
+        #expect(firstSnap.dtwMapFilename == "m.dtwmap.json")
+
+        try await repo.clearDTWMap(sessionID: first)
+        let afterClearMap = try await repo.fetchSnapshot(id: first)
+        #expect(afterClearMap.catalogFilename == "c.shazamcatalog")
+        #expect(afterClearMap.dtwMapFilename == nil)
+
+        let second = try await repo.importSession(
+            name: "Second",
+            audioSrc: audio,
+            srtSrc: srt,
+            catalogSrc: catalog,
+            dtwMapSrc: dtwMap
+        )
+        try await repo.clearCatalog(sessionID: second)
+        let afterClearCatalog = try await repo.fetchSnapshot(id: second)
+        #expect(afterClearCatalog.catalogFilename == nil)
+        #expect(afterClearCatalog.dtwMapFilename == "m.dtwmap.json")
+    }
+
     @Test("CreateSessionView.performSave (edit mode) adds a catalog to a session that had none")
     @MainActor
     func performSaveEditModeAddsCatalog() async throws {
@@ -791,6 +881,156 @@ struct SessionRepositoryTests {
         #expect(row.value(forKey: "catalogFilename") as? String == "keep.shazamcatalog")
         #expect(row.value(forKey: "name") as? String == "Renamed")
         #expect(FileManager.default.fileExists(atPath: onDisk.path))
+    }
+
+    @Test("CreateSessionView.performSave (new mode) passes the dtw map through to import")
+    @MainActor
+    func performSaveNewModePassesDTWMap() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "primary.m4a", contents: "1")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
+        let dtwMap = try writeSourceFile(in: srcDir, name: "movie.dtwmap.json", contents: "{}")
+
+        var form = CreateSessionFormState(name: "Synced", srtURL: srt, dtwMapURL: dtwMap)
+        form.appendPendingTracks(from: [a1])
+        form.updateLabel(for: form.pendingTracks[0].id, to: "Primary")
+        #expect(form.hasDTWMap)
+        #expect(form.canSave)
+
+        try await CreateSessionView.performSave(snapshot: form, mode: .new, repository: repo)
+
+        let rows = try fetchAllSessions(in: persistence)
+        let session = try #require(rows.first)
+        #expect(session.value(forKey: "dtwMapFilename") as? String == "movie.dtwmap.json")
+        let uuid = try #require(session.value(forKey: "id") as? UUID)
+        let copied = storage.dtwMapURL(sessionID: uuid, filename: "movie.dtwmap.json")
+        #expect(FileManager.default.fileExists(atPath: copied.path))
+    }
+
+    @Test("CreateSessionView.performSave (new mode) without a dtw map leaves dtwMapFilename nil")
+    @MainActor
+    func performSaveNewModeWithoutDTWMapLeavesNil() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let a1 = try writeSourceFile(in: srcDir, name: "primary.m4a", contents: "1")
+        let srt = try writeSourceFile(in: srcDir, name: "movie.srt", contents: Self.sampleSRT)
+
+        var form = CreateSessionFormState(name: "Plain", srtURL: srt)
+        form.appendPendingTracks(from: [a1])
+        form.updateLabel(for: form.pendingTracks[0].id, to: "Primary")
+        #expect(form.hasDTWMap == false)
+
+        try await CreateSessionView.performSave(snapshot: form, mode: .new, repository: repo)
+
+        let session = try #require(try fetchAllSessions(in: persistence).first)
+        #expect(session.value(forKey: "dtwMapFilename") as? String == nil)
+    }
+
+    @Test("CreateSessionView.performSave (edit mode) adds a dtw map to a session that had none")
+    @MainActor
+    func performSaveEditModeAddsDTWMap() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        let dtwMap = try writeSourceFile(in: srcDir, name: "new.dtwmap.json", contents: "{}")
+
+        var form = CreateSessionFormState(name: "S")
+        form.existingAudioFilename = "a.m4a"
+        form.existingSrtFilename = "a.srt"
+        form.dtwMapURL = dtwMap
+
+        try await CreateSessionView.performSave(
+            snapshot: form,
+            mode: .edit(id),
+            repository: repo,
+            originalDTWMapFilename: nil
+        )
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "dtwMapFilename") as? String == "new.dtwmap.json")
+        let uuid = try #require(row.value(forKey: "id") as? UUID)
+        let copied = storage.dtwMapURL(sessionID: uuid, filename: "new.dtwmap.json")
+        #expect(FileManager.default.fileExists(atPath: copied.path))
+    }
+
+    @Test("CreateSessionView.performSave (edit mode) removes a cleared dtw map")
+    @MainActor
+    func performSaveEditModeRemovesDTWMap() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let dtwMap = try writeSourceFile(in: srcDir, name: "m.dtwmap.json", contents: "{}")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt, dtwMapSrc: dtwMap)
+        let uuid = try #require(persistence.viewContext.object(with: id).value(forKey: "id") as? UUID)
+        let onDisk = storage.dtwMapURL(sessionID: uuid, filename: "m.dtwmap.json")
+        #expect(FileManager.default.fileExists(atPath: onDisk.path))
+
+        var form = CreateSessionFormState(name: "S")
+        form.existingAudioFilename = "a.m4a"
+        form.existingSrtFilename = "a.srt"
+        form.existingDTWMapFilename = nil
+
+        try await CreateSessionView.performSave(
+            snapshot: form,
+            mode: .edit(id),
+            repository: repo,
+            originalDTWMapFilename: "m.dtwmap.json"
+        )
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "dtwMapFilename") as? String == nil)
+        #expect(FileManager.default.fileExists(atPath: onDisk.path) == false)
+    }
+
+    @Test("CreateSessionView.performSave (edit mode) leaves an untouched dtw map intact while clearing catalog independently")
+    @MainActor
+    func performSaveEditModeKeepsUntouchedDTWMap() async throws {
+        let (repo, persistence, storage, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let catalog = try writeSourceFile(in: srcDir, name: "c.shazamcatalog", contents: "c")
+        let dtwMap = try writeSourceFile(in: srcDir, name: "keep.dtwmap.json", contents: "{}")
+        let id = try await repo.importSession(
+            name: "S",
+            audioSrc: audio,
+            srtSrc: srt,
+            catalogSrc: catalog,
+            dtwMapSrc: dtwMap
+        )
+        let uuid = try #require(persistence.viewContext.object(with: id).value(forKey: "id") as? UUID)
+        let mapOnDisk = storage.dtwMapURL(sessionID: uuid, filename: "keep.dtwmap.json")
+
+        var form = CreateSessionFormState(name: "S")
+        form.existingAudioFilename = "a.m4a"
+        form.existingSrtFilename = "a.srt"
+        form.existingCatalogFilename = nil
+        form.existingDTWMapFilename = "keep.dtwmap.json"
+
+        try await CreateSessionView.performSave(
+            snapshot: form,
+            mode: .edit(id),
+            repository: repo,
+            originalCatalogFilename: "c.shazamcatalog",
+            originalDTWMapFilename: "keep.dtwmap.json"
+        )
+
+        persistence.viewContext.refreshAllObjects()
+        let row = try persistence.viewContext.existingObject(with: id)
+        #expect(row.value(forKey: "catalogFilename") as? String == nil)
+        #expect(row.value(forKey: "dtwMapFilename") as? String == "keep.dtwmap.json")
+        #expect(FileManager.default.fileExists(atPath: mapOnDisk.path))
     }
 
     @Test("objectID from import resolves cleanly on the view context (handoff smoke)")

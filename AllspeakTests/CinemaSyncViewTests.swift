@@ -23,7 +23,7 @@ struct CinemaSyncViewTests {
 
     @Test("matched maps to the matched phase with a formatted timecode and the raw offset")
     func matchedStateMapsToMatchedPhase() {
-        let display = CinemaSyncDisplay(state: .matched(offset: 3_661))
+        let display = CinemaSyncDisplay(state: .matched(enOffset: 3_661, ruOffset: 3_661))
         #expect(display.phase == .matched(offset: 3_661))
         #expect(display.iconName == "checkmark.circle.fill")
         #expect(display.title == CinemaSyncDisplay.matchedTitle)
@@ -31,6 +31,15 @@ struct CinemaSyncViewTests {
         #expect(display.matchedOffset == 3_661)
         #expect(!display.showsCancel)
         #expect(!display.showsRetry)
+    }
+
+    @Test("matched display reflects the ruOffset (the seek target), not the enOffset")
+    func matchedStateUsesRuOffset() {
+        let display = CinemaSyncDisplay(state: .matched(enOffset: 2_960, ruOffset: 2_937))
+        #expect(display.phase == .matched(offset: 2_937))
+        #expect(display.matchedOffset == 2_937)
+        #expect(display.detail == PlayerTime.formatHHMMSS(2_937))
+        #expect(display.detail != PlayerTime.formatHHMMSS(2_960))
     }
 
     @Test("noMatch maps to the problem phase with the no-match copy and retry buttons")

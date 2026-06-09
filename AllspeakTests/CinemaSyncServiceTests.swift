@@ -79,6 +79,14 @@ struct CinemaSyncServiceTests {
             .appendingPathComponent("\(UUID().uuidString).shazamcatalog")
     }
 
+    private func stubMapping() throws -> DTWMapping {
+        let json = """
+        {"film":"Stub","version":1,"ru_fps":24.0,"en_fps":24.0,"precision_s":0.1,\
+        "pairs":[[0.0,0.0],[100.0,90.0],[200.0,180.0]]}
+        """
+        return try DTWMapping(jsonData: Data(json.utf8))
+    }
+
     @Test("start transitions to listening and swaps audio session with mix options")
     func startSwapsAudioSession() async throws {
         let session = MockSHSession()
@@ -145,7 +153,7 @@ struct CinemaSyncServiceTests {
 
         service.ingestMatch(offset: 1_234.5)
 
-        #expect(service.state == .matched(offset: 1_234.5))
+        #expect(service.state == .matched(enOffset: 1_234.5, ruOffset: 1_234.5))
         #expect(capture.stopCalled)
         #expect(audio.category == .playback)
         #expect(audio.mode == .spokenAudio)
@@ -166,6 +174,41 @@ struct CinemaSyncServiceTests {
         service.ingestMatch(offset: nil)
 
         #expect(service.state == .noMatch)
+    }
+
+    @Test("with no mapping, ruOffset equals enOffset (identity passthrough)")
+    func matchWithoutMappingPassesOffsetThrough() async throws {
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        service.ingestMatch(offset: 1_234.5)
+
+        #expect(service.state == .matched(enOffset: 1_234.5, ruOffset: 1_234.5))
+    }
+
+    @Test("with a mapping injected, ruOffset reflects the mapping lookup")
+    func matchWithMappingReportsRuOffset() async throws {
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            mapping: try stubMapping(),
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        service.ingestMatch(offset: 100)
+
+        #expect(service.state == .matched(enOffset: 100, ruOffset: 90))
     }
 
     @Test("no match within the timeout window transitions to noMatch and restores the session")
@@ -378,7 +421,7 @@ struct CinemaSyncServiceTests {
 
         await service.start()
         service.ingestMatch(offset: 42)
-        #expect(service.state == .matched(offset: 42))
+        #expect(service.state == .matched(enOffset: 42, ruOffset: 42))
 
         service.cancel()
 

@@ -8,6 +8,7 @@ struct SessionSnapshot: Equatable, Sendable {
     let audioFilename: String
     let srtFilename: String
     let catalogFilename: String?
+    let dtwMapFilename: String?
 }
 
 struct TrackSnapshot: Equatable, Sendable {
@@ -46,11 +47,12 @@ final class SessionRepository: @unchecked Sendable {
         self.storage = storage
     }
 
-    func importSession(name: String, audioSrc: URL, srtSrc: URL, catalogSrc: URL? = nil) async throws -> NSManagedObjectID {
+    func importSession(name: String, audioSrc: URL, srtSrc: URL, catalogSrc: URL? = nil, dtwMapSrc: URL? = nil) async throws -> NSManagedObjectID {
         let id = UUID()
         let audioName = audioSrc.lastPathComponent
         let srtName = srtSrc.lastPathComponent
         let catalogName = catalogSrc?.lastPathComponent
+        let dtwMapName = dtwMapSrc?.lastPathComponent
         let createdAt = Date()
 
         let audioDest: URL
@@ -59,6 +61,9 @@ final class SessionRepository: @unchecked Sendable {
             try storage.copyIntoSession(srcURL: srtSrc, sessionID: id, as: srtName)
             if let catalogSrc, let catalogName {
                 try storage.copyIntoSession(srcURL: catalogSrc, sessionID: id, as: catalogName)
+            }
+            if let dtwMapSrc, let dtwMapName {
+                try storage.copyIntoSession(srcURL: dtwMapSrc, sessionID: id, as: dtwMapName)
             }
         } catch {
             try? storage.removeSessionDir(id)
@@ -78,6 +83,9 @@ final class SessionRepository: @unchecked Sendable {
                 session.setValue(createdAt, forKey: "createdAt")
                 if let catalogName {
                     session.setValue(catalogName, forKey: "catalogFilename")
+                }
+                if let dtwMapName {
+                    session.setValue(dtwMapName, forKey: "dtwMapFilename")
                 }
                 if let durationSeconds {
                     session.setValue(durationSeconds, forKey: "durationSeconds")
@@ -190,11 +198,111 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func setDTWMap(sessionID: NSManagedObjectID, srcURL: URL) async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+
+        let (sessionUUID, oldDTWMap): (UUID, String?) = try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = session.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let prior = session.value(forKey: "dtwMapFilename") as? String
+            return (uuid, prior)
+        }
+
+        let dtwMapName = srcURL.lastPathComponent
+        let dir = storage.sessionDir(for: sessionUUID)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let finalURL = dir.appendingPathComponent(dtwMapName)
+
+        let stagedURL = dir.appendingPathComponent("staged-\(UUID().uuidString)")
+        let scoped = srcURL.startAccessingSecurityScopedResource()
+        do {
+            try FileManager.default.copyItem(at: srcURL, to: stagedURL)
+        } catch {
+            if scoped { srcURL.stopAccessingSecurityScopedResource() }
+            throw error
+        }
+        if scoped { srcURL.stopAccessingSecurityScopedResource() }
+
+        let backupName = "backup-\(UUID().uuidString)"
+        var backupURL: URL?
+        do {
+            if FileManager.default.fileExists(atPath: finalURL.path) {
+                _ = try FileManager.default.replaceItemAt(finalURL, withItemAt: stagedURL, backupItemName: backupName, options: [.withoutDeletingBackupItem])
+                backupURL = dir.appendingPathComponent(backupName)
+            } else {
+                try FileManager.default.moveItem(at: stagedURL, to: finalURL)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: stagedURL)
+            throw error
+        }
+
+        do {
+            try await context.perform {
+                let session = try context.existingObject(with: sessionID)
+                session.setValue(dtwMapName, forKey: "dtwMapFilename")
+                try context.save()
+            }
+        } catch {
+            if let backupURL, FileManager.default.fileExists(atPath: backupURL.path) {
+                try? FileManager.default.removeItem(at: finalURL)
+                try? FileManager.default.moveItem(at: backupURL, to: finalURL)
+            } else {
+                try? FileManager.default.removeItem(at: finalURL)
+            }
+            throw error
+        }
+
+        if let backupURL {
+            try? FileManager.default.removeItem(at: backupURL)
+        }
+        if let oldDTWMap, oldDTWMap != dtwMapName {
+            try? storage.removeDTWMapFile(sessionID: sessionUUID, filename: oldDTWMap)
+        }
+    }
+
+    func clearDTWMap(sessionID: NSManagedObjectID) async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+
+        let cleanup: (UUID, String)? = try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = session.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let filename = session.value(forKey: "dtwMapFilename") as? String
+            session.setValue(nil, forKey: "dtwMapFilename")
+            try context.save()
+            if let filename {
+                return (uuid, filename)
+            }
+            return nil
+        }
+
+        if let (sessionUUID, filename) = cleanup {
+            try? storage.removeDTWMapFile(sessionID: sessionUUID, filename: filename)
+        }
+    }
+
     func importMultiTrackSession(
         name: String,
         audioSources: [PendingTrackImport],
         srtSrc: URL,
-        catalogSrc: URL? = nil
+        catalogSrc: URL? = nil,
+        dtwMapSrc: URL? = nil
     ) async throws -> NSManagedObjectID {
         guard !audioSources.isEmpty else {
             throw SessionRepositoryError.noAudioSources
@@ -203,6 +311,7 @@ final class SessionRepository: @unchecked Sendable {
         let sessionUUID = UUID()
         let srtName = srtSrc.lastPathComponent
         let catalogName = catalogSrc?.lastPathComponent
+        let dtwMapName = dtwMapSrc?.lastPathComponent
         let createdAt = Date()
 
         struct StagedTrack {
@@ -243,6 +352,9 @@ final class SessionRepository: @unchecked Sendable {
             if let catalogSrc, let catalogName {
                 try storage.copyIntoSession(srcURL: catalogSrc, sessionID: sessionUUID, as: catalogName)
             }
+            if let dtwMapSrc, let dtwMapName {
+                try storage.copyIntoSession(srcURL: dtwMapSrc, sessionID: sessionUUID, as: dtwMapName)
+            }
         } catch {
             try? storage.removeSessionDir(sessionUUID)
             throw error
@@ -269,6 +381,9 @@ final class SessionRepository: @unchecked Sendable {
                 session.setValue(createdAt, forKey: "createdAt")
                 if let catalogName {
                     session.setValue(catalogName, forKey: "catalogFilename")
+                }
+                if let dtwMapName {
+                    session.setValue(dtwMapName, forKey: "dtwMapFilename")
                 }
                 if let duration {
                     session.setValue(duration, forKey: "durationSeconds")
@@ -320,7 +435,8 @@ final class SessionRepository: @unchecked Sendable {
             let audio = object.value(forKey: "audioFilename") as? String ?? ""
             let srt = object.value(forKey: "srtFilename") as? String ?? ""
             let catalog = object.value(forKey: "catalogFilename") as? String
-            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt, catalogFilename: catalog)
+            let dtwMap = object.value(forKey: "dtwMapFilename") as? String
+            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt, catalogFilename: catalog, dtwMapFilename: dtwMap)
         }
     }
 

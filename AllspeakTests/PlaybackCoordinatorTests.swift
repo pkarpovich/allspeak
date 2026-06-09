@@ -590,6 +590,133 @@ struct PlaybackCoordinatorTests {
 
         #expect(fixture.coordinator.catalogURL == nil)
     }
+
+    private struct DTWMapFixture {
+        let coordinator: PlaybackCoordinator
+        let storage: DocumentsStorage
+        let sessionUUID: UUID
+        let dtwMapName: String?
+        let root: URL
+    }
+
+    private static let dtwMapJSON =
+        #"{"film":"Fixture","version":1,"ru_fps":24.0,"en_fps":24.0,"precision_s":0.1,"pairs":[[0.0,0.0],[4.0,2.0]]}"#
+
+    private static func makeDTWMapSessionFixture(withDTWMap: Bool) async throws -> DTWMapFixture {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-coord-dtwmap-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storage = DocumentsStorage(documentsURL: root)
+        let persistence = PersistenceController.makeInMemory()
+        let repo = SessionRepository(persistence: persistence, storage: storage)
+
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let initialAudio = try makeSilenceFile(seconds: 5)
+        let movedAudio = srcDir.appendingPathComponent("source.caf")
+        try FileManager.default.moveItem(at: initialAudio, to: movedAudio)
+        let srtURL = srcDir.appendingPathComponent("subs.srt")
+        let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
+        try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
+
+        var dtwMapSrc: URL?
+        var dtwMapName: String?
+        if withDTWMap {
+            let url = srcDir.appendingPathComponent("film.dtwmap.json")
+            try Data(dtwMapJSON.utf8).write(to: url)
+            dtwMapSrc = url
+            dtwMapName = url.lastPathComponent
+        }
+
+        let sessionID = try await repo.importSession(
+            name: "Movie",
+            audioSrc: movedAudio,
+            srtSrc: srtURL,
+            dtwMapSrc: dtwMapSrc
+        )
+        persistence.viewContext.refreshAllObjects()
+        let sessionUUID = try #require(
+            persistence.viewContext.existingObject(with: sessionID).value(forKey: "id") as? UUID
+        )
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        try await coordinator.startSession(
+            sessionID: sessionID,
+            repository: repo,
+            persistence: persistence,
+            storage: storage
+        )
+
+        return DTWMapFixture(
+            coordinator: coordinator,
+            storage: storage,
+            sessionUUID: sessionUUID,
+            dtwMapName: dtwMapName,
+            root: root
+        )
+    }
+
+    @Test("startSession resolves dtwMapURL and loads the mapping when the session has a DTW map")
+    func startSessionResolvesDTWMapURLAndLoadsMapping() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        let dtwMapName = try #require(fixture.dtwMapName)
+        let expected = fixture.storage.dtwMapURL(sessionID: fixture.sessionUUID, filename: dtwMapName)
+        #expect(fixture.coordinator.dtwMapURL == expected)
+        #expect(FileManager.default.fileExists(atPath: try #require(fixture.coordinator.dtwMapURL).path))
+
+        let mapping = try #require(fixture.coordinator.dtwMapping)
+        #expect(abs(mapping.ruTime(forEnTime: 4.0) - 2.0) < 0.0001)
+    }
+
+    @Test("startSession leaves dtwMapURL and dtwMapping nil when the session has no DTW map")
+    func startSessionWithoutDTWMapIsNil() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        #expect(fixture.coordinator.dtwMapURL == nil)
+        #expect(fixture.coordinator.dtwMapping == nil)
+    }
+
+    @Test("endSession clears the dtwMapURL and dtwMapping")
+    func endSessionClearsDTWMap() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.coordinator.dtwMapURL != nil)
+        #expect(fixture.coordinator.dtwMapping != nil)
+
+        fixture.coordinator.endSession()
+
+        #expect(fixture.coordinator.dtwMapURL == nil)
+        #expect(fixture.coordinator.dtwMapping == nil)
+    }
+
+    @Test("applySyncOffset seeks to the DTW-mapped ruOffset, not the raw enOffset")
+    func applySyncOffsetSeeksToRuOffset() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        let mapping = try #require(fixture.coordinator.dtwMapping)
+
+        let enOffset = 4.0
+        let ruOffset = mapping.ruTime(forEnTime: enOffset)
+        #expect(abs(ruOffset - enOffset) > 0.5)
+
+        fixture.coordinator.applySyncOffset(ruOffset)
+
+        #expect(abs(controller.currentTime - ruOffset) < 0.05)
+    }
 }
 
 #endif

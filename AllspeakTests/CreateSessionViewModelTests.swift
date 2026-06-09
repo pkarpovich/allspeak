@@ -16,6 +16,7 @@ struct CreateSessionViewModelTests {
     private static let audio2 = URL(fileURLWithPath: "/tmp/example2.m4a")
     private static let srt = URL(fileURLWithPath: "/tmp/example.srt")
     private static let catalog = URL(fileURLWithPath: "/tmp/example.shazamcatalog")
+    private static let dtwMap = URL(fileURLWithPath: "/tmp/example.dtwmap.json")
 
     @Test(
         "canSave reflects trimmed name + both files",
@@ -206,5 +207,66 @@ struct CreateSessionViewModelTests {
         )
         missingAudioWithCatalog.pendingTracks = []
         #expect(missingAudioWithCatalog.canSave == false)
+    }
+
+    @Test("hasDTWMap is false when neither a URL nor an existing filename is set")
+    func hasDTWMapFalseWhenAbsent() {
+        let state = CreateSessionFormState(name: "Heat", audioURL: Self.audio, srtURL: Self.srt)
+        #expect(state.hasDTWMap == false)
+        #expect(state.dtwMapDisplayName == nil)
+    }
+
+    @Test("hasDTWMap is true when a newly-picked dtw map URL is set")
+    func hasDTWMapTrueWithPickedURL() {
+        let state = CreateSessionFormState(
+            name: "Heat",
+            audioURL: Self.audio,
+            srtURL: Self.srt,
+            dtwMapURL: Self.dtwMap
+        )
+        #expect(state.hasDTWMap)
+        #expect(state.dtwMapDisplayName == "example.dtwmap.json")
+    }
+
+    @Test("hasDTWMap is true when only an existing dtw map filename is present")
+    func hasDTWMapTrueWithExistingFilename() {
+        var state = CreateSessionFormState(name: "Heat")
+        state.existingDTWMapFilename = "heat.dtwmap.json"
+        #expect(state.hasDTWMap)
+        #expect(state.dtwMapDisplayName == "heat.dtwmap.json")
+    }
+
+    @Test("a newly-picked dtw map URL takes display priority over the existing filename")
+    func pickedDTWMapOverridesExisting() {
+        var state = CreateSessionFormState(name: "Heat")
+        state.existingDTWMapFilename = "old.dtwmap.json"
+        state.dtwMapURL = Self.dtwMap
+        #expect(state.dtwMapDisplayName == "example.dtwmap.json")
+    }
+
+    @Test("clearing the dtw map resets both the URL and the existing filename")
+    func clearDTWMapResetsBoth() {
+        var state = CreateSessionFormState(
+            name: "Heat",
+            audioURL: Self.audio,
+            srtURL: Self.srt,
+            dtwMapURL: Self.dtwMap,
+            existingDTWMapFilename: "old.dtwmap.json"
+        )
+        state.dtwMapURL = nil
+        state.existingDTWMapFilename = nil
+        #expect(state.hasDTWMap == false)
+        #expect(state.dtwMapDisplayName == nil)
+    }
+
+    @Test("dtw map is optional: canSave is unaffected by its presence or absence")
+    func dtwMapDoesNotGateSave() {
+        var withMap = CreateSessionFormState(name: "Heat", srtURL: Self.srt, dtwMapURL: Self.dtwMap)
+        withMap.appendPendingTracks(from: [Self.audio])
+        #expect(withMap.canSave)
+
+        var withoutMap = CreateSessionFormState(name: "Heat", srtURL: Self.srt)
+        withoutMap.appendPendingTracks(from: [Self.audio])
+        #expect(withoutMap.canSave)
     }
 }
