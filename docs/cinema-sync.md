@@ -63,6 +63,20 @@ Playback continues throughout the listen. The audio session swaps to
 `AVAudioPlayer` is neither ducked nor paused, then restores its previous
 category on exit.
 
+## Sync delay (latency compensation)
+
+The match offset is anchored to the moment the mic captured the audio, but the
+seek only becomes audible a fraction of a second later (ShazamKit processing,
+the seek, and `AVAudioPlayer` start). The film keeps playing in between, so an
+uncompensated seek lands slightly in the past and the dub trails the screen.
+
+Settings (gear icon on the Sessions screen) has a **Sync delay** slider that
+shifts the seek forward by a fixed amount (default `0.9s`, range `0...3s`). It is
+a global setting (the right value depends on the audio route — Bluetooth adds
+more delay than the built-in speaker — not on the film). Raise it if the dub
+lands behind the film after a sync; lower it if it jumps ahead. The value is read
+at each sync tap, so changes take effect on the next sync without restarting.
+
 ## Microphone permission
 
 The first sync tap prompts for microphone access via

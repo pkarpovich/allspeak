@@ -429,6 +429,62 @@ struct CinemaSyncServiceTests {
         #expect(audio.category == .playback)
     }
 
+    @Test("latency compensation shifts the matched offset forward before mapping")
+    func latencyCompensationShiftsOffset() async throws {
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            mapping: try stubMapping(),
+            latencyCompensation: 10,
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        service.ingestMatch(offset: 100)
+
+        #expect(service.state == .matched(enOffset: 110, ruOffset: 99))
+    }
+
+    @Test("latency compensation applies without a mapping (identity)")
+    func latencyCompensationWithoutMapping() async throws {
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            latencyCompensation: 0.9,
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60)
+        )
+
+        await service.start()
+        service.ingestMatch(offset: 100)
+
+        #expect(service.state == .matched(enOffset: 100.9, ruOffset: 100.9))
+    }
+
+    @Test("storedLatencyCompensation defaults when unset and clamps when out of range")
+    func storedLatencyCompensationReadsDefaults() throws {
+        let defaults = try #require(UserDefaults(suiteName: "CinemaSyncTests.\(UUID().uuidString)"))
+        let key = CinemaSyncService.latencyCompensationDefaultsKey
+
+        #expect(CinemaSyncService.storedLatencyCompensation(defaults)
+            == CinemaSyncService.defaultLatencyCompensation)
+
+        defaults.set(1.25, forKey: key)
+        #expect(CinemaSyncService.storedLatencyCompensation(defaults) == 1.25)
+
+        defaults.set(-5.0, forKey: key)
+        #expect(CinemaSyncService.storedLatencyCompensation(defaults) == 0)
+
+        defaults.set(99.0, forKey: key)
+        #expect(CinemaSyncService.storedLatencyCompensation(defaults)
+            == CinemaSyncService.maxLatencyCompensation)
+    }
+
     @Test("absStart parses chunked-catalog subtitle markers")
     func absStartParsing() {
         #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=3480") == 3480)

@@ -17,10 +17,18 @@ Russian-dub timecode, and seeks the dub track there.
    media item carries `subtitle=abs_start=<seconds>` and `MatchDelegateProxy`
    reconstructs the absolute English position as `abs_start + offset`. Subtitles
    without the marker fall back to `abs_start = 0`.
-3. **Map EN → RU** — `DTWMapping.ruTime(forEnTime:)` looks up the Russian-dub timecode
-   for that English offset using a pre-built DTW alignment (`.dtwmap.json`). With no
-   mapping attached the offset passes through unchanged (identity).
-4. **Seek** — the service emits `.matched(enOffset:ruOffset:)`. The seek flows through
+3. **Compensate latency** — the matched offset is anchored to when the mic *captured*
+   the audio, but the seek only becomes audible after ShazamKit processing, MainActor
+   hops, the SwiftUI render, and `AVAudioPlayer` start. The cinema keeps playing during
+   that dead time, so an uncompensated seek lands in the past (dub trails the film).
+   `ingestMatch` adds `latencyCompensation` (seconds) to the EN time before mapping.
+   The value is user-tunable in Settings (`CinemaSyncService.latencyCompensationDefaultsKey`,
+   default `0.9s`, clamped `0...3s`); `PlayerView` reads it via
+   `CinemaSyncService.storedLatencyCompensation()` each time a sync starts.
+4. **Map EN → RU** — `DTWMapping.ruTime(forEnTime:)` looks up the Russian-dub timecode
+   for that (compensated) English offset using a pre-built DTW alignment (`.dtwmap.json`).
+   With no mapping attached the offset passes through unchanged (identity).
+5. **Seek** — the service emits `.matched(enOffset:ruOffset:)`. The seek flows through
    `CinemaSyncView.onSyncResult` → `PlaybackCoordinator.applySyncOffset(_:)` →
    `AudioController.seek(to:)`. The carried offset is `ruOffset`, so the dub lands on the
    DTW-mapped Russian time. Playback is `AVAudioPlayer`, not `AVPlayer` — there is no

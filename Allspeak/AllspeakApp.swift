@@ -11,7 +11,7 @@ struct AllspeakApp: App {
 
     var body: some Scene {
         WindowGroup {
-            SessionsView()
+            RootView()
                 .environment(\.managedObjectContext, persistence.viewContext)
                 .onOpenURL { url in
                     _ = SessionURLParser.parseSessionURL(url)

@@ -20,4 +20,6 @@ enum Icons {
     static let dtwMap         = "point.topleft.down.to.point.bottomright.curvepath"
     static let check          = "checkmark"
     static let filmReel       = "film"
+    static let settings       = "gearshape"
+    static let home           = "house"
 }
