@@ -63,6 +63,44 @@ Playback continues throughout the listen. The audio session swaps to
 `AVAudioPlayer` is neither ducked nor paused, then restores its previous
 category on exit.
 
+## Syncing from the watch
+
+The AllspeakWatch transport screen has its own sync button (same
+waveform-with-magnifier glyph, between the coarse skip buttons). It appears only
+once the session's catalog has been transferred to the watch.
+
+- **Tap** -> the watch listens through its own microphone via
+  `SHManagedSession(catalog:)` and matches locally on the watch (8s timeout).
+- **Match** -> a success haptic plays and the watch sends the absolute English
+  timecode to the phone (`WatchCommand.cinemaMatch(enTime:)`). The phone treats
+  it exactly like a phone-button match: it adds the Sync delay, DTW-maps
+  EN -> RU (identity without a mapping), and seeks the dub track.
+- **No match / timeout / unreachable phone** -> a failure haptic plays and the
+  button briefly shows an error state.
+- **Tap again while listening** -> cancels, nothing is sent.
+
+Why the watch listens instead of the phone: with AirPods in and the phone in a
+pocket, a phone-side listen would switch the AirPods to the HFP (phone-call)
+profile for the mic, degrading dub playback during every sync. The watch mic
+sits on the wrist in open air and never touches the phone's audio route — the
+dub keeps playing untouched.
+
+**Catalog transfer**: when a session with a catalog is opened (and on watch
+session activation), the phone queues the catalog file via
+`WCSession.transferFile` with `kind: "catalog"` metadata. The watch stores it at
+`Documents/catalogs/<sessionID>.shazamcatalog` and prunes catalogs of other
+sessions. The 1.5MB DTW map never leaves the phone — the watch only sends the
+English time.
+
+The same **Sync delay** setting (below) applies to watch-triggered syncs — it is
+added on the phone, so one slider covers both entry points. The extra WCSession
+hop (~0.1-0.3s) is absorbed by the same value; raise it slightly if
+watch-triggered syncs land behind phone-triggered ones.
+
+The first tap prompts for microphone access on the watch
+(`NSMicrophoneUsageDescription` in `AllspeakWatch/Info.plist`); if denied, the
+sync fails until re-granted via the watch Settings.
+
 ## Sync delay (latency compensation)
 
 The match offset is anchored to the moment the mic captured the audio, but the

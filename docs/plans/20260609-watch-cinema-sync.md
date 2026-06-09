@@ -262,10 +262,15 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 10: Update documentation
 
-- [ ] add a "Syncing from the watch" section to `docs/cinema-sync.md` (flow,
+- [x] add a "Syncing from the watch" section to `docs/cinema-sync.md` (flow,
       AirPods rationale, catalog transfer, same Sync delay setting applies)
-- [ ] update `Allspeak/Sync/README.md` flow with the watch entry point
-- [ ] update `README.md` cinema sync paragraph to mention the watch button
+- [x] update `Allspeak/Sync/README.md` flow with the watch entry point (flow
+      steps cover both entry points; stale "Out of scope" deferral replaced
+      with a "Watch entry point" section)
+- [x] update `README.md` cinema sync paragraph to mention the watch button
+- + `README.md` watch-remote section refreshed for this plan's Task 8 changes:
+      fine skip ±0.5s -> ±1s (labels, coalescing example), click haptics,
+      sync button placement, `cinemaMatch(enTime:)` in the command list
 
 ## Technical Details
 
