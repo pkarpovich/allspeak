@@ -151,9 +151,9 @@ This is Phase 2 — Phase 1 (offline assets: `.shazamcatalog` + `.dtwmap.json`) 
 
 ### Task 8: Update project docs
 
-- [ ] add a brief section to `Allspeak/Sync/README.md` (create if missing) describing the manual-sync + DTW mapping flow
-- [ ] note that Apple Watch sync is deferred to a future plan
-- [ ] note both memories that constrain the design (manual-only, mid-phrase OK)
+- [x] add a brief section to `Allspeak/Sync/README.md` (created) describing the manual-sync + DTW mapping flow (Flow + DTWMapping sections)
+- [x] note that Apple Watch sync is deferred to a future plan (Out of scope section)
+- [x] note both memories that constrain the design (manual-only, mid-phrase OK) (Design constraints section references `feedback-manual-resync-only` and `feedback-seek-precision-acceptable`)
 
 ## Technical Details
 
