@@ -9,7 +9,7 @@ enum CinemaSyncState: Equatable {
     case idle
     case preparing
     case listening
-    case matched(offset: TimeInterval)
+    case matched(enOffset: TimeInterval, ruOffset: TimeInterval)
     case noMatch
     case error(String)
 }
@@ -55,6 +55,7 @@ final class CinemaSyncService {
     private(set) var state: CinemaSyncState = .idle
 
     @ObservationIgnored private let catalogURL: URL
+    @ObservationIgnored private let mapping: DTWMapping?
     @ObservationIgnored private let audioSession: AVAudioSessionConfigurable
     @ObservationIgnored private let capture: AudioInputCapturing
     @ObservationIgnored private let makeSession: (URL) throws -> SHSessionMatching
@@ -68,6 +69,7 @@ final class CinemaSyncService {
 
     init(
         catalogURL: URL,
+        mapping: DTWMapping? = nil,
         audioSession: AVAudioSessionConfigurable = AVAudioSession.sharedInstance(),
         capture: AudioInputCapturing = AVAudioEngineCapture(),
         makeSession: @escaping (URL) throws -> SHSessionMatching = CinemaSyncService.makeCatalogSession,
@@ -75,6 +77,7 @@ final class CinemaSyncService {
         timeout: Duration = .seconds(6)
     ) {
         self.catalogURL = catalogURL
+        self.mapping = mapping
         self.audioSession = audioSession
         self.capture = capture
         self.makeSession = makeSession
@@ -156,7 +159,8 @@ final class CinemaSyncService {
         guard case .listening = state else { return }
         teardown()
         if let offset {
-            state = .matched(offset: offset)
+            let ruOffset = mapping?.ruTime(forEnTime: offset) ?? offset
+            state = .matched(enOffset: offset, ruOffset: ruOffset)
         } else {
             state = .noMatch
         }

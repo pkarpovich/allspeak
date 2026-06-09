@@ -122,13 +122,13 @@ This is Phase 2 — Phase 1 (offline assets: `.shazamcatalog` + `.dtwmap.json`) 
 
 ### Task 5: CinemaSyncService loads DTWMapping and reports ruOffset
 
-- [ ] add `nonisolated let mapping: DTWMapping?` to CinemaSyncService init parameters (with `= nil` default for back-compat with existing tests)
-- [ ] update `CinemaSyncState.matched(offset: TimeInterval)` → `.matched(enOffset: TimeInterval, ruOffset: TimeInterval)` (this is a breaking change to the enum — update every callsite)
-- [ ] in `ingestMatch(offset:)`: if `mapping != nil`, compute `ruOffset = mapping.ruTime(forEnTime: enOffset)`; else `ruOffset = enOffset` (passthrough, preserves existing test behavior)
-- [ ] update CinemaSyncServiceTests: existing `.matched(offset:)` assertions get updated to `.matched(enOffset:ruOffset:)`; add a new test where a stub mapping is injected and the ruOffset differs from enOffset by a known delta
-- [ ] write a test: no mapping → ruOffset == enOffset (identity passthrough)
-- [ ] write a test: mapping injected → ruOffset reflects mapping lookup
-- [ ] run tests — must pass before Task 6
+- [x] add `mapping: DTWMapping?` to CinemaSyncService init parameters (with `= nil` default for back-compat; stored as `@ObservationIgnored private let` to match the other 6 injected deps — a Sendable `let` is already nonisolated-accessible so the literal `nonisolated` keyword is redundant)
+- [x] update `CinemaSyncState.matched(offset: TimeInterval)` → `.matched(enOffset: TimeInterval, ruOffset: TimeInterval)` (breaking change — updated callsites in CinemaSyncView.swift init + CinemaSyncServiceTests + CinemaSyncViewTests; CinemaSyncDisplay.Phase still carries enOffset for now, ruOffset display deferred to Task 6)
+- [x] in `ingestMatch(offset:)`: `ruOffset = mapping?.ruTime(forEnTime: offset) ?? offset` (passthrough when no mapping, preserves existing test behavior)
+- [x] update CinemaSyncServiceTests: existing `.matched(offset:)` assertions updated to `.matched(enOffset:ruOffset:)`; added stub-mapping test where ruOffset (90) differs from enOffset (100) by a known delta via inline 3-pair JSON
+- [x] write a test: no mapping → ruOffset == enOffset (identity passthrough) (matchWithoutMappingPassesOffsetThrough)
+- [x] write a test: mapping injected → ruOffset reflects mapping lookup (matchWithMappingReportsRuOffset)
+- [x] run tests — must pass before Task 6 (20 tests across CinemaSyncService + CinemaSyncView suites pass on iPhone 17 / iOS 26.2)
 
 ### Task 6: PlaybackCoordinator + CinemaSyncView wire seek to AVPlayer
 

@@ -23,7 +23,7 @@ struct CinemaSyncViewTests {
 
     @Test("matched maps to the matched phase with a formatted timecode and the raw offset")
     func matchedStateMapsToMatchedPhase() {
-        let display = CinemaSyncDisplay(state: .matched(offset: 3_661))
+        let display = CinemaSyncDisplay(state: .matched(enOffset: 3_661, ruOffset: 3_661))
         #expect(display.phase == .matched(offset: 3_661))
         #expect(display.iconName == "checkmark.circle.fill")
         #expect(display.title == CinemaSyncDisplay.matchedTitle)
