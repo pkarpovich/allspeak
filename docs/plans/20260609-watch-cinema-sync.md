@@ -134,19 +134,23 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 4: Phone transfers the catalog file to the watch
 
-- [ ] tag existing cue-bundle transfers in `WatchSessionHost.sendCueBundle`
+- [x] tag existing cue-bundle transfers in `WatchSessionHost.sendCueBundle`
       with `"kind": "cuebundle"` metadata
-- [ ] add `WatchSessionHost.sendCatalogIfNeeded()`: when the current session
+- [x] add `WatchSessionHost.sendCatalogIfNeeded()`: when the current session
       has a catalog file, queue `session.transferFile(catalogURL, metadata:
       ["kind": "catalog", "sessionID": ..., "filename": ...])`; skip when an
       identical transfer (same sessionID + filename) is already outstanding
       (`session.outstandingFileTransfers`) or was already acknowledged this
       activation
-- [ ] call `sendCatalogIfNeeded()` from the same places the cue bundle / session
+- [x] call `sendCatalogIfNeeded()` from the same places the cue bundle / session
       context is broadcast (watch session activation, session change)
-- [ ] write tests for the dedup/metadata logic (extract pure decision helper if
+- [x] write tests for the dedup/metadata logic (extract pure decision helper if
       needed for testability, mirroring `handleFileTransferFailure` style)
-- [ ] run tests - must pass before task 5
+- [x] run tests - must pass before task 5 (415 tests, all green)
+- + `session(_:didFinish:error:)` now deletes the transferred file only for
+      non-catalog transfers - the catalog source lives in Documents (not a temp
+      file) and must survive the transfer; `handleFileTransferFailure` gained a
+      catalog branch keyed on sessionID + filename
 
 ### Task 5: Watch receives and stores the catalog
 

@@ -10,6 +10,7 @@ final class WatchSessionHost: NSObject {
     private let broadcastGate: SnapshotBroadcastGate
     private var session: WCSession?
     private var lastSentBundleKey: (sessionID: UUID, revision: Int)?
+    private var lastSentCatalogKey: (sessionID: UUID, filename: String)?
 
     init(
         coordinator: PlaybackCoordinator = .shared,
@@ -64,6 +65,68 @@ final class WatchSessionHost: NSObject {
                 }
             }
         }
+        sendCatalogIfNeeded()
+    }
+
+    func sendCatalogIfNeeded() {
+        guard let session, session.activationState == .activated else { return }
+        let outstanding = session.outstandingFileTransfers.compactMap(\.file.metadata)
+        sendCatalogIfNeeded(outstandingMetadata: outstanding) { url, metadata in
+            session.transferFile(url, metadata: metadata)
+        }
+    }
+
+    func sendCatalogIfNeeded(
+        outstandingMetadata: [[String: Any]],
+        transfer: (URL, [String: Any]) -> Void
+    ) {
+        guard let sessionUUID = coordinator.sessionUUID,
+              let catalogURL = coordinator.catalogURL else { return }
+        let filename = catalogURL.lastPathComponent
+        if lastSentCatalogKey?.sessionID == sessionUUID, lastSentCatalogKey?.filename == filename {
+            return
+        }
+        if Self.hasOutstandingCatalogTransfer(
+            in: outstandingMetadata,
+            sessionID: sessionUUID,
+            filename: filename
+        ) {
+            return
+        }
+        transfer(catalogURL, Self.catalogTransferMetadata(sessionID: sessionUUID, filename: filename))
+        lastSentCatalogKey = (sessionUUID, filename)
+    }
+
+    nonisolated static func catalogTransferMetadata(sessionID: UUID, filename: String) -> [String: Any] {
+        [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "filename": filename,
+        ]
+    }
+
+    nonisolated static func cueBundleTransferMetadata(sessionID: UUID, revision: Int) -> [String: Any] {
+        [
+            "kind": "cuebundle",
+            "sessionID": sessionID.uuidString,
+            "revision": revision,
+        ]
+    }
+
+    nonisolated static func hasOutstandingCatalogTransfer(
+        in outstanding: [[String: Any]],
+        sessionID: UUID,
+        filename: String
+    ) -> Bool {
+        outstanding.contains { metadata in
+            metadata["kind"] as? String == "catalog"
+                && metadata["sessionID"] as? String == sessionID.uuidString
+                && metadata["filename"] as? String == filename
+        }
+    }
+
+    nonisolated static func isCatalogTransfer(metadata: [String: Any]?) -> Bool {
+        metadata?["kind"] as? String == "catalog"
     }
 
     func broadcast(metadata: SessionMetadata) {
@@ -91,17 +154,28 @@ final class WatchSessionHost: NSObject {
         } catch {
             return false
         }
-        let meta: [String: Any] = [
-            "sessionID": bundle.sessionID.uuidString,
-            "revision": bundle.revision,
-        ]
-        session.transferFile(url, metadata: meta)
+        session.transferFile(
+            url,
+            metadata: Self.cueBundleTransferMetadata(sessionID: bundle.sessionID, revision: bundle.revision)
+        )
         return true
     }
 
     func handleFileTransferFailure(metadata fileMetadata: [String: Any]?) {
+        guard let fileMetadata else { return }
+        if Self.isCatalogTransfer(metadata: fileMetadata) {
+            guard
+                let sessionIDString = fileMetadata["sessionID"] as? String,
+                let sessionID = UUID(uuidString: sessionIDString),
+                let filename = fileMetadata["filename"] as? String,
+                let cached = lastSentCatalogKey,
+                cached.sessionID == sessionID,
+                cached.filename == filename
+            else { return }
+            lastSentCatalogKey = nil
+            return
+        }
         guard
-            let fileMetadata,
             let sessionIDString = fileMetadata["sessionID"] as? String,
             let sessionID = UUID(uuidString: sessionIDString),
             let revision = fileMetadata["revision"] as? Int,
@@ -178,7 +252,9 @@ final class WatchSessionHost: NSObject {
 
 extension WatchSessionHost: WCSessionDelegate {
     nonisolated func session(_: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
-        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        if !Self.isCatalogTransfer(metadata: fileTransfer.file.metadata) {
+            try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        }
         guard error != nil else { return }
         let meta = SendablePayload(value: fileTransfer.file.metadata)
         Task { @MainActor in

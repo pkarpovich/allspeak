@@ -699,6 +699,264 @@ struct WatchSessionHostTests {
         #expect(contexts.isEmpty)
     }
 
+    private struct CatalogFixture {
+        let coordinator: PlaybackCoordinator
+        let host: WatchSessionHost
+        let sessionUUID: UUID
+        let catalogName: String?
+        let root: URL
+    }
+
+    private func makeCatalogFixture(withCatalog: Bool) async throws -> CatalogFixture {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-host-catalog-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storage = DocumentsStorage(documentsURL: root)
+        let persistence = PersistenceController.makeInMemory()
+        let repo = SessionRepository(persistence: persistence, storage: storage)
+
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let initialAudio = try Self.makeSilenceFile(seconds: 5)
+        let movedAudio = srcDir.appendingPathComponent("source.caf")
+        try FileManager.default.moveItem(at: initialAudio, to: movedAudio)
+        let srtURL = srcDir.appendingPathComponent("subs.srt")
+        let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
+        try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
+
+        var catalogSrc: URL?
+        var catalogName: String?
+        if withCatalog {
+            let url = srcDir.appendingPathComponent("film.shazamcatalog")
+            try Data([0x01, 0x02, 0x03]).write(to: url)
+            catalogSrc = url
+            catalogName = url.lastPathComponent
+        }
+
+        let sessionID = try await repo.importSession(
+            name: "Movie",
+            audioSrc: movedAudio,
+            srtSrc: srtURL,
+            catalogSrc: catalogSrc
+        )
+        persistence.viewContext.refreshAllObjects()
+        let sessionUUID = try #require(
+            persistence.viewContext.existingObject(with: sessionID).value(forKey: "id") as? UUID
+        )
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        try await coordinator.startSession(
+            sessionID: sessionID,
+            repository: repo,
+            persistence: persistence,
+            storage: storage
+        )
+        let host = WatchSessionHost(coordinator: coordinator)
+        return CatalogFixture(
+            coordinator: coordinator,
+            host: host,
+            sessionUUID: sessionUUID,
+            catalogName: catalogName,
+            root: root
+        )
+    }
+
+    @Test("sendCatalogIfNeeded queues the catalog file with kind/sessionID/filename metadata")
+    func sendCatalogQueuesWithMetadata() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let catalogName = try #require(fixture.catalogName)
+
+        var transfers: [(url: URL, metadata: [String: Any])] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, metadata in
+            transfers.append((url, metadata))
+        }
+
+        #expect(transfers.count == 1)
+        #expect(transfers[0].url == fixture.coordinator.catalogURL)
+        #expect(transfers[0].metadata["kind"] as? String == "catalog")
+        #expect(transfers[0].metadata["sessionID"] as? String == fixture.sessionUUID.uuidString)
+        #expect(transfers[0].metadata["filename"] as? String == catalogName)
+    }
+
+    @Test("sendCatalogIfNeeded skips a repeat send for the same session and filename")
+    func sendCatalogSkipsRepeat() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+
+        #expect(transfers.count == 1)
+    }
+
+    @Test("sendCatalogIfNeeded skips when an identical transfer is already outstanding")
+    func sendCatalogSkipsOutstanding() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let catalogName = try #require(fixture.catalogName)
+        let outstanding = [
+            WatchSessionHost.catalogTransferMetadata(sessionID: fixture.sessionUUID, filename: catalogName)
+        ]
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: outstanding) { url, _ in transfers.append(url) }
+
+        #expect(transfers.isEmpty)
+    }
+
+    @Test("sendCatalogIfNeeded sends when outstanding transfers are for other sessions or files")
+    func sendCatalogIgnoresUnrelatedOutstanding() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let catalogName = try #require(fixture.catalogName)
+        let outstanding = [
+            WatchSessionHost.catalogTransferMetadata(sessionID: UUID(), filename: catalogName),
+            WatchSessionHost.catalogTransferMetadata(sessionID: fixture.sessionUUID, filename: "other.shazamcatalog"),
+            WatchSessionHost.cueBundleTransferMetadata(sessionID: fixture.sessionUUID, revision: 1),
+        ]
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: outstanding) { url, _ in transfers.append(url) }
+
+        #expect(transfers.count == 1)
+    }
+
+    @Test("sendCatalogIfNeeded is a no-op when the session has no catalog")
+    func sendCatalogNoCatalog() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+
+        #expect(transfers.isEmpty)
+    }
+
+    @Test("sendCatalogIfNeeded is a no-op without an active session")
+    func sendCatalogNoSession() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+
+        var transfers: [URL] = []
+        host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+
+        #expect(transfers.isEmpty)
+    }
+
+    @Test("handleFileTransferFailure for catalog metadata clears dedupe so next call resends")
+    func handleCatalogTransferFailureClearsDedupe() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let catalogName = try #require(fixture.catalogName)
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+
+        fixture.host.handleFileTransferFailure(
+            metadata: WatchSessionHost.catalogTransferMetadata(
+                sessionID: fixture.sessionUUID,
+                filename: catalogName
+            )
+        )
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 2)
+    }
+
+    @Test("handleFileTransferFailure ignores catalog metadata for a different file")
+    func handleCatalogTransferFailureIgnoresStale() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+
+        fixture.host.handleFileTransferFailure(
+            metadata: WatchSessionHost.catalogTransferMetadata(
+                sessionID: fixture.sessionUUID,
+                filename: "other.shazamcatalog"
+            )
+        )
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+    }
+
+    @Test("handleFileTransferFailure still clears the cue bundle key when metadata carries the cuebundle kind")
+    func handleFileTransferFailureWithKindClearsBundleKey() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        var bundles: [CueBundle] = []
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 1)
+
+        host.handleFileTransferFailure(
+            metadata: WatchSessionHost.cueBundleTransferMetadata(
+                sessionID: bundles[0].sessionID,
+                revision: bundles[0].revision
+            )
+        )
+
+        host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(bundles.count == 2)
+    }
+
+    @Test("cue bundle transfer metadata is tagged with the cuebundle kind")
+    func cueBundleMetadataTagged() {
+        let sessionID = UUID()
+        let metadata = WatchSessionHost.cueBundleTransferMetadata(sessionID: sessionID, revision: 7)
+        #expect(metadata["kind"] as? String == "cuebundle")
+        #expect(metadata["sessionID"] as? String == sessionID.uuidString)
+        #expect(metadata["revision"] as? Int == 7)
+    }
+
+    @Test("isCatalogTransfer recognizes only catalog metadata")
+    func isCatalogTransferRouting() {
+        let catalog = WatchSessionHost.catalogTransferMetadata(sessionID: UUID(), filename: "f.shazamcatalog")
+        let bundle = WatchSessionHost.cueBundleTransferMetadata(sessionID: UUID(), revision: 1)
+        #expect(WatchSessionHost.isCatalogTransfer(metadata: catalog) == true)
+        #expect(WatchSessionHost.isCatalogTransfer(metadata: bundle) == false)
+        #expect(WatchSessionHost.isCatalogTransfer(metadata: nil) == false)
+        #expect(WatchSessionHost.isCatalogTransfer(metadata: ["sessionID": UUID().uuidString]) == false)
+    }
+
     @Test("broadcastSnapshot empty-session calls do not consume the rate-limit slot")
     func broadcastSnapshotEmptyDoesNotConsumeSlot() throws {
         let coordinator = PlaybackCoordinator.shared
