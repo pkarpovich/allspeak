@@ -15,12 +15,14 @@ final class WatchSessionClient: NSObject {
     var lastSnapshot: PlaybackSnapshot?
     var isConnected: Bool = false
     var interpolationTick: UInt64 = 0
+    var hasCatalogForCurrentSession: Bool = false
 
     var tracks: [TrackInfo] { metadata?.tracks ?? [] }
     var activeTrackID: UUID? { metadata?.activeTrackID }
 
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
+    @ObservationIgnored private let catalogStore: CatalogStore?
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var interpolationTimer: Timer?
     @ObservationIgnored private var lastRequestedBundleKey: (sessionID: UUID, revision: Int)?
@@ -28,7 +30,7 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
 
-    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil) {
+    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil, catalogStore: CatalogStore? = nil) {
         self.sender = sender ?? DefaultWatchMessageSender.shared
         if let cache {
             self.cache = cache
@@ -36,6 +38,13 @@ final class WatchSessionClient: NSObject {
             self.cache = try? CueCache(baseURL: baseURL)
         } else {
             self.cache = nil
+        }
+        if let catalogStore {
+            self.catalogStore = catalogStore
+        } else if let baseURL = try? CatalogStore.defaultBaseURL() {
+            self.catalogStore = try? CatalogStore(baseURL: baseURL)
+        } else {
+            self.catalogStore = nil
         }
         super.init()
     }
@@ -156,6 +165,7 @@ final class WatchSessionClient: NSObject {
             self.cues = []
             self.lastSnapshot = nil
             self.lastRequestedBundleKey = nil
+            refreshHasCatalogForCurrentSession()
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
@@ -174,6 +184,15 @@ final class WatchSessionClient: NSObject {
         if cues.isEmpty && meta.cueCount > 0 {
             requestCueBundleIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
         }
+        refreshHasCatalogForCurrentSession()
+    }
+
+    private func refreshHasCatalogForCurrentSession() {
+        guard let metadata, let catalogStore else {
+            hasCatalogForCurrentSession = false
+            return
+        }
+        hasCatalogForCurrentSession = catalogStore.catalogURL(for: metadata.sessionID) != nil
     }
 
     private func requestCueBundleIfNeeded(sessionID: UUID, revision: Int) {
@@ -214,7 +233,11 @@ final class WatchSessionClient: NSObject {
     }
 
     func handleReceivedFile(data: Data?, metadata fileMetadata: [String: Any]) {
-        _ = fileMetadata
+        if fileMetadata["kind"] as? String == "catalog" {
+            handleReceivedCatalog(data: data, metadata: fileMetadata)
+            completePendingBackgroundTasks()
+            return
+        }
         guard let data, let bundle = try? CueBundle(compressed: data) else {
             completePendingBackgroundTasks()
             return
@@ -248,6 +271,16 @@ final class WatchSessionClient: NSObject {
             }
         }
         completePendingBackgroundTasks()
+    }
+
+    private func handleReceivedCatalog(data: Data?, metadata fileMetadata: [String: Any]) {
+        guard let data,
+              let sessionIDString = fileMetadata["sessionID"] as? String,
+              let sessionID = UUID(uuidString: sessionIDString),
+              let catalogStore
+        else { return }
+        try? catalogStore.save(data: data, sessionID: sessionID)
+        refreshHasCatalogForCurrentSession()
     }
 
     #if os(watchOS)

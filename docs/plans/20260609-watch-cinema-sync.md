@@ -154,21 +154,22 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 5: Watch receives and stores the catalog
 
-- [ ] create `AllspeakWatch/CatalogStore.swift` (or shared file if tests need
-      it on iOS): saves received catalog data to
+- [x] create `Allspeak/Watch/CatalogStore.swift` (shared so iOS tests cover it,
+      following the CueCache precedent): saves received catalog data to
       `Documents/catalogs/<sessionID>.shazamcatalog`, exposes
       `catalogURL(for sessionID: UUID) -> URL?` and prunes catalogs for other
       sessions on save
-- [ ] update `WatchSessionClient.handleReceivedFile` to route by
+- [x] update `WatchSessionClient.handleReceivedFile` to route by
       `metadata["kind"]`: `"catalog"` -> CatalogStore, anything else (including
       missing kind, for backward compat) -> existing cue-bundle path
-- [ ] expose `hasCatalogForCurrentSession: Bool` on `WatchSessionClient`
+- [x] expose `hasCatalogForCurrentSession: Bool` on `WatchSessionClient`
       (re-evaluated on session metadata change and on catalog receive) so the
       UI can show/hide the sync button
-- [ ] write tests: kind routing (catalog saved, cue bundle still works, missing
+- [x] write tests: kind routing (catalog saved, cue bundle still works, missing
       kind treated as cue bundle), pruning, hasCatalog flips on receive and on
       session switch
-- [ ] run tests - must pass before task 6
+- [x] run tests - must pass before task 6 (428 tests, all green; AllspeakWatch
+      scheme builds clean)
 
 ### Task 6: Watch cinema sync controller (SHManagedSession wrapper)
 

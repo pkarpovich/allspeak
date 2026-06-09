@@ -35,6 +35,27 @@ struct WatchSessionClientTests {
         return (client, sender, dir)
     }
 
+    private func makeClientWithCatalogStore() throws -> (WatchSessionClient, CatalogStore, URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("client-catalog-\(UUID().uuidString)", isDirectory: true)
+        let cache = try CueCache(baseURL: dir.appendingPathComponent("cues", isDirectory: true))
+        let store = try CatalogStore(baseURL: dir.appendingPathComponent("catalogs", isDirectory: true))
+        let client = WatchSessionClient(sender: MockSender(), cache: cache, catalogStore: store)
+        return (client, store, dir)
+    }
+
+    private func makeMetadata(sessionID: UUID, cueCount: Int = 0) -> SessionMetadata {
+        SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Session",
+            duration: 60,
+            cueCount: cueCount,
+            isPlaying: false,
+            currentTime: 0
+        )
+    }
+
     private static let cues: [Subtitle] = [
         Subtitle(index: 1, start: 0, end: 1, text: "first"),
         Subtitle(index: 2, start: 1, end: 2, text: "second"),
@@ -1124,5 +1145,175 @@ struct WatchSessionClientTests {
         #expect(client.metadata?.revision == 2)
         #expect(client.tracks == [trackA, trackB])
         #expect(client.activeTrackID == trackB.id)
+    }
+
+    @Test("handleReceivedFile with catalog kind saves to store and skips cue path")
+    func receiveCatalogFileSavesToStore() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+
+        let payload = Data([0xCA, 0x7A, 0x10])
+        client.handleReceivedFile(data: payload, metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "filename": "Masters.v2.shazamcatalog",
+        ])
+
+        let url = try #require(store.catalogURL(for: sessionID))
+        #expect(try Data(contentsOf: url) == payload)
+        #expect(client.cues == [])
+    }
+
+    @Test("handleReceivedFile with cuebundle kind still hydrates cues")
+    func receiveCueBundleWithExplicitKind() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, cueCount: Self.cues.count).toPropertyList()
+        )
+
+        let bundle = CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundle.compressed(), metadata: [
+            "kind": "cuebundle",
+            "sessionID": sessionID.uuidString,
+            "revision": 1,
+        ])
+
+        #expect(client.cues == Self.cues)
+        #expect(store.catalogURL(for: sessionID) == nil)
+    }
+
+    @Test("handleReceivedFile without kind metadata is treated as legacy cue bundle")
+    func receiveFileMissingKindFallsBackToCueBundle() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, cueCount: Self.cues.count).toPropertyList()
+        )
+
+        let bundle = CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues)
+        client.handleReceivedFile(data: try bundle.compressed(), metadata: [:])
+
+        #expect(client.cues == Self.cues)
+        #expect(store.catalogURL(for: sessionID) == nil)
+    }
+
+    @Test("catalog receive with missing or malformed sessionID saves nothing")
+    func receiveCatalogRejectsBadMetadata() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+
+        client.handleReceivedFile(data: Data([0x01]), metadata: ["kind": "catalog"])
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": "not-a-uuid",
+        ])
+        client.handleReceivedFile(data: nil, metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+        ])
+
+        #expect(store.catalogURL(for: sessionID) == nil)
+        #expect(client.hasCatalogForCurrentSession == false)
+    }
+
+    @Test("hasCatalogForCurrentSession flips true on catalog receive for current session")
+    func hasCatalogFlipsOnReceive() async throws {
+        let (client, _, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        #expect(client.hasCatalogForCurrentSession == false)
+
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+        ])
+
+        #expect(client.hasCatalogForCurrentSession == true)
+    }
+
+    @Test("hasCatalogForCurrentSession stays false when catalog is for another session")
+    func hasCatalogIgnoresOtherSessionCatalog() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let otherID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: activeID).toPropertyList())
+
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": otherID.uuidString,
+        ])
+
+        #expect(client.hasCatalogForCurrentSession == false)
+        #expect(store.catalogURL(for: otherID) != nil)
+    }
+
+    @Test("hasCatalogForCurrentSession flips false on session switch and true again when stored catalog matches")
+    func hasCatalogTracksSessionSwitch() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionA = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionA).toPropertyList())
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionA.uuidString,
+        ])
+        #expect(client.hasCatalogForCurrentSession == true)
+
+        let sessionB = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionB).toPropertyList())
+        #expect(client.hasCatalogForCurrentSession == false)
+
+        try store.save(data: Data([0x02]), sessionID: sessionB)
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionB).toPropertyList())
+        #expect(client.hasCatalogForCurrentSession == true)
+    }
+
+    @Test("hasCatalogForCurrentSession becomes true when metadata arrives after the catalog")
+    func hasCatalogHandlesCatalogBeforeMetadata() async throws {
+        let (client, _, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+        ])
+        #expect(client.hasCatalogForCurrentSession == false)
+
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        #expect(client.hasCatalogForCurrentSession == true)
+    }
+
+    @Test("hasCatalogForCurrentSession resets on sessionEnded")
+    func hasCatalogResetsOnSessionEnded() async throws {
+        let (client, _, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+        ])
+        #expect(client.hasCatalogForCurrentSession == true)
+
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+        #expect(client.hasCatalogForCurrentSession == false)
     }
 }
