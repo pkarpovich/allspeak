@@ -89,13 +89,13 @@ This is Phase 2 — Phase 1 (offline assets: `.shazamcatalog` + `.dtwmap.json`) 
 
 ### Task 2: SessionRepository and DocumentsStorage handle `dtwMapFilename`
 
-- [ ] add `dtwMapFilename: String?` to `SessionSnapshot` (Allspeak/Storage/SessionRepository.swift, line ~10)
-- [ ] mirror every `catalogFilename` read/write site (lines 80, 108, 144, 179, 271, 322-323) — symmetric `dtwMapFilename` save/clear/snapshot
-- [ ] add `func dtwMapURL(sessionID: UUID, filename: String) -> URL` to DocumentsStorage mirroring `catalogURL`
-- [ ] write SessionRepositoryTests: save session with both `catalogFilename` and `dtwMapFilename`, reload, assert round-trip
-- [ ] write SessionRepositoryTests: clearing `dtwMapFilename` does not clear `catalogFilename` and vice versa
-- [ ] write DocumentsStorageTests: `dtwMapURL` returns expected path under Documents/Sessions/<uuid>/
-- [ ] run tests — must pass before Task 3
+- [x] add `dtwMapFilename: String?` to `SessionSnapshot` (Allspeak/Storage/SessionRepository.swift, line ~10)
+- [x] mirror every `catalogFilename` read/write site (lines 80, 108, 144, 179, 271, 322-323) — symmetric `dtwMapFilename` save/clear/snapshot (importSession + importMultiTrackSession `dtwMapSrc:` params, new `setDTWMap`/`clearDTWMap`, fetchSnapshot read)
+- [x] add `func dtwMapURL(sessionID: UUID, filename: String) -> URL` to DocumentsStorage mirroring `catalogURL` (also added symmetric `removeDTWMapFile`)
+- [x] write SessionRepositoryTests: save session with both `catalogFilename` and `dtwMapFilename`, reload, assert round-trip
+- [x] write SessionRepositoryTests: clearing `dtwMapFilename` does not clear `catalogFilename` and vice versa
+- [x] write DocumentsStorageTests: `dtwMapURL` returns expected path under Documents/Sessions/<uuid>/
+- [x] run tests — must pass before Task 3 (55 tests across DocumentsStorage + SessionRepository suites pass)
 
 ### Task 3: DTWMapping value type with JSON load and bisect lookup
 

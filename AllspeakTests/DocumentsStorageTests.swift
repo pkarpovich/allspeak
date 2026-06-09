@@ -141,6 +141,41 @@ struct DocumentsStorageTests {
         try storage.removeCatalogFile(sessionID: id, filename: "missing.shazamcatalog")
     }
 
+    @Test("dtwMapURL composes session-dir filename path under sessions/<uuid>")
+    func dtwMapURLComposition() {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let url = storage.dtwMapURL(sessionID: id, filename: "movie.dtwmap.json")
+        #expect(url == storage.sessionDir(for: id).appendingPathComponent("movie.dtwmap.json"))
+        #expect(url.path.hasSuffix("sessions/\(id.uuidString)/movie.dtwmap.json"))
+    }
+
+    @Test("removeDTWMapFile deletes the dtw map file")
+    func removeDTWMapFileDeletes() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let srcDir = root.appendingPathComponent("src", isDirectory: true)
+        let src = try writeFile(in: srcDir, name: "movie.dtwmap.json", contents: "{}")
+        _ = try storage.copyIntoSession(srcURL: src, sessionID: id, as: "movie.dtwmap.json")
+        let url = storage.dtwMapURL(sessionID: id, filename: "movie.dtwmap.json")
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        try storage.removeDTWMapFile(sessionID: id, filename: "movie.dtwmap.json")
+
+        #expect(FileManager.default.fileExists(atPath: url.path) == false)
+    }
+
+    @Test("removeDTWMapFile is idempotent for a missing file")
+    func removeDTWMapFileIdempotent() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        try storage.removeDTWMapFile(sessionID: id, filename: "missing.dtwmap.json")
+        try storage.removeDTWMapFile(sessionID: id, filename: "missing.dtwmap.json")
+    }
+
     @Test("trackURL formats as track-<trackID>-<originalFilename>")
     func trackURLFormat() {
         let (storage, root) = makeTempStorage()
