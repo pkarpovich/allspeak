@@ -80,10 +80,17 @@ Building the `.shazamcatalog` and `.dtwmap.json` is a separate Mac-side step,
 not part of the app (the `cinema-prep` skill's `build_catalog.py` and
 `export_dtwmap.py` produce them):
 
-- **Catalog**: generate an `SHSignature` over the full film from the **English
-  original** audio, wrap it in an `SHMediaItem` (`timeOffset: 0`, plus title
-  metadata), and write an `SHCustomCatalog` to a `.shazamcatalog` file. A
-  Russian dub catalog would not match what the cinema plays.
+- **Catalog**: generate `SHSignature` chunks over the film from the **English
+  original** audio and write them into one `SHCustomCatalog` (`.shazamcatalog`).
+  A Russian dub catalog would not match what the cinema plays. The film is
+  split into 30-minute signatures with 60s overlap because a single signature
+  only matches queries within its first ~34 minutes (verified empirically:
+  matches stop ~2060-2100s into a signature). Each chunk's media item carries
+  `subtitle=abs_start=<seconds>`; the app reconstructs the absolute English
+  timecode as `abs_start + predictedCurrentMatchOffset`
+  (`MatchDelegateProxy.absStart(fromSubtitle:)`). Catalogs without the
+  `abs_start=` marker (single-signature legacy ones) still work — `abs_start`
+  defaults to 0, but they only match in the first ~34 minutes of the film.
 - **Mapping**: because the catalog covers the film from minute 0, a match's
   `predictedCurrentMatchOffset` is an **English** timecode. The English and
   Russian masters are not frame-aligned (drift can reach tens of seconds), so a

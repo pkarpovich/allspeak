@@ -242,7 +242,21 @@ final class MatchDelegateProxy: NSObject, SHSessionDelegate, @unchecked Sendable
     }
 
     func session(_ session: SHSession, didFind match: SHMatch) {
-        onMatch(match.mediaItems.first?.predictedCurrentMatchOffset)
+        guard let item = match.mediaItems.first else {
+            onMatch(nil)
+            return
+        }
+        let absStart = Self.absStart(fromSubtitle: item.subtitle)
+        onMatch(absStart + item.predictedCurrentMatchOffset)
+    }
+
+    static func absStart(fromSubtitle subtitle: String?) -> TimeInterval {
+        let prefix = "abs_start="
+        guard let subtitle, subtitle.hasPrefix(prefix),
+              let value = TimeInterval(subtitle.dropFirst(prefix.count)) else {
+            return 0
+        }
+        return value
     }
 }
 

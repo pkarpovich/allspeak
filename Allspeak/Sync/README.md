@@ -11,8 +11,12 @@ Russian-dub timecode, and seeks the dub track there.
 1. **Listen** — `CinemaSyncService` (`../Audio/CinemaSyncService.swift`) activates the
    mic via `AVAudioEngine`, feeds buffers into an `SHSession` built from the session's
    `.shazamcatalog`, and waits (6s timeout) for a match.
-2. **Match** — ShazamKit returns `predictedCurrentMatchOffset` — the **English** play
-   position in seconds.
+2. **Match** — ShazamKit returns `predictedCurrentMatchOffset` — the play position in
+   seconds **relative to the matched reference signature**. Catalogs are chunked
+   (a single signature only matches within its first ~34 minutes), so each chunk's
+   media item carries `subtitle=abs_start=<seconds>` and `MatchDelegateProxy`
+   reconstructs the absolute English position as `abs_start + offset`. Subtitles
+   without the marker fall back to `abs_start = 0`.
 3. **Map EN → RU** — `DTWMapping.ruTime(forEnTime:)` looks up the Russian-dub timecode
    for that English offset using a pre-built DTW alignment (`.dtwmap.json`). With no
    mapping attached the offset passes through unchanged (identity).

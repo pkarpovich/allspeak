@@ -428,4 +428,15 @@ struct CinemaSyncServiceTests {
         #expect(capture.stopCount >= 2)
         #expect(audio.category == .playback)
     }
+
+    @Test("absStart parses chunked-catalog subtitle markers")
+    func absStartParsing() {
+        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=3480") == 3480)
+        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=1") == 1)
+        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=0.5") == 0.5)
+        #expect(MatchDelegateProxy.absStart(fromSubtitle: "Cinema sync reference") == 0)
+        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=") == 0)
+        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=abc") == 0)
+        #expect(MatchDelegateProxy.absStart(fromSubtitle: nil) == 0)
+    }
 }
