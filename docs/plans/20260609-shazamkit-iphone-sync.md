@@ -142,12 +142,12 @@ This is Phase 2 — Phase 1 (offline assets: `.shazamcatalog` + `.dtwmap.json`) 
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] verify Task 1-6 deliverables are present (Core Data v4, DTWMapping, picker, seek)
-- [ ] copy `Masters.shazamcatalog` and `Masters.dtwmap.json` to a test fixtures directory inside `AllspeakTests/Fixtures/`
-- [ ] write an integration test that constructs a `PlaybackCoordinator` with both fixtures loaded, fakes a match at en=2960.04, asserts the player's seek target is ~2937.6 ± 0.1
-- [ ] run the full test suite (`xcodebuild test -scheme Allspeak`) — every test must pass
-- [ ] run SwiftLint / SwiftFormat (or whatever lint config the project uses) — zero warnings on touched files
-- [ ] confirm test coverage on the new DTWMapping file is 100% (struct is small; this is achievable)
+- [x] verify Task 1-6 deliverables are present (Core Data v4 `Allspeak v4.xcdatamodel`, `Allspeak/Sync/DTWMapping.swift`, DTW picker via `UTType+Catalog`/`CreateSessionFormState`, seek via `PlaybackCoordinator.applySyncOffset` + `dtwMapping`) — all present and wired
+- [x] copy `Masters.shazamcatalog` and `Masters.dtwmap.json` to a test fixtures directory inside `AllspeakTests/Fixtures/` (dtwmap already present; catalog copied + both wired into the test target's Resources in `project.pbxproj`)
+- [x] write an integration test that constructs a `PlaybackCoordinator` with both fixtures loaded, fakes a match at en=2960.04, asserts the player's seek target is ~2937.6 ± 0.1 (`AllspeakTests/CinemaSyncIntegrationTests.swift` — builds a session with both real Masters assets, starts the coordinator, drives a `CinemaSyncService` through `.listening` → `ingestMatch(offset: 2960.04)`, asserts `ruOffset ≈ 2937.6 ± 0.1` then applies the seek)
+- [x] run the full test suite (`xcodebuild test -scheme Allspeak`) — every test must pass (393 tests in 34 suites pass on iPhone 17 Pro / iOS 26)
+- [x] run SwiftLint / SwiftFormat (or whatever lint config the project uses) — zero warnings on touched files (project ships no SwiftLint/SwiftFormat config and neither tool is installed; `build-for-testing` reports zero compiler warnings on the touched files)
+- [x] confirm test coverage on the new DTWMapping file is 100% (struct is small; this is achievable) — `DTWMapping.swift` now 100.00% (56/56) after adding `pairEncodeRoundTrips` covering the symmetric `Pair.encode(to:)`
 
 ### Task 8: Update project docs
 

@@ -46,6 +46,16 @@ struct DTWMappingTests {
         #expect(mapping.pairs.last == DTWMapping.Pair(enT: 9.0, ruT: 14.0))
     }
 
+    @Test("Pair encodes back to the array-of-arrays form and round-trips")
+    func pairEncodeRoundTrips() throws {
+        let pairs = [DTWMapping.Pair(enT: 1.0, ruT: 2.5), DTWMapping.Pair(enT: 3.0, ruT: 4.0)]
+        let data = try JSONEncoder().encode(pairs)
+        let raw = try JSONSerialization.jsonObject(with: data) as? [[Double]]
+        #expect(raw == [[1.0, 2.5], [3.0, 4.0]])
+        let decoded = try JSONDecoder().decode([DTWMapping.Pair].self, from: data)
+        #expect(decoded == pairs)
+    }
+
     @Test("exact pair hit returns that pair's ru time")
     func exactHit() throws {
         let mapping = try tinyMapping()
