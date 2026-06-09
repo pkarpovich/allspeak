@@ -243,15 +243,22 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 9: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (watch-local match,
+- [x] verify all requirements from Overview are implemented (watch-local match,
       EN time over the wire, phone applies delay + DTW, manual-only, haptic
-      feedback)
-- [ ] verify edge cases: session without catalog (no button), catalog without
-      abs_start markers (absStart=0 passthrough), no DTW map (identity), watch
-      unreachable phone (command send failure -> failed state)
-- [ ] run full test suite (iOS scheme) - all green
-- [ ] build the AllspeakWatch scheme for watchOS simulator - compiles clean
-- [ ] run linter if configured - all issues fixed
+      feedback) - WatchCinemaSync matches via SHManagedSession on the watch,
+      sends cinemaMatch(enTime: absStart + predictedCurrentMatchOffset);
+      PlaybackCoordinator.applyCinemaMatch adds storedLatencyCompensation()
+      then DTW-maps; listen only on explicit tap, session cancelled on every
+      exit path; success/failure haptics
+- [x] verify edge cases: session without catalog (no button -
+      hasCatalogForCurrentSession gates the button), catalog without abs_start
+      markers (CinemaMatch.absStart returns 0, tested), no DTW map
+      (`dtwMapping?.ruTime(...) ?? enOffset` identity, tested), watch
+      unreachable phone (sendMatch catch -> failed + failure haptic, tested)
+- [x] run full test suite (iOS scheme) - all green (448 tests in 37 suites)
+- [x] build the AllspeakWatch scheme for watchOS simulator - compiles clean
+- [x] run linter if configured - none configured (no .swiftlint.yml, swiftlint
+      not installed)
 
 ### Task 10: Update documentation
 
