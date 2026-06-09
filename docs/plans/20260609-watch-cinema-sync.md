@@ -88,17 +88,17 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 1: Extract shared abs_start parsing
 
-- [ ] create `Allspeak/Sync/CinemaMatch.swift` with `enum CinemaMatch` exposing
+- [x] create `Allspeak/Sync/CinemaMatch.swift` with `enum CinemaMatch` exposing
       `static func absStart(fromSubtitle: String?) -> TimeInterval` (move the
       implementation from `MatchDelegateProxy.absStart`)
-- [ ] update `MatchDelegateProxy` in `CinemaSyncService.swift` to delegate to
+- [x] update `MatchDelegateProxy` in `CinemaSyncService.swift` to delegate to
       `CinemaMatch.absStart`
-- [ ] add `Allspeak/Sync/CinemaMatch.swift` to the AllspeakWatch target sources
+- [x] add `Allspeak/Sync/CinemaMatch.swift` to the AllspeakWatch target sources
       in `project.yml` and regenerate the project (`xcodegen generate`)
-- [ ] move/extend the existing `absStartParsing` test in
+- [x] move/extend the existing `absStartParsing` test in
       `CinemaSyncServiceTests` to cover `CinemaMatch.absStart` (success +
       malformed + nil cases)
-- [ ] run tests - must pass before task 2
+- [x] run tests - must pass before task 2
 
 ### Task 2: Add cinemaMatch command to WireProtocol
 

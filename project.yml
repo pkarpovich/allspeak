@@ -70,6 +70,7 @@ targets:
       - path: AllspeakWatch
       - path: Allspeak/Allspeak.icon
       - path: Allspeak/Models/Subtitle.swift
+      - path: Allspeak/Sync/CinemaMatch.swift
       - path: Allspeak/Watch/WireProtocol.swift
       - path: Allspeak/Watch/PlaybackSnapshot.swift
       - path: Allspeak/Watch/CueCache.swift

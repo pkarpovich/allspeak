@@ -485,14 +485,23 @@ struct CinemaSyncServiceTests {
             == CinemaSyncService.maxLatencyCompensation)
     }
 
-    @Test("absStart parses chunked-catalog subtitle markers")
-    func absStartParsing() {
-        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=3480") == 3480)
-        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=1") == 1)
-        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=0.5") == 0.5)
-        #expect(MatchDelegateProxy.absStart(fromSubtitle: "Cinema sync reference") == 0)
-        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=") == 0)
-        #expect(MatchDelegateProxy.absStart(fromSubtitle: "abs_start=abc") == 0)
-        #expect(MatchDelegateProxy.absStart(fromSubtitle: nil) == 0)
+    @Test(
+        "CinemaMatch.absStart parses chunked-catalog subtitle markers",
+        arguments: [
+            ("abs_start=3480", 3480.0),
+            ("abs_start=1", 1.0),
+            ("abs_start=0.5", 0.5),
+            ("abs_start=007", 7.0),
+            ("Cinema sync reference", 0.0),
+            ("abs_start=", 0.0),
+            ("abs_start=abc", 0.0),
+            ("abs_start= 5", 0.0),
+            ("prefix abs_start=5", 0.0),
+            ("", 0.0),
+            (nil, 0.0),
+        ] as [(String?, TimeInterval)]
+    )
+    func absStartParsing(subtitle: String?, expected: TimeInterval) {
+        #expect(CinemaMatch.absStart(fromSubtitle: subtitle) == expected)
     }
 }
