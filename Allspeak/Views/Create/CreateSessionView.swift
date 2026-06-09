@@ -17,6 +17,7 @@ struct CreateSessionView: View {
     @State private var isSaving = false
     @State private var loadError: String?
     @State private var loadedCatalogFilename: String?
+    @State private var loadedDTWMapFilename: String?
 
     private let repository: SessionRepository
 
@@ -50,6 +51,12 @@ struct CreateSessionView: View {
                         filename: form.catalogDisplayName,
                         onChoose: { presentPicker(.catalog) },
                         onClear: { form.catalogURL = nil; form.existingCatalogFilename = nil }
+                    )
+                    FileSlotRow(
+                        kind: .dtwMap,
+                        filename: form.dtwMapDisplayName,
+                        onChoose: { presentPicker(.dtwMap) },
+                        onClear: { form.dtwMapURL = nil; form.existingDTWMapFilename = nil }
                     )
                 } header: {
                     Text("Files")
@@ -156,7 +163,9 @@ struct CreateSessionView: View {
             form.existingAudioFilename = snapshot.audioFilename
             form.existingSrtFilename = snapshot.srtFilename
             form.existingCatalogFilename = snapshot.catalogFilename
+            form.existingDTWMapFilename = snapshot.dtwMapFilename
             loadedCatalogFilename = snapshot.catalogFilename
+            loadedDTWMapFilename = snapshot.dtwMapFilename
         } catch {
             loadError = "Couldn't load session: \(error.localizedDescription)"
         }
@@ -188,6 +197,11 @@ struct CreateSessionView: View {
                     form.catalogURL = url
                     form.existingCatalogFilename = nil
                 }
+            case .dtwMap:
+                if let url = urls.first {
+                    form.dtwMapURL = url
+                    form.existingDTWMapFilename = nil
+                }
             case .none:
                 break
             }
@@ -203,13 +217,15 @@ struct CreateSessionView: View {
         let mode = self.mode
         let repo = repository
         let originalCatalog = loadedCatalogFilename
+        let originalDTWMap = loadedDTWMapFilename
         Task {
             do {
                 try await Self.performSave(
                     snapshot: snapshot,
                     mode: mode,
                     repository: repo,
-                    originalCatalogFilename: originalCatalog
+                    originalCatalogFilename: originalCatalog,
+                    originalDTWMapFilename: originalDTWMap
                 )
                 await MainActor.run {
                     isSaving = false
@@ -228,7 +244,8 @@ struct CreateSessionView: View {
         snapshot: CreateSessionFormState,
         mode: CreateSessionMode,
         repository: SessionRepository,
-        originalCatalogFilename: String? = nil
+        originalCatalogFilename: String? = nil,
+        originalDTWMapFilename: String? = nil
     ) async throws {
         switch mode {
         case .new:
@@ -241,7 +258,8 @@ struct CreateSessionView: View {
                 name: snapshot.trimmedName,
                 audioSources: sources,
                 srtSrc: srt,
-                catalogSrc: snapshot.catalogURL
+                catalogSrc: snapshot.catalogURL,
+                dtwMapSrc: snapshot.dtwMapURL
             )
         case .edit(let id):
             if let srt = snapshot.srtURL {
@@ -251,6 +269,11 @@ struct CreateSessionView: View {
                 try await repository.setCatalog(sessionID: id, srcURL: catalog)
             } else if originalCatalogFilename != nil, snapshot.existingCatalogFilename == nil {
                 try await repository.clearCatalog(sessionID: id)
+            }
+            if let dtwMap = snapshot.dtwMapURL {
+                try await repository.setDTWMap(sessionID: id, srcURL: dtwMap)
+            } else if originalDTWMapFilename != nil, snapshot.existingDTWMapFilename == nil {
+                try await repository.clearDTWMap(sessionID: id)
             }
             var renameError: Error?
             do {
@@ -308,6 +331,7 @@ private enum ActivePicker: Hashable {
     case audio
     case subtitles
     case catalog
+    case dtwMap
 
     var allowedTypes: [UTType] {
         switch self {
@@ -320,6 +344,8 @@ private enum ActivePicker: Hashable {
             return [.plainText]
         case .catalog:
             return [.shazamCatalog]
+        case .dtwMap:
+            return [.dtwMap]
         }
     }
 
@@ -328,6 +354,7 @@ private enum ActivePicker: Hashable {
         case .audio: return true
         case .subtitles: return false
         case .catalog: return false
+        case .dtwMap: return false
         }
     }
 }

@@ -112,13 +112,13 @@ This is Phase 2 — Phase 1 (offline assets: `.shazamcatalog` + `.dtwmap.json`) 
 
 ### Task 4: DTW map file picker in session create/edit UI
 
-- [ ] in CreateSessionView (Allspeak/Views/Create/CreateSessionView.swift) add a second file picker right next to the catalog picker, labeled "DTW Mapping" (or similar — match existing copy style)
-- [ ] register `.dtwmap.json` UTType OR accept `public.json` with a filename pattern guard — match the existing catalog UTType registration pattern (see Phase 1 commit `feat: register ShazamKit catalog UTType + mic permission`)
-- [ ] on selection, copy the file into the session's storage via DocumentsStorage and persist `dtwMapFilename` via SessionRepository
-- [ ] mirror the same UI in the session edit flow (the create form is already mirrored — find and update both)
-- [ ] handle clearing (X button next to filename) — clears `dtwMapFilename` in repo
-- [ ] write a ViewInspector or Swift Testing harness test confirming the picker callback persists `dtwMapFilename`
-- [ ] run tests — must pass before Task 5
+- [x] in CreateSessionView (Allspeak/Views/Create/CreateSessionView.swift) add a second file picker right next to the catalog picker, labeled "Cinema sync mapping (optional)" — matches the existing catalog copy style via a new `FileSlotKind.dtwMap`
+- [x] register `.dtwmap.json` UTType — accept `public.json` (`UTType.dtwMap = .json`) mirroring the catalog `shazamCatalog` registration in UTType+Catalog.swift; `.dtwmap.json` files surface under the JSON filter
+- [x] on selection, copy the file into the session's storage via DocumentsStorage and persist `dtwMapFilename` via SessionRepository (new mode → `importMultiTrackSession(dtwMapSrc:)`; edit mode → `setDTWMap`)
+- [x] mirror the same UI in the session edit flow (single shared Form serves both `.new` and `.edit`, matching the catalog row — the slot shows in both)
+- [x] handle clearing (X button next to filename) — clears `dtwMapFilename` in repo via `clearDTWMap`, independent of catalog
+- [x] write a Swift Testing harness test confirming the picker callback persists `dtwMapFilename` (CreateSessionView.performSave new/edit add/remove/keep tests in SessionRepositoryTests + form-state tests in CreateSessionViewModelTests)
+- [x] run tests — must pass before Task 5 (full suite passes via `xcodebuild test -scheme Allspeak`)
 
 ### Task 5: CinemaSyncService loads DTWMapping and reports ruOffset
 

@@ -30,9 +30,11 @@ struct CreateSessionFormState: Equatable {
     var audioURL: URL?
     var srtURL: URL?
     var catalogURL: URL?
+    var dtwMapURL: URL?
     var existingAudioFilename: String?
     var existingSrtFilename: String?
     var existingCatalogFilename: String?
+    var existingDTWMapFilename: String?
 
     init(
         name: String = "",
@@ -40,18 +42,22 @@ struct CreateSessionFormState: Equatable {
         audioURL: URL? = nil,
         srtURL: URL? = nil,
         catalogURL: URL? = nil,
+        dtwMapURL: URL? = nil,
         existingAudioFilename: String? = nil,
         existingSrtFilename: String? = nil,
-        existingCatalogFilename: String? = nil
+        existingCatalogFilename: String? = nil,
+        existingDTWMapFilename: String? = nil
     ) {
         self.name = name
         self.pendingTracks = pendingTracks
         self.audioURL = audioURL
         self.srtURL = srtURL
         self.catalogURL = catalogURL
+        self.dtwMapURL = dtwMapURL
         self.existingAudioFilename = existingAudioFilename
         self.existingSrtFilename = existingSrtFilename
         self.existingCatalogFilename = existingCatalogFilename
+        self.existingDTWMapFilename = existingDTWMapFilename
     }
 
     var trimmedName: String {
@@ -68,6 +74,10 @@ struct CreateSessionFormState: Equatable {
 
     var hasCatalog: Bool {
         catalogURL != nil || existingCatalogFilename != nil
+    }
+
+    var hasDTWMap: Bool {
+        dtwMapURL != nil || existingDTWMapFilename != nil
     }
 
     var allTrackLabelsValid: Bool {
@@ -88,6 +98,10 @@ struct CreateSessionFormState: Equatable {
 
     var catalogDisplayName: String? {
         catalogURL?.lastPathComponent ?? existingCatalogFilename
+    }
+
+    var dtwMapDisplayName: String? {
+        dtwMapURL?.lastPathComponent ?? existingDTWMapFilename
     }
 
     mutating func appendPendingTracks(from urls: [URL]) {

@@ -4,12 +4,14 @@ enum FileSlotKind {
     case audio
     case subtitles
     case catalog
+    case dtwMap
 
     var iconSymbol: String {
         switch self {
         case .audio: return Icons.audio
         case .subtitles: return Icons.caption
         case .catalog: return Icons.catalog
+        case .dtwMap: return Icons.dtwMap
         }
     }
 
@@ -18,6 +20,7 @@ enum FileSlotKind {
         case .audio: return "Choose audio file"
         case .subtitles: return "Choose subtitles file"
         case .catalog: return "Cinema sync catalog (optional)"
+        case .dtwMap: return "Cinema sync mapping (optional)"
         }
     }
 
@@ -26,6 +29,7 @@ enum FileSlotKind {
         case .audio: return ".m4a"
         case .subtitles: return ".srt"
         case .catalog: return ".shazamcatalog"
+        case .dtwMap: return ".dtwmap.json"
         }
     }
 }
