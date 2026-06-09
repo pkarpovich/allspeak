@@ -116,20 +116,21 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 3: Phone handles cinemaMatch (latency compensation + DTW + seek)
 
-- [ ] give `PlaybackCoordinator` an optional `dtwMapping: DTWMapping?` loaded
+- [x] give `PlaybackCoordinator` an optional `dtwMapping: DTWMapping?` loaded
       when a session opens (same place the session's `dtwMapFilename` is
       resolved for `PlayerView`/`CinemaSyncService` today; nil when the session
-      has no mapping or the file fails to load)
-- [ ] add `PlaybackCoordinator.applyCinemaMatch(enTime:)`: compute
+      has no mapping or the file fails to load) - already existed from the
+      phone sync feature, with tests
+- [x] add `PlaybackCoordinator.applyCinemaMatch(enTime:)`: compute
       `enOffset = enTime + CinemaSyncService.storedLatencyCompensation()`,
       `ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset`, then
       `controller?.seek(to: ruOffset)`
-- [ ] route `case .cinemaMatch(let enTime)` in `PlaybackCoordinator.apply(_:)`
+- [x] route `case .cinemaMatch(let enTime)` in `PlaybackCoordinator.apply(_:)`
       to `applyCinemaMatch`
-- [ ] write tests: mapping applied, identity fallback without mapping, latency
+- [x] write tests: mapping applied, identity fallback without mapping, latency
       compensation read from UserDefaults (set a known value in the test),
       no-op when no controller
-- [ ] run tests - must pass before task 4
+- [x] run tests - must pass before task 4 (404 tests, all green)
 
 ### Task 4: Phone transfers the catalog file to the watch
 

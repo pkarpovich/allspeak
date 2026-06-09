@@ -699,6 +699,100 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.coordinator.dtwMapping == nil)
     }
 
+    private static func withLatencyCompensation(_ value: Double, _ body: () -> Void) {
+        let defaults = UserDefaults.standard
+        let key = CinemaSyncService.latencyCompensationDefaultsKey
+        let previous = defaults.object(forKey: key)
+        defaults.set(value, forKey: key)
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+        body()
+    }
+
+    @Test("applyCinemaMatch seeks to the DTW-mapped RU time")
+    func applyCinemaMatchMapsThroughDTW() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        Self.withLatencyCompensation(0.0) {
+            fixture.coordinator.applyCinemaMatch(enTime: 4.0)
+        }
+
+        #expect(abs(controller.currentTime - 2.0) < 0.05)
+    }
+
+    @Test("applyCinemaMatch adds the stored latency compensation before DTW mapping")
+    func applyCinemaMatchAppliesLatencyCompensation() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        Self.withLatencyCompensation(2.0) {
+            fixture.coordinator.applyCinemaMatch(enTime: 2.0)
+        }
+
+        #expect(abs(controller.currentTime - 2.0) < 0.05)
+    }
+
+    @Test("applyCinemaMatch without a DTW mapping falls back to the EN offset")
+    func applyCinemaMatchIdentityFallback() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        Self.withLatencyCompensation(1.5) {
+            fixture.coordinator.applyCinemaMatch(enTime: 1.0)
+        }
+
+        #expect(abs(controller.currentTime - 2.5) < 0.05)
+    }
+
+    @Test("applyCinemaMatch with no active session is a no-op")
+    func applyCinemaMatchIdleIsNoOp() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+
+        Self.withLatencyCompensation(0.0) {
+            coordinator.applyCinemaMatch(enTime: 123.0)
+        }
+
+        #expect(coordinator.controller == nil)
+    }
+
+    @Test("cinemaMatch command routes to applyCinemaMatch")
+    func cinemaMatchCommandSeeksController() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Sync", audio: audio, subtitles: Self.cues)
+        defer { coordinator.endSession() }
+        let controller = try #require(coordinator.controller)
+
+        Self.withLatencyCompensation(0.5) {
+            coordinator.apply(.cinemaMatch(enTime: 2.0))
+        }
+
+        #expect(abs(controller.currentTime - 2.5) < 0.05)
+    }
+
     @Test("applySyncOffset seeks to the DTW-mapped ruOffset, not the raw enOffset")
     func applySyncOffsetSeeksToRuOffset() async throws {
         let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)

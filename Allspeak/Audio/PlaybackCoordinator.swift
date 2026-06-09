@@ -579,6 +579,13 @@ final class PlaybackCoordinator {
         controller?.seek(to: offset)
     }
 
+    func applyCinemaMatch(enTime: Double) {
+        guard let controller else { return }
+        let enOffset = enTime + CinemaSyncService.storedLatencyCompensation()
+        let ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
+        controller.seek(to: ruOffset)
+    }
+
     func apply(_ command: WatchCommand) {
         guard let controller else { return }
         switch command {
@@ -600,8 +607,8 @@ final class PlaybackCoordinator {
             controller.setVolume(value)
         case .requestCueBundle:
             break
-        case .cinemaMatch:
-            break
+        case .cinemaMatch(let enTime):
+            applyCinemaMatch(enTime: enTime)
         }
     }
 
