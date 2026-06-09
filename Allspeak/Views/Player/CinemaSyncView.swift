@@ -77,9 +77,9 @@ struct CinemaSyncView: View {
         .task { await service.start() }
         .task(id: display) {
             guard case let .matched(offset) = display.phase else { return }
+            onSyncResult(offset)
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
-            onSyncResult(offset)
             dismiss()
         }
         .onDisappear { service.cancel() }

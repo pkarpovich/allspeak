@@ -262,28 +262,28 @@ struct CreateSessionView: View {
                 dtwMapSrc: snapshot.dtwMapURL
             )
         case .edit(let id):
-            if let srt = snapshot.srtURL {
-                try await repository.replaceSubtitle(id: id, srcURL: srt)
-            }
-            if let catalog = snapshot.catalogURL {
-                try await repository.setCatalog(sessionID: id, srcURL: catalog)
-            } else if originalCatalogFilename != nil, snapshot.existingCatalogFilename == nil {
-                try await repository.clearCatalog(sessionID: id)
-            }
-            if let dtwMap = snapshot.dtwMapURL {
-                try await repository.setDTWMap(sessionID: id, srcURL: dtwMap)
-            } else if originalDTWMapFilename != nil, snapshot.existingDTWMapFilename == nil {
-                try await repository.clearDTWMap(sessionID: id)
-            }
-            var renameError: Error?
+            var saveError: Error?
             do {
+                if let srt = snapshot.srtURL {
+                    try await repository.replaceSubtitle(id: id, srcURL: srt)
+                }
+                if let catalog = snapshot.catalogURL {
+                    try await repository.setCatalog(sessionID: id, srcURL: catalog)
+                } else if originalCatalogFilename != nil, snapshot.existingCatalogFilename == nil {
+                    try await repository.clearCatalog(sessionID: id)
+                }
+                if let dtwMap = snapshot.dtwMapURL {
+                    try await repository.setDTWMap(sessionID: id, srcURL: dtwMap)
+                } else if originalDTWMapFilename != nil, snapshot.existingDTWMapFilename == nil {
+                    try await repository.clearDTWMap(sessionID: id)
+                }
                 try await repository.rename(id: id, to: snapshot.trimmedName)
             } catch {
-                renameError = error
+                saveError = error
             }
             await PlaybackCoordinator.shared.refreshIfActive(sessionID: id)
-            if let renameError {
-                throw renameError
+            if let saveError {
+                throw saveError
             }
         }
     }
