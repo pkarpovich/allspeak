@@ -201,17 +201,24 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 7: Sync button on TransportView + mic permission
 
-- [ ] add `NSMicrophoneUsageDescription` to `AllspeakWatch/Info.plist` (watch
+- [x] add `NSMicrophoneUsageDescription` to `AllspeakWatch/Info.plist` (watch
       listens briefly to the cinema audio to sync the dub track)
-- [ ] add a sync button to `TransportView` (waveform-with-magnifier glyph,
+- [x] add a sync button to `TransportView` (waveform-with-magnifier glyph,
       matching the phone player's icon): visible only when
       `hasCatalogForCurrentSession`, shows a progress indicator while
       `listening`, brief checkmark/x on sent/failed before returning to idle
-- [ ] wire the button to `WatchCinemaSync`; ensure tapping while listening
+- [x] wire the button to `WatchCinemaSync`; ensure tapping while listening
       cancels
-- [ ] write tests for any extracted view-state logic (button visibility,
+- [x] write tests for any extracted view-state logic (button visibility,
       state-to-glyph mapping)
-- [ ] run tests - must pass before task 8
+- [x] run tests - must pass before task 8 (443 tests, all green; AllspeakWatch
+      scheme builds clean)
+- + state-to-glyph and accessibility-label mappings live on
+      `WatchCinemaSyncState` (shared file, AllspeakTests coverage); added
+      `WatchCinemaSync.reset()` for the brief checkmark/x flash and
+      `WatchSessionClient.catalogURLForCurrentSession()` so the view can hand
+      the catalog to the controller; button sits between the coarse skip
+      buttons
 
 ### Task 8: Skip-button haptics + fine skip 0.5s -> 1s
 

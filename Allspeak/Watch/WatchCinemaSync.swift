@@ -17,6 +17,25 @@ enum WatchCinemaSyncState: Equatable {
     case listening
     case sent
     case failed
+
+    // Sync-button presentation. nil glyph = show a progress indicator.
+    var buttonGlyph: String? {
+        switch self {
+        case .idle: "waveform.badge.magnifyingglass"
+        case .listening: nil
+        case .sent: "checkmark"
+        case .failed: "xmark"
+        }
+    }
+
+    var buttonAccessibilityLabel: String {
+        switch self {
+        case .idle: "Sync to film"
+        case .listening: "Cancel sync"
+        case .sent: "Synced"
+        case .failed: "Sync failed"
+        }
+    }
 }
 
 enum WatchSyncHaptic: Equatable {
@@ -113,6 +132,13 @@ final class WatchCinemaSync {
         } else {
             startListening(catalogURL: catalogURL)
         }
+    }
+
+    // Called by the UI after briefly showing the sent/failed result so the
+    // button returns to its idle glyph. Never interrupts an active listen.
+    func reset() {
+        guard state == .sent || state == .failed else { return }
+        state = .idle
     }
 
     func cancelListening() {

@@ -1284,6 +1284,41 @@ struct WatchSessionClientTests {
         #expect(client.hasCatalogForCurrentSession == true)
     }
 
+    @Test("catalogURLForCurrentSession returns the stored catalog for the active session")
+    func catalogURLForCurrentSessionReturnsStoredURL() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        #expect(client.catalogURLForCurrentSession() == nil)
+
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        #expect(client.catalogURLForCurrentSession() == nil)
+
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+        ])
+
+        #expect(client.catalogURLForCurrentSession() == store.catalogURL(for: sessionID))
+    }
+
+    @Test("catalogURLForCurrentSession ignores a catalog stored for another session")
+    func catalogURLForCurrentSessionIgnoresOtherSession() async throws {
+        let (client, _, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let otherID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: activeID).toPropertyList())
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": otherID.uuidString,
+        ])
+
+        #expect(client.catalogURLForCurrentSession() == nil)
+    }
+
     @Test("hasCatalogForCurrentSession becomes true when metadata arrives after the catalog")
     func hasCatalogHandlesCatalogBeforeMetadata() async throws {
         let (client, _, dir) = try makeClientWithCatalogStore()

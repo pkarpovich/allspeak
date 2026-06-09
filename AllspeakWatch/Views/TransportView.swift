@@ -33,6 +33,8 @@ struct TransportView: View {
     }()
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
+    @State private var cinemaSync = WatchCinemaSync(haptics: WatchDeviceHaptics())
+    @State private var syncResetTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -85,10 +87,38 @@ struct TransportView: View {
         HStack(spacing: 14) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "3", prominent: true, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
+            if client.hasCatalogForCurrentSession {
+                syncButton
+            }
             skipButton(icon: Tokens.Icon.skipForward, seconds: "3", prominent: true, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // Cinema sync: listens through the watch mic and matches against the
+    // session catalog. Manual only - one listen per tap, tap again to cancel.
+    // Shows a spinner while listening and flashes checkmark/x before settling
+    // back to the idle glyph (see scheduleSyncReset).
+    private var syncButton: some View {
+        Button(action: handleSync) {
+            ZStack {
+                if let glyph = cinemaSync.state.buttonGlyph {
+                    Image(systemName: glyph)
+                        .font(.system(size: 16, weight: .medium))
+                } else {
+                    ProgressView()
+                }
+            }
+            .foregroundStyle(Tokens.accent)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .frame(width: 44, height: 44)
+        .accessibilityLabel(cinemaSync.state.buttonAccessibilityLabel)
+        .onChange(of: cinemaSync.state) { _, newState in
+            scheduleSyncReset(for: newState)
+        }
     }
 
     private var fineRow: some View {
@@ -184,6 +214,25 @@ struct TransportView: View {
 
     private func handlePlayPause() {
         client.send(.togglePlayPause)
+    }
+
+    private func handleSync() {
+        if cinemaSync.state == .listening {
+            cinemaSync.cancelListening()
+            return
+        }
+        guard let catalogURL = client.catalogURLForCurrentSession() else { return }
+        cinemaSync.tap(catalogURL: catalogURL)
+    }
+
+    private func scheduleSyncReset(for state: WatchCinemaSyncState) {
+        syncResetTask?.cancel()
+        guard state == .sent || state == .failed else { return }
+        syncResetTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            cinemaSync.reset()
+        }
     }
 
     private func handleSkipBackFine() {

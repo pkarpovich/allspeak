@@ -187,6 +187,11 @@ final class WatchSessionClient: NSObject {
         refreshHasCatalogForCurrentSession()
     }
 
+    func catalogURLForCurrentSession() -> URL? {
+        guard let metadata else { return nil }
+        return catalogStore?.catalogURL(for: metadata.sessionID)
+    }
+
     private func refreshHasCatalogForCurrentSession() {
         guard let metadata, let catalogStore else {
             hasCatalogForCurrentSession = false

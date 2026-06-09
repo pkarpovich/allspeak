@@ -206,6 +206,53 @@ struct WatchCinemaSyncTests {
         #expect(haptics.played == [.failure])
     }
 
+    @Test("sync button glyph mapping covers every state")
+    func buttonGlyphMapping() {
+        #expect(WatchCinemaSyncState.idle.buttonGlyph == "waveform.badge.magnifyingglass")
+        #expect(WatchCinemaSyncState.listening.buttonGlyph == nil)
+        #expect(WatchCinemaSyncState.sent.buttonGlyph == "checkmark")
+        #expect(WatchCinemaSyncState.failed.buttonGlyph == "xmark")
+    }
+
+    @Test("sync button accessibility label mapping covers every state")
+    func buttonAccessibilityLabelMapping() {
+        #expect(WatchCinemaSyncState.idle.buttonAccessibilityLabel == "Sync to film")
+        #expect(WatchCinemaSyncState.listening.buttonAccessibilityLabel == "Cancel sync")
+        #expect(WatchCinemaSyncState.sent.buttonAccessibilityLabel == "Synced")
+        #expect(WatchCinemaSyncState.failed.buttonAccessibilityLabel == "Sync failed")
+    }
+
+    @Test("reset returns to idle from sent and failed only")
+    func resetFromTerminalStates() async throws {
+        let sent = makeSync(session: MockMatchingSession(outcome: .match(subtitle: "abs_start=0", offset: 1)))
+        sent.tap(catalogURL: catalogURL())
+        await sent.listenTask?.value
+        #expect(sent.state == .sent)
+        sent.reset()
+        #expect(sent.state == .idle)
+
+        let failed = makeSync(session: MockMatchingSession(outcome: .noMatch))
+        failed.tap(catalogURL: catalogURL())
+        await failed.listenTask?.value
+        #expect(failed.state == .failed)
+        failed.reset()
+        #expect(failed.state == .idle)
+    }
+
+    @Test("reset is a no-op while listening")
+    func resetIgnoredWhileListening() async throws {
+        let session = MockMatchingSession(outcome: nil)
+        let sync = makeSync(session: session)
+
+        sync.tap(catalogURL: catalogURL())
+        #expect(sync.state == .listening)
+
+        sync.reset()
+        #expect(sync.state == .listening)
+
+        sync.cancelListening()
+    }
+
     @Test("tap after a failed attempt starts a fresh listen")
     func tapAfterFailureRestarts() async throws {
         let failing = MockMatchingSession(outcome: .noMatch)
