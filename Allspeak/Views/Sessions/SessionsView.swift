@@ -25,19 +25,13 @@ struct SessionsView: View {
                 }
             }
             .navigationTitle("Sessions")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add session", systemImage: Icons.plus) {
                         isPresentingCreate = true
-                    } label: {
-                        Image(systemName: Icons.plus)
-                            .font(.system(size: 22, weight: .regular))
-                            .foregroundStyle(Tokens.accent)
-                            .frame(width: 44, height: 44)
                     }
-                    .glassEffect(.regular, in: .circle)
-                    .accessibilityLabel("Add session")
+                    .tint(Tokens.accent)
                 }
             }
             .navigationDestination(for: NSManagedObjectID.self) { id in

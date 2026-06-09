@@ -108,6 +108,7 @@ struct PlayerView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $showSyncSheet) {
@@ -154,9 +155,11 @@ struct PlayerView: View {
 
     private func startSync() {
         guard let catalogURL else { return }
-        if syncService == nil {
-            syncService = CinemaSyncService(catalogURL: catalogURL, mapping: mapping)
-        }
+        syncService = CinemaSyncService(
+            catalogURL: catalogURL,
+            mapping: mapping,
+            latencyCompensation: CinemaSyncService.storedLatencyCompensation()
+        )
         showSyncSheet = true
     }
 

@@ -52,10 +52,22 @@ final class CinemaSyncService {
     static let captureMessage =
         "Couldn't start the microphone. Try again."
 
+    static let latencyCompensationDefaultsKey = "cinema.syncLatencyCompensation"
+    static let defaultLatencyCompensation: TimeInterval = 0.9
+    static let maxLatencyCompensation: TimeInterval = 3.0
+
+    static func storedLatencyCompensation(_ defaults: UserDefaults = .standard) -> TimeInterval {
+        guard let stored = defaults.object(forKey: latencyCompensationDefaultsKey) as? Double else {
+            return defaultLatencyCompensation
+        }
+        return min(max(stored, 0), maxLatencyCompensation)
+    }
+
     private(set) var state: CinemaSyncState = .idle
 
     @ObservationIgnored private let catalogURL: URL
     @ObservationIgnored private let mapping: DTWMapping?
+    @ObservationIgnored private let latencyCompensation: TimeInterval
     @ObservationIgnored private let audioSession: AVAudioSessionConfigurable
     @ObservationIgnored private let capture: AudioInputCapturing
     @ObservationIgnored private let makeSession: (URL) throws -> SHSessionMatching
@@ -70,6 +82,7 @@ final class CinemaSyncService {
     init(
         catalogURL: URL,
         mapping: DTWMapping? = nil,
+        latencyCompensation: TimeInterval = 0,
         audioSession: AVAudioSessionConfigurable = AVAudioSession.sharedInstance(),
         capture: AudioInputCapturing = AVAudioEngineCapture(),
         makeSession: @escaping (URL) throws -> SHSessionMatching = CinemaSyncService.makeCatalogSession,
@@ -78,6 +91,7 @@ final class CinemaSyncService {
     ) {
         self.catalogURL = catalogURL
         self.mapping = mapping
+        self.latencyCompensation = latencyCompensation
         self.audioSession = audioSession
         self.capture = capture
         self.makeSession = makeSession
@@ -158,12 +172,13 @@ final class CinemaSyncService {
     func ingestMatch(offset: TimeInterval?) {
         guard case .listening = state else { return }
         teardown()
-        if let offset {
-            let ruOffset = mapping?.ruTime(forEnTime: offset) ?? offset
-            state = .matched(enOffset: offset, ruOffset: ruOffset)
-        } else {
+        guard let offset else {
             state = .noMatch
+            return
         }
+        let enOffset = offset + latencyCompensation
+        let ruOffset = mapping?.ruTime(forEnTime: enOffset) ?? enOffset
+        state = .matched(enOffset: enOffset, ruOffset: ruOffset)
     }
 
     private func handleTimeout() {
