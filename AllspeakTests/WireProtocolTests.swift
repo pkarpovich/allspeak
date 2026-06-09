@@ -20,6 +20,8 @@ struct WireProtocolTests {
             sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000001")!,
             revision: 42
         ),
+        WatchCommand.cinemaMatch(enTime: 0),
+        WatchCommand.cinemaMatch(enTime: 5432.125),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()
@@ -40,6 +42,18 @@ struct WireProtocolTests {
         )
         let plist = try snapshot.toPropertyList()
         #expect(throws: WireCodingError.self) {
+            _ = try WatchCommand(propertyList: plist)
+        }
+    }
+
+    @Test("cinemaMatch payload without enTime fails to decode")
+    func cinemaMatchMissingEnTime() throws {
+        let payload = #"{"kind": "cinemaMatch"}"#.data(using: .utf8)!
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.command.rawValue,
+            WirePayloadKey.payload: payload,
+        ]
+        #expect(throws: DecodingError.self) {
             _ = try WatchCommand(propertyList: plist)
         }
     }

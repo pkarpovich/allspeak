@@ -102,14 +102,17 @@ Constraints (from project memory, non-negotiable):
 
 ### Task 2: Add cinemaMatch command to WireProtocol
 
-- [ ] add `case cinemaMatch(enTime: Double)` to `WatchCommand` with Kind
+- [x] add `case cinemaMatch(enTime: Double)` to `WatchCommand` with Kind
       discriminator, CodingKeys entry, encode/decode branches (follow the
       `seek(time:)` pattern and the file-top checklist comment)
-- [ ] write round-trip coding tests for `cinemaMatch` (encode -> decode ==
+- [x] write round-trip coding tests for `cinemaMatch` (encode -> decode ==
       original; decoding a payload with missing `enTime` fails)
-- [ ] verify existing WireProtocol tests still pass (unknown-kind behavior
+- [x] verify existing WireProtocol tests still pass (unknown-kind behavior
       unchanged)
-- [ ] run tests - must pass before task 3
+- [x] run tests - must pass before task 3
+- + placeholder `case .cinemaMatch: break` added to
+      `PlaybackCoordinator.apply(_:)` (exhaustive switch must compile);
+      Task 3 replaces it with the real routing
 
 ### Task 3: Phone handles cinemaMatch (latency compensation + DTW + seek)
 

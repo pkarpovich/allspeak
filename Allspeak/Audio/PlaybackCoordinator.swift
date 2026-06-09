@@ -600,6 +600,8 @@ final class PlaybackCoordinator {
             controller.setVolume(value)
         case .requestCueBundle:
             break
+        case .cinemaMatch:
+            break
         }
     }
 

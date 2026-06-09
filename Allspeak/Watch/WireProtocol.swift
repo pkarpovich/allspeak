@@ -25,6 +25,11 @@ import Foundation
 //                     revision:)      miss (watch app reset / Application
 //                                     Support cleanup); host clears its
 //                                     dedup key and rebroadcasts the bundle
+//   .cinemaMatch(enTime:)             watch-local ShazamKit match result:
+//                                     absolute English timecode in seconds
+//                                     (abs_start + predicted offset); host
+//                                     adds latency compensation, DTW-maps
+//                                     EN -> RU, then seeks
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -85,6 +90,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case switchTrack(id: UUID)
     case setVolume(Float)
     case requestCueBundle(sessionID: UUID, revision: Int)
+    case cinemaMatch(enTime: Double)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -94,6 +100,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case volume
         case sessionID
         case revision
+        case enTime
     }
 
     private enum Kind: String, Codable {
@@ -105,6 +112,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case switchTrack
         case setVolume
         case requestCueBundle
+        case cinemaMatch
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -132,6 +140,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(Kind.requestCueBundle, forKey: .kind)
             try container.encode(sessionID, forKey: .sessionID)
             try container.encode(revision, forKey: .revision)
+        case .cinemaMatch(let enTime):
+            try container.encode(Kind.cinemaMatch, forKey: .kind)
+            try container.encode(enTime, forKey: .enTime)
         }
     }
 
@@ -158,6 +169,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 sessionID: try container.decode(UUID.self, forKey: .sessionID),
                 revision: try container.decode(Int.self, forKey: .revision)
             )
+        case .cinemaMatch:
+            self = .cinemaMatch(enTime: try container.decode(Double.self, forKey: .enTime))
         }
     }
 }
