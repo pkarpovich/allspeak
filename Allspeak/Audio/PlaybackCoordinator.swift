@@ -173,7 +173,7 @@ final class PlaybackCoordinator {
         self.activeTrackID = selectedTrack?.trackID
         self.catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: snap.uuid, filename: $0) }
         self.dtwMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: snap.uuid, filename: $0) }
-        self.dtwMapping = self.dtwMapURL.flatMap { try? DTWMapping(jsonURL: $0) }
+        self.dtwMapping = await Self.loadDTWMapping(url: self.dtwMapURL)
         self.repository = repository
         self.storage = storage
         self.persistence = persistence
@@ -200,6 +200,13 @@ final class PlaybackCoordinator {
             return candidate
         }
         return storage.audioURL(sessionID: sessionUUID, filename: filename)
+    }
+
+    private static func loadDTWMapping(url: URL?) async -> DTWMapping? {
+        guard let url else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            try? DTWMapping(jsonURL: url)
+        }.value
     }
 
     func startSession(
@@ -292,6 +299,17 @@ final class PlaybackCoordinator {
             return
         }
 
+        let newDTWMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: sessionUUID, filename: $0) }
+        let newDTWMapping: DTWMapping?
+        if newDTWMapURL == dtwMapURL {
+            newDTWMapping = dtwMapping
+        } else {
+            newDTWMapping = await Self.loadDTWMapping(url: newDTWMapURL)
+            guard self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
+                return
+            }
+        }
+
         let selectedTrack: TrackSnap?
         if let activeID = snap.activeTrackID, let match = snap.tracks.first(where: { $0.trackID == activeID }) {
             selectedTrack = match
@@ -306,8 +324,8 @@ final class PlaybackCoordinator {
         let previousTracks = self.tracks
         sessionTitle = snap.name
         catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: sessionUUID, filename: $0) }
-        dtwMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: sessionUUID, filename: $0) }
-        dtwMapping = dtwMapURL.flatMap { try? DTWMapping(jsonURL: $0) }
+        dtwMapURL = newDTWMapURL
+        dtwMapping = newDTWMapping
         tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         activeTrackID = selectedTrack?.trackID
         let tracksChanged = previousTracks.map(\.id) != tracks.map(\.id) || previousActiveTrackID != activeTrackID
