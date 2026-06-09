@@ -99,16 +99,16 @@ This is Phase 2 — Phase 1 (offline assets: `.shazamcatalog` + `.dtwmap.json`) 
 
 ### Task 3: DTWMapping value type with JSON load and bisect lookup
 
-- [ ] create `Allspeak/Sync/DTWMapping.swift` with `struct DTWMapping: Sendable, Equatable`
-- [ ] define `struct Pair: Sendable, Equatable, Codable { let enT: Double; let ruT: Double }` decoded from JSON array form (`[enT, ruT]`) via custom `init(from decoder:)` — array-of-arrays, not object-of-objects
-- [ ] define `struct Payload: Decodable { let film: String; let version: Int; let ru_fps: Double; let en_fps: Double; let precision_s: Double; let pairs: [Pair] }`
-- [ ] implement `init(jsonURL: URL) throws` — JSONDecoder, validate `version == 1`, validate `pairs.count > 0`, validate `pairs` is sorted by `enT` (defensive)
-- [ ] implement `func ruTime(forEnTime en: Double) -> Double` — bisect (`pairs.firstIndex(where:)` or Swift's `BinarySearch` if available; otherwise a manual halving loop) + linear interpolation between neighbours
-- [ ] edge cases: `en` before first pair → return `pairs[0].ruT`; `en` after last pair → return `pairs.last!.ruT`; exact hit → return that pair's `ruT`
-- [ ] write tests using a tiny fixture (10-pair JSON inline in test file) covering: exact hit, between-pair interpolation, before-first clamp, after-last clamp, monotonic ru_t output
-- [ ] write a test loading the real `Masters.dtwmap.json` (bundled as test resource) and asserting `ruTime(forEnTime: 2960.04) ≈ 2937.6 ± 0.1`
-- [ ] write a performance test: 10k random `ruTime(forEnTime:)` calls on the full Masters mapping must complete under 100ms
-- [ ] run tests — must pass before Task 4
+- [x] create `Allspeak/Sync/DTWMapping.swift` with `struct DTWMapping: Sendable, Equatable`
+- [x] define `struct Pair: Sendable, Equatable, Codable { let enT: Double; let ruT: Double }` decoded from JSON array form (`[enT, ruT]`) via custom `init(from decoder:)` — array-of-arrays, not object-of-objects (symmetric `encode(to:)` added too)
+- [x] define `struct Payload: Decodable { let film: String; let version: Int; let ru_fps: Double; let en_fps: Double; let precision_s: Double; let pairs: [Pair] }`
+- [x] implement `init(jsonURL: URL) throws` — delegates to `init(jsonData:)`; JSONDecoder, validate `version == 1`, validate `pairs.count > 0`, validate `pairs` is sorted by `enT` (defensive); throws `DTWMapping.LoadError`
+- [x] implement `func ruTime(forEnTime en: Double) -> Double` — manual halving bisect + linear interpolation between neighbours
+- [x] edge cases: `en` before first pair → return `pairs[0].ruT`; `en` after last pair → return `pairs.last!.ruT`; exact hit → return that pair's `ruT`
+- [x] write tests using a tiny fixture (10-pair JSON inline in test file) covering: exact hit, between-pair interpolation, before-first clamp, after-last clamp, monotonic ru_t output (plus version/empty/notSorted error cases)
+- [x] write a test loading the real `Masters.dtwmap.json` (bundled as test resource at `AllspeakTests/Fixtures/`) and asserting `ruTime(forEnTime: 2960.04) ≈ 2937.6 ± 0.1` (actual 2937.623)
+- [x] write a performance test: 10k random `ruTime(forEnTime:)` calls on the full Masters mapping must complete under 100ms (actual ~44ms)
+- [x] run tests — must pass before Task 4 (11 DTWMapping tests pass; full suite 226 Swift Testing tests pass)
 
 ### Task 4: DTW map file picker in session create/edit UI
 
