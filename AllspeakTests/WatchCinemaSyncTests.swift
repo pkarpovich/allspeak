@@ -63,6 +63,15 @@ struct WatchCinemaSyncTests {
         }
     }
 
+    // Real-time clock the test advances explicitly, so a slow permission
+    // prompt can be simulated as elapsed time between reads.
+    final class ManualClock: @unchecked Sendable {
+        private var offset: TimeInterval = 0
+        private let base = Date(timeIntervalSinceReferenceDate: 2_000)
+        func advance(by seconds: TimeInterval) { offset += seconds }
+        func now() -> Date { base.addingTimeInterval(offset) }
+    }
+
     final class MockHaptics: WatchSyncHapticsPlaying {
         private(set) var played: [WatchSyncHaptic] = []
 
@@ -574,6 +583,31 @@ struct WatchCinemaSyncTests {
         #expect(reports[0]["result"] as? String == "error")
         #expect(reports[0]["listenSeconds"] as? Double == 0)
         #expect(reports[0]["sessionID"] as? String == sessionID.uuidString)
+    }
+
+    @Test("the permission prompt wait does not inflate the reported listen duration")
+    func permissionPromptDoesNotInflateListenSeconds() async throws {
+        let clock = ManualClock()
+        let sessionID = UUID()
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=60", offset: 5))
+        let sender = MockSender()
+        sender.nextReply = Self.snapshotReply(sessionID: sessionID)
+        let sync = makeSync(
+            session: session,
+            sender: sender,
+            checkPermission: {
+                clock.advance(by: 10)
+                return true
+            },
+            now: clock.now
+        )
+
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
+        await sync.listenTask?.value
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["listenSeconds"] as? Double == 0)
     }
 
     @Test("an attempt report carries the sessionID it listened against")

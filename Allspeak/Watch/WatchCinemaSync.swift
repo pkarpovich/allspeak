@@ -180,15 +180,22 @@ final class WatchCinemaSync {
         }
         activeSession = session
         state = .listening
-        listenStartedAt = now()
+        listenStartedAt = nil
         let timeout = timeout
         let checkPermission = checkPermission
         // Permission resolves before the timeout starts: the first-run system
-        // prompt must not eat into (or outlive) the listen window. Denial maps
-        // to .error, which surfaces as failed with the failure haptic.
+        // prompt must not eat into (or outlive) the listen window. The listen
+        // clock starts only once permission resolves, so the prompt wait never
+        // inflates the reported listenSeconds (mirrors the phone's order in
+        // CinemaSyncService.start). The attempt guard stops a superseded
+        // prompt-wait from stamping a newer listen. Denial maps to .error,
+        // which surfaces as failed with the failure haptic.
         listenTask = Task { [weak self] in
             let outcome: WatchCinemaMatchOutcome?
             if await checkPermission() {
+                if let self, self.attemptID == attempt {
+                    self.listenStartedAt = self.now()
+                }
                 outcome = await Self.awaitOutcome(session: session, timeout: timeout)
             } else {
                 outcome = .error
