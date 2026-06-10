@@ -55,7 +55,7 @@ struct CinemaSyncDisplay: Equatable {
 
 struct CinemaSyncView: View {
     @Bindable var service: CinemaSyncService
-    let onSyncResult: (TimeInterval) -> Void
+    let onSyncResult: (CinemaSyncMatch) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -76,8 +76,8 @@ struct CinemaSyncView: View {
         .presentationBackground(Tokens.bgDeep)
         .task { await service.start() }
         .task(id: display) {
-            guard case let .matched(offset) = display.phase else { return }
-            onSyncResult(offset)
+            guard case .matched = display.phase, let match = service.lastMatch else { return }
+            onSyncResult(match)
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
             dismiss()

@@ -623,8 +623,28 @@ final class PlaybackCoordinator {
         return CueBundle(sessionID: sessionUUID, revision: revision, cues: controller.subtitles)
     }
 
-    func applySyncOffset(_ offset: TimeInterval) {
-        controller?.seek(to: offset)
+    func applySyncOffset(
+        _ offset: TimeInterval,
+        enTime: Double? = nil,
+        latencyComp: Double? = nil,
+        absStart: Double? = nil,
+        listenSeconds: Double? = nil
+    ) {
+        guard let controller else { return }
+        let playerBefore = controller.currentTime
+        controller.seek(to: offset)
+        diagnostics.log(.sync(
+            source: .phone,
+            result: .matched,
+            enTime: enTime,
+            ruTime: offset,
+            playerBefore: playerBefore,
+            delta: offset - playerBefore,
+            latencyComp: latencyComp,
+            absStart: absStart,
+            listenSeconds: listenSeconds,
+            error: nil
+        ))
     }
 
     // The stamp identifies the catalog the watch matched against; both sides

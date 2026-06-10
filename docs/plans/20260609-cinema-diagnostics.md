@@ -132,22 +132,29 @@ Design decisions (settled, do not relitigate):
 
 ### Task 3: Log phone-button sync events
 
-- [ ] thread `absStart` through the phone match path: `MatchDelegateProxy`
+- [x] thread `absStart` through the phone match path: `MatchDelegateProxy`
       already computes it - extend its callback to pass
       `(offset: TimeInterval?, absStart: TimeInterval)` and add an
       `absStart` parameter (default 0) to `ingestMatch` so existing tests
-      keep compiling with minimal edits
-- [ ] in the phone seek path (`PlayerView.onSyncResult` ->
+      keep compiling with minimal edits (CinemaSyncService now stores the
+      match diagnostics in `lastMatch: CinemaSyncMatch`; the view passes it
+      to the seek path)
+- [x] in the phone seek path (`PlayerView.onSyncResult` ->
       `PlaybackCoordinator.applySyncOffset`): before seeking read
       `playerBefore = controller.currentTime`, then log
       `sync(source: .phone, result: .matched, enTime:, ruTime:, playerBefore:,
-      delta: ruTime - playerBefore, latencyComp:, absStart:)`
-- [ ] log failed phone attempts too: `noMatch` / `error` / timeout from
+      delta: ruTime - playerBefore, latencyComp:, absStart:)` (applySyncOffset
+      gained optional enTime/latencyComp/absStart/listenSeconds params;
+      CinemaSyncView passes `service.lastMatch` through `onSyncResult`)
+- [x] log failed phone attempts too: `noMatch` / `error` / timeout from
       `CinemaSyncService` state transitions as `sync` events with nil
-      offsets and the failure result
-- [ ] write tests: matched -> full record with correct delta; noMatch ->
-      failure record; no catalog -> nothing logged
-- [ ] run tests - must pass before task 4
+      offsets and the failure result (injected `diagnostics`/`now` into the
+      service; `logSyncFailure` carries latencyComp + listen duration)
+- [x] write tests: matched -> full record with correct delta; noMatch ->
+      failure record; no catalog -> nothing logged (plus timeout, error, and
+      lastMatch coverage; integration + 6 failure-path tests use temp/quiet
+      logs to stay off the shared singleton)
+- [x] run tests - must pass before task 4 (531 tests in 38 suites passed)
 
 ### Task 4: Log watch-originated sync + transport events
 

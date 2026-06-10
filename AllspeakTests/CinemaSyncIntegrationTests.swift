@@ -103,6 +103,9 @@ struct CinemaSyncIntegrationTests {
         // singleton in a different suite, and suite-level .serialized does not
         // serialize across suites.
         let coordinator = PlaybackCoordinator()
+        // applySyncOffset now writes a diagnostics line; keep it inside `root`
+        // instead of the real Documents directory.
+        coordinator.diagnostics = DiagnosticsLog(rootURL: root)
         try await coordinator.startSession(
             sessionID: sessionID,
             repository: repo,

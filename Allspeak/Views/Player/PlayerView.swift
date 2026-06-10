@@ -113,8 +113,14 @@ struct PlayerView: View {
         .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $showSyncSheet) {
             if let syncService {
-                CinemaSyncView(service: syncService) { offset in
-                    PlaybackCoordinator.shared.applySyncOffset(offset)
+                CinemaSyncView(service: syncService) { match in
+                    PlaybackCoordinator.shared.applySyncOffset(
+                        match.ruOffset,
+                        enTime: match.enOffset,
+                        latencyComp: match.latencyComp,
+                        absStart: match.absStart,
+                        listenSeconds: match.listenSeconds
+                    )
                 }
             }
         }
@@ -158,7 +164,8 @@ struct PlayerView: View {
         syncService = CinemaSyncService(
             catalogURL: catalogURL,
             mapping: mapping,
-            latencyCompensation: CinemaSyncService.storedLatencyCompensation()
+            latencyCompensation: CinemaSyncService.storedLatencyCompensation(),
+            diagnostics: PlaybackCoordinator.shared.diagnostics
         )
         showSyncSheet = true
     }

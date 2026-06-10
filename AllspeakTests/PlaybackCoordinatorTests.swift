@@ -1058,6 +1058,16 @@ struct PlaybackCoordinatorTests {
         root.appendingPathComponent("diagnostics", isDirectory: true)
     }
 
+    private static func readJSONLines(_ url: URL) throws -> [[String: Any]] {
+        let text = try String(contentsOf: url, encoding: .utf8)
+        return text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
+            return obj
+        }
+    }
+
     @Test("startSession with a catalog begins a gated-on diagnostics log named after the film")
     func startSessionWithCatalogBeginsDiagnostics() async throws {
         let imported = try await Self.importSession(withCatalog: true)
@@ -1194,6 +1204,69 @@ struct PlaybackCoordinatorTests {
             storage: b.storage
         )
         #expect(try #require(log.currentFileURL).lastPathComponent.hasPrefix("bravo-"))
+    }
+
+    @Test("applySyncOffset logs a matched phone sync record with the player position and delta")
+    func applySyncOffsetLogsMatchedRecord() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let controller = try #require(coordinator.controller)
+        controller.seek(to: 1.5)
+
+        coordinator.applySyncOffset(3.5, enTime: 4.4, latencyComp: 0.9, absStart: 1_800, listenSeconds: 4.0)
+
+        let url = try #require(log.currentFileURL)
+        let record = try #require(Self.readJSONLines(url).last)
+        #expect(record["event"] as? String == "sync")
+        #expect(record["source"] as? String == "phone")
+        #expect(record["result"] as? String == "matched")
+        #expect(record["enTime"] as? Double == 4.4)
+        #expect(record["ruTime"] as? Double == 3.5)
+        #expect(record["playerBefore"] as? Double == 1.5)
+        #expect(record["delta"] as? Double == 2.0)
+        #expect(record["latencyComp"] as? Double == 0.9)
+        #expect(record["absStart"] as? Double == 1_800)
+        #expect(record["listenSeconds"] as? Double == 4.0)
+    }
+
+    @Test("applySyncOffset without a catalog logs nothing")
+    func applySyncOffsetWithoutCatalogLogsNothing() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Quick", audio: audio, subtitles: Self.cues)
+        coordinator.applySyncOffset(2.5, enTime: 3.4, latencyComp: 0.9, absStart: 100, listenSeconds: 2.0)
+
+        let url = try #require(log.currentFileURL)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 }
 
