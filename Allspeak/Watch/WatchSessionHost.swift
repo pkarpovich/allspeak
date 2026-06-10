@@ -10,6 +10,7 @@ final class WatchSessionHost: NSObject {
     private let broadcastGate: SnapshotBroadcastGate
     private var session: WCSession?
     private var lastSentBundleKey: (sessionID: UUID, revision: Int)?
+    private var lastSentCatalogKey: (sessionID: UUID, stamp: String)?
 
     init(
         coordinator: PlaybackCoordinator = .shared,
@@ -64,6 +65,74 @@ final class WatchSessionHost: NSObject {
                 }
             }
         }
+        sendCatalogIfNeeded()
+    }
+
+    func sendCatalogIfNeeded() {
+        guard let session, session.activationState == .activated else { return }
+        let outstanding = session.outstandingFileTransfers.compactMap(\.file.metadata)
+        sendCatalogIfNeeded(outstandingMetadata: outstanding) { url, metadata in
+            session.transferFile(url, metadata: metadata)
+        }
+    }
+
+    func sendCatalogIfNeeded(
+        outstandingMetadata: [[String: Any]],
+        transfer: (URL, [String: Any]) -> Void
+    ) {
+        guard let sessionUUID = coordinator.sessionUUID,
+              let catalogURL = coordinator.catalogURL,
+              let stamp = coordinator.catalogStamp else {
+            // No catalog means the watch deletes its copy on the cleared
+            // metadata - forget the last send so re-attaching identical
+            // content (same stamp) transfers again.
+            lastSentCatalogKey = nil
+            return
+        }
+        if lastSentCatalogKey?.sessionID == sessionUUID, lastSentCatalogKey?.stamp == stamp {
+            return
+        }
+        if Self.hasOutstandingCatalogTransfer(
+            in: outstandingMetadata,
+            sessionID: sessionUUID,
+            stamp: stamp
+        ) {
+            return
+        }
+        transfer(catalogURL, Self.catalogTransferMetadata(sessionID: sessionUUID, stamp: stamp))
+        lastSentCatalogKey = (sessionUUID, stamp)
+    }
+
+    nonisolated static func catalogTransferMetadata(sessionID: UUID, stamp: String) -> [String: Any] {
+        [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": stamp,
+        ]
+    }
+
+    nonisolated static func cueBundleTransferMetadata(sessionID: UUID, revision: Int) -> [String: Any] {
+        [
+            "kind": "cuebundle",
+            "sessionID": sessionID.uuidString,
+            "revision": revision,
+        ]
+    }
+
+    nonisolated static func hasOutstandingCatalogTransfer(
+        in outstanding: [[String: Any]],
+        sessionID: UUID,
+        stamp: String
+    ) -> Bool {
+        outstanding.contains { metadata in
+            metadata["kind"] as? String == "catalog"
+                && metadata["sessionID"] as? String == sessionID.uuidString
+                && metadata["stamp"] as? String == stamp
+        }
+    }
+
+    nonisolated static func isCatalogTransfer(metadata: [String: Any]?) -> Bool {
+        metadata?["kind"] as? String == "catalog"
     }
 
     func broadcast(metadata: SessionMetadata) {
@@ -74,6 +143,7 @@ final class WatchSessionHost: NSObject {
 
     func broadcastSessionEnded() {
         lastSentBundleKey = nil
+        lastSentCatalogKey = nil
         guard let session, session.activationState == .activated else { return }
         try? session.updateApplicationContext(SessionEndedSignal.propertyList())
     }
@@ -91,17 +161,28 @@ final class WatchSessionHost: NSObject {
         } catch {
             return false
         }
-        let meta: [String: Any] = [
-            "sessionID": bundle.sessionID.uuidString,
-            "revision": bundle.revision,
-        ]
-        session.transferFile(url, metadata: meta)
+        session.transferFile(
+            url,
+            metadata: Self.cueBundleTransferMetadata(sessionID: bundle.sessionID, revision: bundle.revision)
+        )
         return true
     }
 
     func handleFileTransferFailure(metadata fileMetadata: [String: Any]?) {
+        guard let fileMetadata else { return }
+        if Self.isCatalogTransfer(metadata: fileMetadata) {
+            guard
+                let sessionIDString = fileMetadata["sessionID"] as? String,
+                let sessionID = UUID(uuidString: sessionIDString),
+                let stamp = fileMetadata["stamp"] as? String,
+                let cached = lastSentCatalogKey,
+                cached.sessionID == sessionID,
+                cached.stamp == stamp
+            else { return }
+            lastSentCatalogKey = nil
+            return
+        }
         guard
-            let fileMetadata,
             let sessionIDString = fileMetadata["sessionID"] as? String,
             let sessionID = UUID(uuidString: sessionIDString),
             let revision = fileMetadata["revision"] as? Int,
@@ -118,6 +199,15 @@ final class WatchSessionHost: NSObject {
             try? await coordinator.switchTrack(to: id)
         case .requestCueBundle(let sessionID, let revision):
             handleCueBundleRequest(sessionID: sessionID, revision: revision)
+        case .requestCatalog(let sessionID, let stamp):
+            handleCatalogRequest(sessionID: sessionID, stamp: stamp)
+        case .cinemaMatch(let sessionID, let stamp, let enTime):
+            // A rejected match (session or catalog stamp moved on mid-listen)
+            // must reply with the empty snapshot: a current-session snapshot
+            // would read as success on the wrist even though nothing seeked.
+            guard coordinator.applyCinemaMatch(sessionID: sessionID, stamp: stamp, enTime: enTime) else {
+                return .empty
+            }
         default:
             coordinator.apply(command)
         }
@@ -131,6 +221,28 @@ final class WatchSessionHost: NSObject {
             lastSentBundleKey = nil
         }
         broadcastCurrentSession()
+    }
+
+    // The watch has no usable copy of the announced catalog (persisting it
+    // failed after WCSession already reported the transfer delivered). Clear
+    // the dedup key so the rebroadcast resends - unless that transfer is
+    // still in flight, in which case the OS will deliver it anyway.
+    func handleCatalogRequest(sessionID: UUID, stamp: String) {
+        let outstanding = session?.outstandingFileTransfers.compactMap(\.file.metadata) ?? []
+        handleCatalogRequest(sessionID: sessionID, stamp: stamp, outstandingMetadata: outstanding)
+        broadcastCurrentSession()
+    }
+
+    func handleCatalogRequest(sessionID: UUID, stamp: String, outstandingMetadata: [[String: Any]]) {
+        guard !Self.hasOutstandingCatalogTransfer(
+            in: outstandingMetadata,
+            sessionID: sessionID,
+            stamp: stamp
+        ) else { return }
+        guard let cached = lastSentCatalogKey,
+              cached.sessionID == sessionID,
+              cached.stamp == stamp else { return }
+        lastSentCatalogKey = nil
     }
 
     func broadcastSnapshot() {
@@ -178,7 +290,9 @@ final class WatchSessionHost: NSObject {
 
 extension WatchSessionHost: WCSessionDelegate {
     nonisolated func session(_: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
-        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        if !Self.isCatalogTransfer(metadata: fileTransfer.file.metadata) {
+            try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        }
         guard error != nil else { return }
         let meta = SendablePayload(value: fileTransfer.file.metadata)
         Task { @MainActor in
@@ -200,10 +314,19 @@ extension WatchSessionHost: WCSessionDelegate {
 
     nonisolated func sessionDidBecomeInactive(_: WCSession) {}
 
+    // A deactivate means the user switched to another paired watch — the new
+    // watch has none of our transfers, so the per-activation dedup keys must
+    // reset before the post-reactivation broadcast or it never gets the files.
     nonisolated func sessionDidDeactivate(_: WCSession) {
         Task { @MainActor in
+            self.resetTransferDedupKeys()
             WCSession.default.activate()
         }
+    }
+
+    func resetTransferDedupKeys() {
+        lastSentBundleKey = nil
+        lastSentCatalogKey = nil
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {

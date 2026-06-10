@@ -84,7 +84,15 @@ and auto-dismisses; with no match within ~6 seconds it offers Try Again / Close.
 The first tap prompts for microphone access (`NSMicrophoneUsageDescription`).
 Playback is not interrupted during the listen — the audio session swaps to
 `.playAndRecord` with `.mixWithOthers` for the sync window and restores
-afterward. The button is hidden for sessions without a catalog. Generating the
+afterward. The button is hidden for sessions without a catalog.
+
+The watch transport screen has the same sync button: the phone transfers the
+session's catalog to the watch, the watch listens through its own mic and
+matches locally (so the phone's audio route — and AirPods playback quality — is
+never touched), then sends the matched English timecode to the phone, which
+applies the same Sync delay and DTW mapping before seeking. Success / failure
+is signalled by a wrist haptic. The watch asks for its own microphone
+permission on the first tap (separate from the phone's). Generating the
 catalog and mapping files is a separate Mac-side step; see
 [`docs/cinema-sync.md`](docs/cinema-sync.md).
 
@@ -92,8 +100,9 @@ catalog and mapping files is a separate Mac-side step; see
 
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
 resync subtitles in a cinema without taking the iPhone out of your pocket.
-The watch is a thin remote: it sends commands (play/pause, skip ±0.5s / ±3s,
-seek-to-cue, set volume) to the iPhone, which remains the audio host.
+The watch is a thin remote: it sends commands (play/pause, skip ±1s / ±3s,
+seek-to-cue, set volume, cinema-sync match) to the iPhone, which remains the
+audio host.
 
 ### Pairing
 
@@ -112,11 +121,12 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
 ### Usage
 
 - **Page 1** (default, transport): a stacked transport layout — a centered
-  pair of ±3s coarse skips on top, a full-width Play/Pause in the middle, a
-  centered pair of ±0.5s fine skips beneath, and a slim volume bar at the
+  pair of ±3s coarse skips on top (with the cinema sync button between them
+  when the session has a catalog), a full-width Play/Pause in the middle, a
+  centered pair of ±1s fine skips beneath, and a slim volume bar at the
   bottom. The skip controls are circular glass buttons whose icon is a curved
-  arrow with the interval inside it (`3`, `0.5`); Play/Pause is a warm-tinted
-  glowing pill. The Digital Crown is wired to playback volume
+  arrow with the interval inside it (`3`, `1`); every skip tap plays a click
+  haptic. Play/Pause is a warm-tinted glowing pill. The Digital Crown is wired to playback volume
   (`AVAudioPlayer.volume`, 0...1, persisted across launches) with haptic ticks
   at each detent; rotating the Crown up raises the volume, and the bar fills in
   proportion to the current level so the on-screen scale always matches the
@@ -129,7 +139,7 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
   the iPhone-side audio. Shows a `Single track` placeholder when the
   session has only one track.
 - Rapid skip taps (fine or coarse) coalesce inside a 250ms window so five
-  quick ±0.5s taps send a single `skip(+2.5)` command rather than five
+  quick ±1s taps send a single `skip(+5)` command rather than five
   round-trips; mixed fine + coarse taps sum in the same window.
 - Between authoritative snapshots from the iPhone, the watch interpolates
   the displayed position locally (`currentTime + (now - serverDate)` while
@@ -137,7 +147,8 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
 
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
-`setVolume(_:)`, and `requestCueBundle(sessionID:revision:)`. Session
+`setVolume(_:)`, `requestCueBundle(sessionID:revision:)`, and
+`cinemaMatch(sessionID:stamp:enTime:)`. Session
 metadata delivered to the watch carries a `tracks: [TrackInfo]` array
 plus the current `activeTrackID`. The wire contract lives in
 `Allspeak/Watch/WireProtocol.swift` — see the header comment there for

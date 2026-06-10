@@ -99,8 +99,10 @@ struct CinemaSyncIntegrationTests {
         )
         persistence.viewContext.refreshAllObjects()
 
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
+        // A fresh instance, not .shared - PlaybackCoordinatorTests mutates the
+        // singleton in a different suite, and suite-level .serialized does not
+        // serialize across suites.
+        let coordinator = PlaybackCoordinator()
         try await coordinator.startSession(
             sessionID: sessionID,
             repository: repo,

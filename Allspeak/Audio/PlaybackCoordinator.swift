@@ -1,4 +1,5 @@
 import CoreData
+import CryptoKit
 import Foundation
 
 // Owns the iPhone-side audio session lifecycle and broadcasts state to two
@@ -40,15 +41,23 @@ final class PlaybackCoordinator {
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
     private(set) var catalogURL: URL?
+    private(set) var catalogStamp: String?
     private(set) var dtwMapURL: URL?
     private(set) var dtwMapping: DTWMapping?
     private var isSwitching: Bool = false
+    // Bumped by every startSession/endSession so an invocation resuming from
+    // its awaits can detect it was superseded and must not publish state.
+    private var loadGeneration: Int = 0
+    // Same idea for overlapping refreshIfActive calls on one session: the
+    // identity guards cannot tell two same-session refreshes apart, so an
+    // older one finishing last would publish stale data.
+    private var refreshGeneration: Int = 0
     private var repository: SessionRepository?
     private var storage: DocumentsStorage = .default
     private var persistence: PersistenceController = .shared
     var liveActivity: LiveActivityCoordinator = LiveActivityCoordinator()
 
-    private init() {}
+    init() {}
 
     func startSession(
         sessionID: NSManagedObjectID,
@@ -60,6 +69,8 @@ final class PlaybackCoordinator {
             return
         }
         endSession()
+        loadGeneration += 1
+        let generation = loadGeneration
 
         let context = persistence.viewContext
         struct TrackSnap: Sendable {
@@ -152,6 +163,16 @@ final class PlaybackCoordinator {
             throw StartError.noCues
         }
 
+        // Hash and DTW loads finish before anything is published, and the
+        // generation check rejects an invocation superseded while suspended -
+        // otherwise rapid session switches let the older start resume and
+        // clobber the newer session's stamp, mapping, and broadcast.
+        let catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: snap.uuid, filename: $0) }
+        let catalogStamp = await Self.catalogStamp(forCatalogAt: catalogURL)
+        let dtwMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: snap.uuid, filename: $0) }
+        let dtwMapping = await Self.loadDTWMapping(url: dtwMapURL)
+        guard generation == loadGeneration else { return }
+
         let controller = AudioController(repository: repository, sessionID: sessionID)
         do {
             try controller.load(audio: audioURL, subtitles: cues, title: snap.name, trackLabel: trackLabel)
@@ -171,9 +192,10 @@ final class PlaybackCoordinator {
         self.sessionTitle = snap.name
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
-        self.catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: snap.uuid, filename: $0) }
-        self.dtwMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: snap.uuid, filename: $0) }
-        self.dtwMapping = await Self.loadDTWMapping(url: self.dtwMapURL)
+        self.catalogURL = catalogURL
+        self.catalogStamp = catalogStamp
+        self.dtwMapURL = dtwMapURL
+        self.dtwMapping = dtwMapping
         self.repository = repository
         self.storage = storage
         self.persistence = persistence
@@ -200,6 +222,15 @@ final class PlaybackCoordinator {
             return candidate
         }
         return storage.audioURL(sessionID: sessionUUID, filename: filename)
+    }
+
+    nonisolated static func catalogStamp(forCatalogAt url: URL?) async -> String? {
+        guard let url else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+            let digest = SHA256.hash(data: data)
+            return "\(url.lastPathComponent):\(digest.map { String(format: "%02x", $0) }.joined())"
+        }.value
     }
 
     private static func loadDTWMapping(url: URL?) async -> DTWMapping? {
@@ -235,6 +266,7 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.catalogURL = nil
+        self.catalogStamp = nil
         self.dtwMapURL = nil
         self.dtwMapping = nil
         self.revision += 1
@@ -251,6 +283,8 @@ final class PlaybackCoordinator {
 
     func refreshIfActive(sessionID: NSManagedObjectID) async {
         guard self.sessionID == sessionID, let controller = controller, let sessionUUID else { return }
+        refreshGeneration += 1
+        let refreshGen = refreshGeneration
 
         let storage = self.storage
         let context = persistence.viewContext
@@ -295,7 +329,7 @@ final class PlaybackCoordinator {
             return
         }
 
-        guard self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
+        guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
             return
         }
 
@@ -305,9 +339,15 @@ final class PlaybackCoordinator {
             newDTWMapping = dtwMapping
         } else {
             newDTWMapping = await Self.loadDTWMapping(url: newDTWMapURL)
-            guard self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
+            guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
                 return
             }
+        }
+
+        let newCatalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: sessionUUID, filename: $0) }
+        let newCatalogStamp = await Self.catalogStamp(forCatalogAt: newCatalogURL)
+        guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
+            return
         }
 
         let selectedTrack: TrackSnap?
@@ -323,7 +363,8 @@ final class PlaybackCoordinator {
         let previousActiveTrackID = self.activeTrackID
         let previousTracks = self.tracks
         sessionTitle = snap.name
-        catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: sessionUUID, filename: $0) }
+        catalogURL = newCatalogURL
+        catalogStamp = newCatalogStamp
         dtwMapURL = newDTWMapURL
         dtwMapping = newDTWMapping
         tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
@@ -355,7 +396,7 @@ final class PlaybackCoordinator {
                 }
                 if snap.activeTrackID != selectedTrack.trackID, let repository {
                     try? await repository.setActiveTrack(sessionID: sessionID, trackID: selectedTrack.trackID)
-                    guard self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
+                    guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
                         return
                     }
                 }
@@ -513,6 +554,7 @@ final class PlaybackCoordinator {
     }
 
     func endSession() {
+        loadGeneration += 1
         guard let controller else { return }
         controller.onTick = nil
         controller.onStateChange = nil
@@ -529,6 +571,7 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.catalogURL = nil
+        self.catalogStamp = nil
         self.dtwMapURL = nil
         self.dtwMapping = nil
         self.repository = nil
@@ -566,7 +609,8 @@ final class PlaybackCoordinator {
             isPlaying: controller.isPlaying,
             currentTime: controller.currentTime,
             tracks: tracks,
-            activeTrackID: activeTrackID
+            activeTrackID: activeTrackID,
+            catalogStamp: catalogStamp
         )
     }
 
@@ -577,6 +621,24 @@ final class PlaybackCoordinator {
 
     func applySyncOffset(_ offset: TimeInterval) {
         controller?.seek(to: offset)
+    }
+
+    // The stamp identifies the catalog the watch matched against; both sides
+    // must hold the same non-nil stamp. A mismatch means the phone replaced or
+    // cleared the catalog after the watch started listening, so the matched
+    // offsets belong to content the session no longer plays. An unstamped
+    // match is never trusted - even when this session has no catalog either
+    // (nil == nil), because it can only come from a watch holding a catalog
+    // this session no longer announces. Returns false so the host can reply
+    // with an empty snapshot and the wrist feels failure instead of a false
+    // success.
+    @discardableResult
+    func applyCinemaMatch(sessionID: UUID, stamp: String?, enTime: Double, defaults: UserDefaults = .standard) -> Bool {
+        guard let controller, sessionUUID == sessionID, let stamp, stamp == catalogStamp else { return false }
+        let enOffset = enTime + CinemaSyncService.storedLatencyCompensation(defaults)
+        let ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
+        controller.seek(to: ruOffset)
+        return true
     }
 
     func apply(_ command: WatchCommand) {
@@ -598,8 +660,10 @@ final class PlaybackCoordinator {
             }
         case .setVolume(let value):
             controller.setVolume(value)
-        case .requestCueBundle:
+        case .requestCueBundle, .requestCatalog:
             break
+        case .cinemaMatch(let sessionID, let stamp, let enTime):
+            applyCinemaMatch(sessionID: sessionID, stamp: stamp, enTime: enTime)
         }
     }
 

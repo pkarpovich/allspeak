@@ -261,17 +261,8 @@ final class MatchDelegateProxy: NSObject, SHSessionDelegate, @unchecked Sendable
             onMatch(nil)
             return
         }
-        let absStart = Self.absStart(fromSubtitle: item.subtitle)
+        let absStart = CinemaMatch.absStart(fromSubtitle: item.subtitle)
         onMatch(absStart + item.predictedCurrentMatchOffset)
-    }
-
-    static func absStart(fromSubtitle subtitle: String?) -> TimeInterval {
-        let prefix = "abs_start="
-        guard let subtitle, subtitle.hasPrefix(prefix),
-              let value = TimeInterval(subtitle.dropFirst(prefix.count)) else {
-            return 0
-        }
-        return value
     }
 }
 

@@ -15,20 +15,23 @@ final class WatchSessionClient: NSObject {
     var lastSnapshot: PlaybackSnapshot?
     var isConnected: Bool = false
     var interpolationTick: UInt64 = 0
+    var hasCatalogForCurrentSession: Bool = false
 
     var tracks: [TrackInfo] { metadata?.tracks ?? [] }
     var activeTrackID: UUID? { metadata?.activeTrackID }
 
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
+    @ObservationIgnored private let catalogStore: CatalogStore?
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var interpolationTimer: Timer?
     @ObservationIgnored private var lastRequestedBundleKey: (sessionID: UUID, revision: Int)?
+    @ObservationIgnored private var lastRequestedCatalogKey: (sessionID: UUID, stamp: String)?
     #if os(watchOS)
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
 
-    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil) {
+    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil, catalogStore: CatalogStore? = nil) {
         self.sender = sender ?? DefaultWatchMessageSender.shared
         if let cache {
             self.cache = cache
@@ -36,6 +39,13 @@ final class WatchSessionClient: NSObject {
             self.cache = try? CueCache(baseURL: baseURL)
         } else {
             self.cache = nil
+        }
+        if let catalogStore {
+            self.catalogStore = catalogStore
+        } else if let baseURL = try? CatalogStore.defaultBaseURL() {
+            self.catalogStore = try? CatalogStore(baseURL: baseURL)
+        } else {
+            self.catalogStore = nil
         }
         super.init()
     }
@@ -156,11 +166,14 @@ final class WatchSessionClient: NSObject {
             self.cues = []
             self.lastSnapshot = nil
             self.lastRequestedBundleKey = nil
+            self.lastRequestedCatalogKey = nil
+            refreshHasCatalogForCurrentSession()
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
         let previous = self.metadata
         self.metadata = meta
+        reconcileStoredCatalog(with: meta)
         let sessionChanged = previous?.sessionID != meta.sessionID
         let revisionChanged = previous?.sessionID == meta.sessionID && previous?.revision != meta.revision
         if sessionChanged || revisionChanged {
@@ -173,6 +186,44 @@ final class WatchSessionClient: NSObject {
         }
         if cues.isEmpty && meta.cueCount > 0 {
             requestCueBundleIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
+        }
+        refreshHasCatalogForCurrentSession()
+        requestCatalogIfMissing()
+    }
+
+    // A stored catalog is usable only while its stamp matches the current
+    // metadata - a late transfer staged before its announcing context arrives
+    // (or after a clear) must not enable the sync button. The stamp must be
+    // non-nil: metadata without a catalogStamp means the phone has no catalog,
+    // so an unstamped stored file must never match it.
+    func catalogURLForCurrentSession() -> URL? {
+        guard let metadata, let catalogStore,
+              let expected = metadata.catalogStamp,
+              catalogStore.stamp(for: metadata.sessionID) == expected
+        else { return nil }
+        return catalogStore.catalogURL(for: metadata.sessionID)
+    }
+
+    private func refreshHasCatalogForCurrentSession() {
+        hasCatalogForCurrentSession = catalogURLForCurrentSession() != nil
+    }
+
+    // The phone identifies catalog content via catalogStamp. A pending
+    // transfer whose stamp the context now announces becomes the active
+    // catalog; an active catalog whose stamp no longer matches is obsolete
+    // (cleared on the phone, or replaced - possibly under the same filename)
+    // and must not be matched against.
+    private func reconcileStoredCatalog(with meta: SessionMetadata) {
+        guard let catalogStore else { return }
+        catalogStore.prunePendings(sessionID: meta.sessionID, keepingStamp: meta.catalogStamp)
+        if let expected = meta.catalogStamp,
+           catalogStore.hasPending(sessionID: meta.sessionID, stamp: expected) {
+            catalogStore.promotePending(sessionID: meta.sessionID, stamp: expected)
+            return
+        }
+        guard catalogStore.catalogURL(for: meta.sessionID) != nil else { return }
+        if meta.catalogStamp == nil || catalogStore.stamp(for: meta.sessionID) != meta.catalogStamp {
+            catalogStore.remove(sessionID: meta.sessionID)
         }
     }
 
@@ -195,6 +246,69 @@ final class WatchSessionClient: NSObject {
         }
     }
 
+    // The phone dedups catalog transfers and WCSession reports success once
+    // the file is handed over - if persisting it here failed, nothing on the
+    // phone side would ever resend. When a context announces a stamp we hold
+    // neither active nor staged, ask the phone to transfer it again. The
+    // host ignores the request while that transfer is still in flight, so
+    // requesting ahead of a pending delivery cannot duplicate it.
+    private func requestCatalogIfMissing() {
+        guard let metadata,
+              let stamp = metadata.catalogStamp,
+              let catalogStore,
+              !hasCatalogForCurrentSession,
+              !catalogStore.hasPending(sessionID: metadata.sessionID, stamp: stamp)
+        else { return }
+        requestCatalogIfNeeded(sessionID: metadata.sessionID, stamp: stamp)
+    }
+
+    private func requestCatalogIfNeeded(sessionID: UUID, stamp: String) {
+        if let last = lastRequestedCatalogKey,
+           last.sessionID == sessionID,
+           last.stamp == stamp {
+            return
+        }
+        lastRequestedCatalogKey = (sessionID, stamp)
+        sendCommand(.requestCatalog(sessionID: sessionID, stamp: stamp)) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if let last = self.lastRequestedCatalogKey,
+                   last.sessionID == sessionID,
+                   last.stamp == stamp {
+                    self.lastRequestedCatalogKey = nil
+                }
+            }
+        }
+    }
+
+    // Activation/reachability recovery. Reconcile first: a failed pending
+    // promotion leaves the file staged with no other retry trigger until
+    // another context happens to arrive, which mid-film can be never.
+    func recoverCatalogIfNeeded() {
+        guard let metadata, let stamp = metadata.catalogStamp else { return }
+        reconcileStoredCatalog(with: metadata)
+        refreshHasCatalogForCurrentSession()
+        if let last = lastRequestedCatalogKey,
+           last.sessionID == metadata.sessionID,
+           last.stamp == stamp {
+            lastRequestedCatalogKey = nil
+        }
+        requestCatalogIfMissing()
+    }
+
+    // Persisting a delivered transfer failed, but WCSession already reported
+    // it handed over - the phone will never resend unprompted, and the dedup
+    // key set when it was requested would block asking again. Drop the key so
+    // the next context (or recovery trigger) can re-request.
+    private func rearmCatalogRequest(sessionID: UUID, stamp: String?) {
+        guard let stamp,
+              let last = lastRequestedCatalogKey,
+              last.sessionID == sessionID,
+              last.stamp == stamp
+        else { return }
+        lastRequestedCatalogKey = nil
+    }
+
     private func retryPendingCueBundleRequestIfNeeded() {
         guard cues.isEmpty,
               let meta = metadata,
@@ -214,7 +328,11 @@ final class WatchSessionClient: NSObject {
     }
 
     func handleReceivedFile(data: Data?, metadata fileMetadata: [String: Any]) {
-        _ = fileMetadata
+        if fileMetadata["kind"] as? String == "catalog" {
+            handleReceivedCatalog(data: data, metadata: fileMetadata)
+            completePendingBackgroundTasks()
+            return
+        }
         guard let data, let bundle = try? CueBundle(compressed: data) else {
             completePendingBackgroundTasks()
             return
@@ -242,12 +360,53 @@ final class WatchSessionClient: NSObject {
                     isPlaying: current.isPlaying,
                     currentTime: current.currentTime,
                     tracks: current.tracks,
-                    activeTrackID: current.activeTrackID
+                    activeTrackID: current.activeTrackID,
+                    catalogStamp: current.catalogStamp
                 )
                 self.lastSnapshot = nil
             }
         }
         completePendingBackgroundTasks()
+    }
+
+    private func handleReceivedCatalog(data: Data?, metadata fileMetadata: [String: Any]) {
+        guard let sessionIDString = fileMetadata["sessionID"] as? String,
+              let sessionID = UUID(uuidString: sessionIDString),
+              let catalogStore
+        else { return }
+        let stamp = fileMetadata["stamp"] as? String
+        guard let data else {
+            rearmCatalogRequest(sessionID: sessionID, stamp: stamp)
+            return
+        }
+        // A transfer whose stamp does not match the current metadata is either
+        // stale or a replacement racing ahead of its announcing context - the
+        // phone will not resend it unprompted, so it is staged (not discarded)
+        // and must not clobber the active catalog. Reconcile promotes it when
+        // the matching context arrives.
+        if let current = metadata, current.sessionID == sessionID, current.catalogStamp != stamp {
+            // An unstamped mismatched transfer can never be promoted (promote
+            // requires a context announcing its stamp), so only stamped ones
+            // are worth staging.
+            if let stamp {
+                catalogStore.stagePending(data: data, sessionID: sessionID, stamp: stamp)
+                if !catalogStore.hasPending(sessionID: sessionID, stamp: stamp) {
+                    rearmCatalogRequest(sessionID: sessionID, stamp: stamp)
+                }
+            }
+        } else {
+            do {
+                try catalogStore.save(data: data, sessionID: sessionID, stamp: stamp)
+            } catch {
+                rearmCatalogRequest(sessionID: sessionID, stamp: stamp)
+            }
+        }
+        var keep: Set<UUID> = [sessionID]
+        if let current = metadata?.sessionID {
+            keep.insert(current)
+        }
+        catalogStore.pruneStale(keeping: keep)
+        refreshHasCatalogForCurrentSession()
     }
 
     #if os(watchOS)
@@ -287,7 +446,8 @@ final class WatchSessionClient: NSObject {
             isPlaying: snapshot.isPlaying,
             currentTime: snapshot.currentTime,
             tracks: current.tracks,
-            activeTrackID: snapshot.activeTrackID ?? current.activeTrackID
+            activeTrackID: snapshot.activeTrackID ?? current.activeTrackID,
+            catalogStamp: current.catalogStamp
         )
     }
 }
@@ -303,6 +463,7 @@ extension WatchSessionClient: WCSessionDelegate {
             self.isConnected = reachable
             if reachable {
                 self.retryPendingCueBundleRequestIfNeeded()
+                self.recoverCatalogIfNeeded()
             }
         }
     }
@@ -313,6 +474,7 @@ extension WatchSessionClient: WCSessionDelegate {
             self.isConnected = reachable
             if reachable {
                 self.retryPendingCueBundleRequestIfNeeded()
+                self.recoverCatalogIfNeeded()
             }
         }
     }

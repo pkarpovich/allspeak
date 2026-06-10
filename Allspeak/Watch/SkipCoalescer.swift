@@ -38,3 +38,29 @@ final class SkipCoalescer {
         pending = 0
     }
 }
+
+// Transport skip buttons: fixed step sizes plus a click haptic on every tap,
+// so each press is felt without looking at the screen in a dark hall.
+@MainActor
+final class TransportSkipper {
+    static let fineStep: Double = 1.0
+    static let coarseStep: Double = 3.0
+
+    private let coalescer: SkipCoalescer
+    private let haptics: any WatchSyncHapticsPlaying
+
+    init(coalescer: SkipCoalescer, haptics: any WatchSyncHapticsPlaying) {
+        self.coalescer = coalescer
+        self.haptics = haptics
+    }
+
+    func backFine() { skip(-Self.fineStep) }
+    func forwardFine() { skip(Self.fineStep) }
+    func backCoarse() { skip(-Self.coarseStep) }
+    func forwardCoarse() { skip(Self.coarseStep) }
+
+    private func skip(_ delta: Double) {
+        haptics.play(.click)
+        coalescer.accumulate(delta)
+    }
+}
