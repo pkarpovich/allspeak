@@ -1267,6 +1267,97 @@ struct WatchSessionHostTests {
         }
         #expect(sends.count == 1)
     }
+
+    private func makeTempRoot() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func isoDate(_ iso: String) -> Date {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: iso)!
+    }
+
+    private func readLines(_ url: URL) throws -> [String] {
+        try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
+    private func makeDiagnosticsHost() -> (WatchSessionHost, DiagnosticsLog, URL) {
+        let root = makeTempRoot()
+        let log = DiagnosticsLog(rootURL: root, now: { self.isoDate("2026-06-12T19:43:02.000Z") })
+        let coordinator = PlaybackCoordinator()
+        coordinator.endSession()
+        let host = WatchSessionHost(coordinator: coordinator)
+        host.diagnostics = log
+        return (host, log, root)
+    }
+
+    @Test("handleReceivedUserInfo logs a well-formed syncAttempt as a watch_attempt event")
+    func receivedSyncAttemptLogsWatchEvent() throws {
+        let (host, log, root) = makeDiagnosticsHost()
+        defer { try? FileManager.default.removeItem(at: root) }
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+
+        host.handleReceivedUserInfo([
+            "kind": "syncAttempt",
+            "result": "matched",
+            "listenSeconds": 3.5,
+        ])
+
+        let url = try #require(log.currentFileURL)
+        #expect(try readLines(url) == [
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"matched","listenSeconds":3.5}"#
+        ])
+    }
+
+    @Test("handleReceivedUserInfo carries the error message when present")
+    func receivedSyncAttemptLogsError() throws {
+        let (host, log, root) = makeDiagnosticsHost()
+        defer { try? FileManager.default.removeItem(at: root) }
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+
+        host.handleReceivedUserInfo([
+            "kind": "syncAttempt",
+            "result": "error",
+            "listenSeconds": 2.0,
+            "error": "mic denied",
+        ])
+
+        let url = try #require(log.currentFileURL)
+        #expect(try readLines(url) == [
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"error","listenSeconds":2,"error":"mic denied"}"#
+        ])
+    }
+
+    @Test("handleReceivedUserInfo ignores payloads whose kind is not syncAttempt")
+    func receivedNonAttemptIgnored() throws {
+        let (host, log, root) = makeDiagnosticsHost()
+        defer { try? FileManager.default.removeItem(at: root) }
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+
+        host.handleReceivedUserInfo(["kind": "somethingElse", "result": "matched", "listenSeconds": 1.0])
+
+        #expect(log.currentFileURL.map { FileManager.default.fileExists(atPath: $0.path) } != true)
+    }
+
+    @Test("handleReceivedUserInfo ignores malformed syncAttempt payloads")
+    func receivedMalformedAttemptIgnored() throws {
+        let (host, log, root) = makeDiagnosticsHost()
+        defer { try? FileManager.default.removeItem(at: root) }
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+
+        host.handleReceivedUserInfo(["kind": "syncAttempt", "listenSeconds": 1.0])
+        host.handleReceivedUserInfo(["kind": "syncAttempt", "result": "bogus", "listenSeconds": 1.0])
+        host.handleReceivedUserInfo(["kind": "syncAttempt", "result": "matched"])
+
+        #expect(log.currentFileURL.map { FileManager.default.fileExists(atPath: $0.path) } != true)
+    }
 }
 
 #endif

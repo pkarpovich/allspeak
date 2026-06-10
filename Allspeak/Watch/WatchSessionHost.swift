@@ -8,6 +8,7 @@ final class WatchSessionHost: NSObject {
 
     private let coordinator: PlaybackCoordinator
     private let broadcastGate: SnapshotBroadcastGate
+    var diagnostics: DiagnosticsLog = .shared
     private var session: WCSession?
     private var lastSentBundleKey: (sessionID: UUID, revision: Int)?
     private var lastSentCatalogKey: (sessionID: UUID, stamp: String)?
@@ -214,6 +215,18 @@ final class WatchSessionHost: NSObject {
         return coordinator.currentSnapshot()
     }
 
+    // Watch attempt reports arrive over transferUserInfo. A successful match
+    // also produces a phone-side `sync` event (from applyCinemaMatch); the two
+    // are joined by timestamp during analysis. Malformed payloads are ignored.
+    func handleReceivedUserInfo(_ userInfo: [String: Any]) {
+        guard userInfo["kind"] as? String == "syncAttempt" else { return }
+        guard let resultRaw = userInfo["result"] as? String,
+              let result = DiagnosticsEvent.MatchResult(rawValue: resultRaw),
+              let listenSeconds = userInfo["listenSeconds"] as? Double else { return }
+        let error = userInfo["error"] as? String
+        diagnostics.log(.watchAttempt(result: result, listenSeconds: listenSeconds, error: error))
+    }
+
     func handleCueBundleRequest(sessionID: UUID, revision: Int) {
         if let cached = lastSentBundleKey,
            cached.sessionID == sessionID,
@@ -338,6 +351,13 @@ extension WatchSessionHost: WCSessionDelegate {
             } else {
                 self.broadcastSessionEnded()
             }
+        }
+    }
+
+    nonisolated func session(_: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        let payload = SendablePayload(value: userInfo)
+        Task { @MainActor in
+            self.handleReceivedUserInfo(payload.value ?? [:])
         }
     }
 

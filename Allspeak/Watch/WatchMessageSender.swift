@@ -8,6 +8,7 @@ protocol WatchMessageSender: AnyObject, Sendable {
         replyHandler: @escaping @Sendable ([String: Any]) -> Void,
         errorHandler: @escaping @Sendable (Error) -> Void
     )
+    func transferUserInfo(_ userInfo: [String: Any])
 }
 
 final class DefaultWatchMessageSender: NSObject, WatchMessageSender, @unchecked Sendable {
@@ -27,6 +28,11 @@ final class DefaultWatchMessageSender: NSObject, WatchMessageSender, @unchecked 
             return
         }
         WCSession.default.sendMessage(message, replyHandler: replyHandler, errorHandler: errorHandler)
+    }
+
+    func transferUserInfo(_ userInfo: [String: Any]) {
+        guard WCSession.default.activationState == .activated else { return }
+        WCSession.default.transferUserInfo(userInfo)
     }
 }
 

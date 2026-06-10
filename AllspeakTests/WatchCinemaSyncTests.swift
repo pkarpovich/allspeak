@@ -31,6 +31,7 @@ struct WatchCinemaSyncTests {
         var nextError: Error?
         var nextReply: [String: Any] = [:]
         private(set) var sentMessages: [[String: Any]] = []
+        private(set) var sentUserInfos: [[String: Any]] = []
 
         func send(
             message: [String: Any],
@@ -43,6 +44,22 @@ struct WatchCinemaSyncTests {
             } else {
                 replyHandler(nextReply)
             }
+        }
+
+        func transferUserInfo(_ userInfo: [String: Any]) {
+            sentUserInfos.append(userInfo)
+        }
+    }
+
+    // First now() read (listen start) returns base; every later read returns
+    // base + 5, so an attempt that reaches handleOutcome measures a 5s listen
+    // window regardless of how many times the elapsed time is sampled.
+    final class StepClock: @unchecked Sendable {
+        private var reads = 0
+        private let base = Date(timeIntervalSinceReferenceDate: 1_000)
+        func now() -> Date {
+            defer { reads += 1 }
+            return base.addingTimeInterval(reads == 0 ? 0 : 5)
         }
     }
 
@@ -77,14 +94,16 @@ struct WatchCinemaSyncTests {
         sender: MockSender = MockSender(),
         haptics: MockHaptics = MockHaptics(),
         checkPermission: @escaping @Sendable () async -> Bool = { true },
-        timeout: Duration = .seconds(60)
+        timeout: Duration = .seconds(60),
+        now: @escaping () -> Date = { Date() }
     ) -> WatchCinemaSync {
         WatchCinemaSync(
             makeSession: { _ in session },
             sender: sender,
             haptics: haptics,
             checkPermission: checkPermission,
-            timeout: timeout
+            timeout: timeout,
+            now: now
         )
     }
 
@@ -441,5 +460,121 @@ struct WatchCinemaSyncTests {
         await sync.listenTask?.value
         #expect(sync.state == .sent)
         #expect(sentCommands(sender).count == 2)
+    }
+
+    private func attemptReports(_ sender: MockSender) -> [[String: Any]] {
+        sender.sentUserInfos.filter { $0["kind"] as? String == "syncAttempt" }
+    }
+
+    @Test("a match transfers a matched attempt report with the listen duration")
+    func matchSendsAttemptReport() async throws {
+        let sessionID = UUID()
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=1800", offset: 42.5))
+        let sender = MockSender()
+        sender.nextReply = Self.snapshotReply(sessionID: sessionID)
+        let sync = makeSync(session: session, sender: sender, now: StepClock().now)
+
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
+        await sync.listenTask?.value
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["result"] as? String == "matched")
+        #expect(reports[0]["listenSeconds"] as? Double == 5)
+        #expect(reports[0]["error"] == nil)
+    }
+
+    @Test("a noMatch transfers a noMatch attempt report")
+    func noMatchSendsAttemptReport() async throws {
+        let session = MockMatchingSession(outcome: .noMatch)
+        let sender = MockSender()
+        let sync = makeSync(session: session, sender: sender, now: StepClock().now)
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
+        await sync.listenTask?.value
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["result"] as? String == "noMatch")
+        #expect(reports[0]["listenSeconds"] as? Double == 5)
+    }
+
+    @Test("a timeout transfers a timeout attempt report")
+    func timeoutSendsAttemptReport() async throws {
+        let session = MockMatchingSession(outcome: nil)
+        let sender = MockSender()
+        let sync = makeSync(session: session, sender: sender, timeout: .milliseconds(50), now: StepClock().now)
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
+        await sync.listenTask?.value
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["result"] as? String == "timeout")
+        #expect(reports[0]["listenSeconds"] as? Double == 5)
+    }
+
+    @Test("a session error transfers an error attempt report")
+    func errorSendsAttemptReport() async throws {
+        let session = MockMatchingSession(outcome: .error)
+        let sender = MockSender()
+        let sync = makeSync(session: session, sender: sender, now: StepClock().now)
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
+        await sync.listenTask?.value
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["result"] as? String == "error")
+    }
+
+    @Test("denied permission transfers an error attempt report")
+    func deniedPermissionSendsAttemptReport() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=60", offset: 5))
+        let sender = MockSender()
+        let sync = makeSync(session: session, sender: sender, checkPermission: { false })
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
+        await sync.listenTask?.value
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["result"] as? String == "error")
+    }
+
+    @Test("a second tap that cancels the listen transfers no attempt report")
+    func cancelSendsNoAttemptReport() async throws {
+        let session = MockMatchingSession(outcome: nil)
+        let sender = MockSender()
+        let sync = makeSync(session: session, sender: sender)
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
+        #expect(sync.state == .listening)
+        let task = sync.listenTask
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
+        await task?.value
+
+        #expect(attemptReports(sender).isEmpty)
+    }
+
+    @Test("cancel during the permission prompt transfers no attempt report")
+    func cancelDuringPermissionSendsNoAttemptReport() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=0", offset: 1))
+        let sender = MockSender()
+        let sync = makeSync(
+            session: session,
+            sender: sender,
+            checkPermission: {
+                try? await Task.sleep(for: .seconds(60))
+                return true
+            }
+        )
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
+        let task = sync.listenTask
+        sync.cancelListening()
+        await task?.value
+
+        #expect(attemptReports(sender).isEmpty)
     }
 }

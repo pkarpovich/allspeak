@@ -24,6 +24,8 @@ struct WatchSessionClientTests {
                 errorHandler(nextError)
             }
         }
+
+        func transferUserInfo(_: [String: Any]) {}
     }
 
     private func makeClient() throws -> (WatchSessionClient, MockSender, URL) {

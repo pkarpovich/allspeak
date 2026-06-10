@@ -187,19 +187,31 @@ Design decisions (settled, do not relitigate):
 
 ### Task 5: Watch attempt reports over transferUserInfo
 
-- [ ] in `AllspeakWatch/WatchCinemaSync.swift` send a report after EVERY
-      attempt via `WCSession.transferUserInfo` (queued delivery - arrives
+- [x] in `Allspeak/Watch/WatchCinemaSync.swift` (file lives under `Allspeak/Watch/`,
+      shared into both the iOS and watch targets - not `AllspeakWatch/`) send a
+      report after EVERY attempt via `transferUserInfo` (queued delivery - arrives
       even if the phone is briefly unreachable):
       `["kind": "syncAttempt", "result": matched|noMatch|timeout|error,
-      "listenSeconds": Double, "error": String?]` - inject the sender
-      (extend the existing command-sender protocol) so tests can capture it
-- [ ] in `WatchSessionHost` implement
-      `session(_:didReceiveUserInfo:)`, route `kind == "syncAttempt"` to
-      `DiagnosticsLog.shared.log(.watchAttempt(...))`
-- [ ] write tests: watch side - report sent for matched, noMatch, timeout,
-      error, cancel sends nothing; phone side - userInfo parsing (well-formed,
-      malformed ignored), event logged
-- [ ] run tests - must pass before task 6
+      "listenSeconds": Double]` - extended the `WatchMessageSender` protocol with
+      `transferUserInfo(_:)` so tests capture it; `reportAttempt` fires inside
+      `handleOutcome` after the attempt-ID guard, so cancels send nothing. Listen
+      duration measured via an injected `now` clock (stamped at `state=.listening`).
+      DESIGN NOTE: the watch shares this file with the watch target, where the
+      iOS-only `DiagnosticsEvent` type does not exist; `result` is emitted as a
+      raw `String` literal mirroring `DiagnosticsEvent.MatchResult` rather than
+      importing it. The `error` key is omitted (the watch has no error detail;
+      `result` already distinguishes the failure kind).
+- [x] in `WatchSessionHost` implemented `session(_:didReceiveUserInfo:)` (hops to
+      MainActor) routing `kind == "syncAttempt"` through a testable
+      `handleReceivedUserInfo(_:)` to `diagnostics.log(.watchAttempt(...))`;
+      `diagnostics` is an injectable `var` (defaults to `.shared`, mirroring
+      `PlaybackCoordinator.diagnostics`); malformed payloads are ignored
+- [x] write tests: watch side - report sent for matched, noMatch, timeout,
+      error (incl. denied permission), cancel and cancel-during-permission send
+      nothing; phone side - well-formed parsing (with/without error message),
+      wrong kind ignored, malformed (missing/bogus fields) ignored
+- [x] run tests - must pass before task 6 (full iOS suite: 546 tests in 38
+      suites passed)
 
 ### Task 6: Verify acceptance criteria
 

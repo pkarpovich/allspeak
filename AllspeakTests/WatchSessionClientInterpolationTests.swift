@@ -199,5 +199,7 @@ struct WatchSessionClientInterpolationTests {
             replyHandler _: @escaping @Sendable ([String: Any]) -> Void,
             errorHandler _: @escaping @Sendable (Error) -> Void
         ) {}
+
+        func transferUserInfo(_: [String: Any]) {}
     }
 }

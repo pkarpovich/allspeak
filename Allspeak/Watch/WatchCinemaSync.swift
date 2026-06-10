@@ -111,9 +111,11 @@ final class WatchCinemaSync {
     @ObservationIgnored private let haptics: any WatchSyncHapticsPlaying
     @ObservationIgnored private let checkPermission: @Sendable () async -> Bool
     @ObservationIgnored private let timeout: Duration
+    @ObservationIgnored private let now: () -> Date
 
     @ObservationIgnored private var activeSession: (any WatchCinemaMatching)?
     @ObservationIgnored private(set) var listenTask: Task<Void, Never>?
+    @ObservationIgnored private var listenStartedAt: Date?
     // Bumped on every start/cancel so late completions from a superseded
     // attempt cannot flip state or play haptics for the current one.
     @ObservationIgnored private var attemptID = 0
@@ -125,13 +127,15 @@ final class WatchCinemaSync {
         haptics: any WatchSyncHapticsPlaying,
         checkPermission: @escaping @Sendable () async -> Bool
             = { await WatchCinemaSync.requestMicrophonePermission() },
-        timeout: Duration = .seconds(8)
+        timeout: Duration = .seconds(8),
+        now: @escaping () -> Date = { Date() }
     ) {
         self.makeSession = makeSession
         self.sender = sender
         self.haptics = haptics
         self.checkPermission = checkPermission
         self.timeout = timeout
+        self.now = now
     }
 
     func tap(catalogURL: URL, sessionID: UUID, stamp: String?) {
@@ -172,6 +176,7 @@ final class WatchCinemaSync {
         }
         activeSession = session
         state = .listening
+        listenStartedAt = now()
         let timeout = timeout
         let checkPermission = checkPermission
         // Permission resolves before the timeout starts: the first-run system
@@ -228,6 +233,8 @@ final class WatchCinemaSync {
         guard attempt == attemptID, state == .listening else { return }
         activeSession = nil
         listenTask = nil
+        let listenSeconds = listenStartedAt.map { now().timeIntervalSince($0) } ?? 0
+        reportAttempt(result: Self.result(for: outcome), listenSeconds: listenSeconds)
         switch outcome {
         case .match(let subtitle, let offset):
             let enTime = CinemaMatch.absStart(fromSubtitle: subtitle) + offset
@@ -236,6 +243,30 @@ final class WatchCinemaSync {
             state = .failed
             haptics.play(.failure)
         }
+    }
+
+    // Raw strings mirror DiagnosticsEvent.MatchResult on the phone; that type
+    // lives in the iOS-only Diagnostics module, so this watch-shared file keeps
+    // the wire contract as literals rather than importing it.
+    private static func result(for outcome: WatchCinemaMatchOutcome?) -> String {
+        switch outcome {
+        case .match: return "matched"
+        case .noMatch: return "noMatch"
+        case .error: return "error"
+        case nil: return "timeout"
+        }
+    }
+
+    // Queued (transferUserInfo) delivery so a failed/successful attempt is
+    // recorded by the phone's diagnostics log even if the phone was briefly
+    // unreachable. A cancelled attempt never reaches here (handleOutcome's
+    // guard returns first), so cancels report nothing.
+    private func reportAttempt(result: String, listenSeconds: Double) {
+        sender.transferUserInfo([
+            "kind": "syncAttempt",
+            "result": result,
+            "listenSeconds": listenSeconds,
+        ])
     }
 
     // Success only when the phone's reply snapshot is for the session we
