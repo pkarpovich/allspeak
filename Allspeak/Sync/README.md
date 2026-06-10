@@ -26,7 +26,7 @@ they differ only in where the listening happens.
    (`CinemaMatch.swift`, shared with the watch target) reconstructs the absolute
    English position as `abs_start + offset`. Subtitles without the marker fall back
    to `abs_start = 0`. On the watch this absolute EN time is sent to the phone as
-   `WatchCommand.cinemaMatch(sessionID:enTime:)` — the DTW map stays phone-only.
+   `WatchCommand.cinemaMatch(sessionID:stamp:enTime:)` — the DTW map stays phone-only.
 3. **Compensate latency** — the matched offset is anchored to when the mic *captured*
    the audio, but the seek only becomes audible after ShazamKit processing, MainActor
    hops, the SwiftUI render, and `AVAudioPlayer` start. The cinema keeps playing during
@@ -36,7 +36,7 @@ they differ only in where the listening happens.
    default `0.9s`, clamped `0...3s`); `PlayerView` reads it via
    `CinemaSyncService.storedLatencyCompensation()` each time a sync starts.
    Watch-triggered matches are compensated on the phone too —
-   `PlaybackCoordinator.applyCinemaMatch(sessionID:enTime:)` adds the same stored value —
+   `PlaybackCoordinator.applyCinemaMatch(sessionID:stamp:enTime:)` adds the same stored value —
    so one Settings slider covers both entry points (the extra WCSession hop is
    absorbed by it as well).
 4. **Map EN → RU** — `DTWMapping.ruTime(forEnTime:)` looks up the Russian-dub timecode
@@ -46,7 +46,7 @@ they differ only in where the listening happens.
    through `CinemaSyncView.onSyncResult` → `PlaybackCoordinator.applySyncOffset(_:)` →
    `AudioController.seek(to:)`. Watch: `WatchSessionHost` dispatches the received
    `cinemaMatch` command to `PlaybackCoordinator.apply(_:)` →
-   `applyCinemaMatch(sessionID:enTime:)`, which compensates, maps, and calls the same
+   `applyCinemaMatch(sessionID:stamp:enTime:)`, which compensates, maps, and calls the same
    `AudioController.seek(to:)`. The carried offset is `ruOffset`, so the dub lands on
    the DTW-mapped Russian time. Playback is `AVAudioPlayer`, not `AVPlayer` — there is
    no `CMTime` seek here.
@@ -99,14 +99,28 @@ The watch triggers the same sync without touching the phone's mic or audio route
 
 - The phone transfers the session's `.shazamcatalog` to the watch
   (`WatchSessionHost.sendCatalogIfNeeded`, `WCSession.transferFile` with
-  `kind: "catalog"` metadata); the watch stores it via `CatalogStore` at
-  `Documents/catalogs/<sessionID>.shazamcatalog`.
+  `kind: "catalog"` metadata and a content `stamp`); the watch stores it via
+  `CatalogStore` at `Documents/catalogs/<sessionID>.shazamcatalog` and drops it
+  when the `catalogStamp` in session metadata stops matching (catalog cleared
+  or replaced on the phone). A transfer whose stamp does not match the current
+  metadata is staged as a pending file keyed by its stamp and promoted once a
+  context announcing that stamp arrives (retried on session activation and
+  reachability recovery if the promotion fails). If the watch ends up with
+  neither an active nor a staged copy of an announced catalog (persisting it
+  failed after the transfer was already delivered), it sends
+  `WatchCommand.requestCatalog(sessionID:stamp:)` and the phone resends.
 - `WatchCinemaSync` (shared file, `../Watch/WatchCinemaSync.swift`) wraps
   `SHManagedSession(catalog:)`, matches on the watch, and sends
-  `WatchCommand.cinemaMatch(sessionID:enTime:)` with the absolute English time
+  `WatchCommand.cinemaMatch(sessionID:stamp:enTime:)` with the absolute English time
   (`CinemaMatch.absStart + predictedCurrentMatchOffset`).
-- `PlaybackCoordinator.applyCinemaMatch(sessionID:enTime:)` adds the stored Sync delay,
-  maps EN → RU via the same `DTWMapping` (identity without one), and seeks.
+- `PlaybackCoordinator.applyCinemaMatch(sessionID:stamp:enTime:)` validates the
+  session and the catalog stamp the watch matched against (both stamps must be
+  non-nil and equal - a mismatch or missing stamp means the catalog was
+  replaced or cleared mid-listen, or the watch matched against a catalog this
+  session never announced; the match is rejected and the
+  reply is an empty snapshot so the watch surfaces failure), then adds the
+  stored Sync delay, maps EN → RU via the same `DTWMapping` (identity without
+  one), and seeks.
 
 The DTW map never leaves the phone, and the manual-only rule applies on the watch
 identically — listening starts only on an explicit button tap and the managed

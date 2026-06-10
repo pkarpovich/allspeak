@@ -25,14 +25,27 @@ import Foundation
 //                     revision:)      miss (watch app reset / Application
 //                                     Support cleanup); host clears its
 //                                     dedup key and rebroadcasts the bundle
-//   .cinemaMatch(sessionID:enTime:)   watch-local ShazamKit match result:
-//                                     absolute English timecode in seconds
+//   .requestCatalog(sessionID:,       watch-initiated catalog resend when a
+//                   stamp:)           context announces a stamp the watch has
+//                                     neither active nor staged (watch-side
+//                                     persistence failed or the file was
+//                                     lost; WCSession reports success once
+//                                     delivered, so the phone would never
+//                                     resend on its own); host clears its
+//                                     dedup key unless that transfer is
+//                                     still in flight, then rebroadcasts
+//   .cinemaMatch(sessionID:stamp:     watch-local ShazamKit match result:
+//                enTime:)             absolute English timecode in seconds
 //                                     (abs_start + predicted offset); host
 //                                     adds latency compensation, DTW-maps
 //                                     EN -> RU, then seeks. sessionID guards
 //                                     against a stale match seeking a
-//                                     different session than the one the
-//                                     watch matched against
+//                                     different session; stamp is the catalog
+//                                     stamp the watch matched against, so a
+//                                     match made just before the phone
+//                                     replaced or cleared the catalog is
+//                                     rejected instead of seeking on offsets
+//                                     from the old catalog
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -93,7 +106,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case switchTrack(id: UUID)
     case setVolume(Float)
     case requestCueBundle(sessionID: UUID, revision: Int)
-    case cinemaMatch(sessionID: UUID, enTime: Double)
+    case requestCatalog(sessionID: UUID, stamp: String)
+    case cinemaMatch(sessionID: UUID, stamp: String?, enTime: Double)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -103,6 +117,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case volume
         case sessionID
         case revision
+        case stamp
         case enTime
     }
 
@@ -115,6 +130,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case switchTrack
         case setVolume
         case requestCueBundle
+        case requestCatalog
         case cinemaMatch
     }
 
@@ -143,9 +159,14 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(Kind.requestCueBundle, forKey: .kind)
             try container.encode(sessionID, forKey: .sessionID)
             try container.encode(revision, forKey: .revision)
-        case .cinemaMatch(let sessionID, let enTime):
+        case .requestCatalog(let sessionID, let stamp):
+            try container.encode(Kind.requestCatalog, forKey: .kind)
+            try container.encode(sessionID, forKey: .sessionID)
+            try container.encode(stamp, forKey: .stamp)
+        case .cinemaMatch(let sessionID, let stamp, let enTime):
             try container.encode(Kind.cinemaMatch, forKey: .kind)
             try container.encode(sessionID, forKey: .sessionID)
+            try container.encodeIfPresent(stamp, forKey: .stamp)
             try container.encode(enTime, forKey: .enTime)
         }
     }
@@ -173,9 +194,15 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 sessionID: try container.decode(UUID.self, forKey: .sessionID),
                 revision: try container.decode(Int.self, forKey: .revision)
             )
+        case .requestCatalog:
+            self = .requestCatalog(
+                sessionID: try container.decode(UUID.self, forKey: .sessionID),
+                stamp: try container.decode(String.self, forKey: .stamp)
+            )
         case .cinemaMatch:
             self = .cinemaMatch(
                 sessionID: try container.decode(UUID.self, forKey: .sessionID),
+                stamp: try container.decodeIfPresent(String.self, forKey: .stamp),
                 enTime: try container.decode(Double.self, forKey: .enTime)
             )
         }
@@ -197,6 +224,10 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let currentTime: Double
     let tracks: [TrackInfo]
     let activeTrackID: UUID?
+    // Identifies the catalog content (filename + size + mtime). nil = session
+    // has no catalog; the watch deletes its stored copy when the stamp stops
+    // matching, so cleared or same-filename-replaced catalogs cannot go stale.
+    let catalogStamp: String?
 
     init(
         sessionID: UUID,
@@ -207,7 +238,8 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         isPlaying: Bool,
         currentTime: Double,
         tracks: [TrackInfo] = [],
-        activeTrackID: UUID? = nil
+        activeTrackID: UUID? = nil,
+        catalogStamp: String? = nil
     ) {
         self.sessionID = sessionID
         self.revision = revision
@@ -218,10 +250,12 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.currentTime = currentTime
         self.tracks = tracks
         self.activeTrackID = activeTrackID
+        self.catalogStamp = catalogStamp
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID
+        case catalogStamp
     }
 
     init(from decoder: any Decoder) throws {
@@ -235,6 +269,7 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.currentTime = try container.decode(Double.self, forKey: .currentTime)
         self.tracks = try container.decodeIfPresent([TrackInfo].self, forKey: .tracks) ?? []
         self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
+        self.catalogStamp = try container.decodeIfPresent(String.self, forKey: .catalogStamp)
     }
 }
 

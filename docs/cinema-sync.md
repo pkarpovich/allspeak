@@ -72,9 +72,14 @@ once the session's catalog has been transferred to the watch.
 - **Tap** -> the watch listens through its own microphone via
   `SHManagedSession(catalog:)` and matches locally on the watch (8s timeout).
 - **Match** -> a success haptic plays and the watch sends the absolute English
-  timecode to the phone (`WatchCommand.cinemaMatch(sessionID:enTime:)`). The phone treats
+  timecode to the phone (`WatchCommand.cinemaMatch(sessionID:stamp:enTime:)`). The phone treats
   it exactly like a phone-button match: it adds the Sync delay, DTW-maps
-  EN -> RU (identity without a mapping), and seeks the dub track.
+  EN -> RU (identity without a mapping), and seeks the dub track. The command
+  carries the catalog stamp the watch matched against; the phone requires both
+  stamps to be present and equal, so a match made against a catalog the session
+  no longer announces (replaced, cleared, or never stamped) is rejected and the
+  reply is an empty snapshot - the wrist feels failure instead of a false
+  success.
 - **No match / timeout / unreachable phone** -> a failure haptic plays and the
   button briefly shows an error state.
 - **Tap again while listening** -> cancels, nothing is sent.
@@ -87,10 +92,29 @@ dub keeps playing untouched.
 
 **Catalog transfer**: when a session with a catalog is opened (and on watch
 session activation), the phone queues the catalog file via
-`WCSession.transferFile` with `kind: "catalog"` metadata. The watch stores it at
+`WCSession.transferFile` with `kind: "catalog"` metadata plus a content `stamp`
+(filename + SHA-256 of the contents). The watch stores it at
 `Documents/catalogs/<sessionID>.shazamcatalog` and prunes catalogs of other
-sessions. The 1.5MB DTW map never leaves the phone — the watch only sends the
-English time.
+sessions. Session metadata broadcasts carry the same `catalogStamp`; when it
+changes (catalog replaced, even under the same filename) or disappears (catalog
+cleared), the watch deletes its stored copy and the sync button hides until a
+fresh transfer lands. A stored catalog only enables the button while its
+non-empty stamp matches the current metadata. A transfer whose stamp does not
+match the current metadata (queued before a clear, or a replacement racing
+ahead of its announcing context) is staged as a pending file keyed by its
+stamp - delivery order is not guaranteed, so a late obsolete transfer cannot
+displace a staged replacement - instead of replacing or re-enabling anything;
+it is promoted to active once metadata announcing its stamp arrives, since the
+phone will not resend a transfer it considers delivered unprompted; a failed
+promotion keeps the pending file and is retried on watch activation and
+reachability recovery. Pendings staged for stamps that are never announced
+(out-of-order replacements) are pruned whenever metadata for the session
+arrives, so they cannot accumulate on the watch. If the
+watch holds neither an active nor a staged copy of an announced catalog
+(persisting it failed after delivery), it sends
+`WatchCommand.requestCatalog(sessionID:stamp:)`; the phone clears its transfer
+dedup key - unless that transfer is still in flight - and resends. The 1.5MB
+DTW map never leaves the phone — the watch only sends the English time.
 
 The same **Sync delay** setting (below) applies to watch-triggered syncs — it is
 added on the phone, so one slider covers both entry points. The extra WCSession

@@ -591,6 +591,35 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.coordinator.catalogURL == nil)
     }
 
+    @Test("catalogStamp distinguishes same-size same-mtime files by content and is stable for identical bytes")
+    func catalogStampHashesContent() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-stamp-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let url = dir.appendingPathComponent("film.shazamcatalog")
+        let mtime = Date(timeIntervalSince1970: 1_700_000_000)
+        try Data([0x01, 0x02, 0x03]).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
+        let first = try #require(await PlaybackCoordinator.catalogStamp(forCatalogAt: url))
+        #expect(first.hasPrefix("film.shazamcatalog:"))
+
+        try Data([0x03, 0x02, 0x01]).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
+        let second = await PlaybackCoordinator.catalogStamp(forCatalogAt: url)
+        #expect(second != first)
+
+        try Data([0x01, 0x02, 0x03]).write(to: url)
+        let third = await PlaybackCoordinator.catalogStamp(forCatalogAt: url)
+        #expect(third == first)
+
+        let missing = await PlaybackCoordinator.catalogStamp(
+            forCatalogAt: dir.appendingPathComponent("absent.shazamcatalog")
+        )
+        #expect(missing == nil)
+    }
+
     private struct DTWMapFixture {
         let coordinator: PlaybackCoordinator
         let storage: DocumentsStorage
@@ -628,10 +657,16 @@ struct PlaybackCoordinatorTests {
             dtwMapName = url.lastPathComponent
         }
 
+        // applyCinemaMatch requires a matching non-nil catalog stamp, so the
+        // fixture always carries a catalog regardless of the DTW map.
+        let catalogSrc = srcDir.appendingPathComponent("film.shazamcatalog")
+        try Data([0x01, 0x02, 0x03]).write(to: catalogSrc)
+
         let sessionID = try await repo.importSession(
             name: "Movie",
             audioSrc: movedAudio,
             srtSrc: srtURL,
+            catalogSrc: catalogSrc,
             dtwMapSrc: dtwMapSrc
         )
         persistence.viewContext.refreshAllObjects()
@@ -731,6 +766,7 @@ struct PlaybackCoordinatorTests {
 
         fixture.coordinator.applyCinemaMatch(
             sessionID: fixture.sessionUUID,
+            stamp: try #require(fixture.coordinator.catalogStamp),
             enTime: 4.0,
             defaults: try Self.makeLatencyDefaults(0.0)
         )
@@ -749,6 +785,7 @@ struct PlaybackCoordinatorTests {
 
         fixture.coordinator.applyCinemaMatch(
             sessionID: fixture.sessionUUID,
+            stamp: try #require(fixture.coordinator.catalogStamp),
             enTime: 2.0,
             defaults: try Self.makeLatencyDefaults(2.0)
         )
@@ -767,6 +804,7 @@ struct PlaybackCoordinatorTests {
 
         fixture.coordinator.applyCinemaMatch(
             sessionID: fixture.sessionUUID,
+            stamp: try #require(fixture.coordinator.catalogStamp),
             enTime: 1.0,
             defaults: try Self.makeLatencyDefaults(1.5)
         )
@@ -785,6 +823,7 @@ struct PlaybackCoordinatorTests {
 
         fixture.coordinator.applyCinemaMatch(
             sessionID: UUID(),
+            stamp: try #require(fixture.coordinator.catalogStamp),
             enTime: 3.0,
             defaults: try Self.makeLatencyDefaults(0.0)
         )
@@ -799,6 +838,7 @@ struct PlaybackCoordinatorTests {
 
         coordinator.applyCinemaMatch(
             sessionID: UUID(),
+            stamp: nil,
             enTime: 123.0,
             defaults: try Self.makeLatencyDefaults(0.0)
         )
@@ -807,23 +847,139 @@ struct PlaybackCoordinatorTests {
     }
 
     @Test("cinemaMatch command routes to applyCinemaMatch")
-    func cinemaMatchCommandSeeksController() throws {
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
-
-        let audio = try Self.makeSilenceFile(seconds: 5)
-        defer { try? FileManager.default.removeItem(at: audio) }
-
-        let sessionUUID = UUID()
-        try coordinator.startSession(sessionUUID: sessionUUID, title: "Sync", audio: audio, subtitles: Self.cues)
-        defer { coordinator.endSession() }
-        let controller = try #require(coordinator.controller)
+    func cinemaMatchCommandSeeksController() async throws {
+        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        let stamp = try #require(fixture.coordinator.catalogStamp)
 
         Self.withLatencyCompensation(0.5) {
-            coordinator.apply(.cinemaMatch(sessionID: sessionUUID, enTime: 2.0))
+            fixture.coordinator.apply(.cinemaMatch(sessionID: fixture.sessionUUID, stamp: stamp, enTime: 2.0))
         }
 
         #expect(abs(controller.currentTime - 2.5) < 0.05)
+    }
+
+    @Test("applyCinemaMatch with a stale catalog stamp does not seek")
+    func applyCinemaMatchRejectsStaleStamp() async throws {
+        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        #expect(fixture.coordinator.catalogStamp != nil)
+
+        let applied = fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            stamp: "film.shazamcatalog:replaced",
+            enTime: 2.0,
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
+
+        #expect(applied == false)
+        #expect(abs(controller.currentTime - 0.0) < 0.05)
+    }
+
+    @Test("applyCinemaMatch rejects an unstamped match even when the session has no catalog")
+    func applyCinemaMatchRejectsNilStamps() async throws {
+        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        #expect(fixture.coordinator.catalogStamp == nil)
+
+        let applied = fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            stamp: nil,
+            enTime: 2.0,
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
+
+        #expect(applied == false)
+        #expect(abs(controller.currentTime - 0.0) < 0.05)
+    }
+
+    @Test("applyCinemaMatch with the matching catalog stamp seeks")
+    func applyCinemaMatchAcceptsMatchingStamp() async throws {
+        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        let stamp = try #require(fixture.coordinator.catalogStamp)
+
+        let applied = fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            stamp: stamp,
+            enTime: 2.0,
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
+
+        #expect(applied == true)
+        #expect(abs(controller.currentTime - 2.0) < 0.05)
+    }
+
+    @Test("a superseded startSession resuming from its loads cannot clobber the newer session")
+    func rapidStartSessionNewerCallWins() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-coord-race-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = DocumentsStorage(documentsURL: root)
+        let persistence = PersistenceController.makeInMemory()
+        let repo = SessionRepository(persistence: persistence, storage: storage)
+
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
+
+        func importSession(name: String, catalogByte: UInt8) async throws -> NSManagedObjectID {
+            let audio = try Self.makeSilenceFile(seconds: 5)
+            let movedAudio = srcDir.appendingPathComponent("\(name).caf")
+            try FileManager.default.moveItem(at: audio, to: movedAudio)
+            let srtURL = srcDir.appendingPathComponent("\(name).srt")
+            try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
+            let catalogURL = srcDir.appendingPathComponent("\(name).shazamcatalog")
+            try Data([catalogByte]).write(to: catalogURL)
+            return try await repo.importSession(
+                name: name,
+                audioSrc: movedAudio,
+                srtSrc: srtURL,
+                catalogSrc: catalogURL
+            )
+        }
+
+        let aID = try await importSession(name: "A", catalogByte: 0x0A)
+        let bID = try await importSession(name: "B", catalogByte: 0x0B)
+        persistence.viewContext.refreshAllObjects()
+        let bUUID = try #require(
+            persistence.viewContext.existingObject(with: bID).value(forKey: "id") as? UUID
+        )
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        defer { coordinator.endSession() }
+
+        let firstStart = Task { @MainActor in
+            try? await coordinator.startSession(sessionID: aID, repository: repo, persistence: persistence, storage: storage)
+        }
+        await Task.yield()
+        try await coordinator.startSession(sessionID: bID, repository: repo, persistence: persistence, storage: storage)
+        _ = await firstStart.value
+
+        #expect(coordinator.sessionUUID == bUUID)
+        #expect(coordinator.sessionTitle == "B")
+        let expectedStamp = await PlaybackCoordinator.catalogStamp(
+            forCatalogAt: storage.catalogURL(sessionID: bUUID, filename: "B.shazamcatalog")
+        )
+        #expect(coordinator.catalogStamp == (try #require(expectedStamp)))
     }
 
     @Test("applySyncOffset seeks to the DTW-mapped ruOffset, not the raw enOffset")

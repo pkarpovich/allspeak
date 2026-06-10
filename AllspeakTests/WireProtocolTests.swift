@@ -20,12 +20,18 @@ struct WireProtocolTests {
             sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000001")!,
             revision: 42
         ),
+        WatchCommand.requestCatalog(
+            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000004")!,
+            stamp: "film.shazamcatalog:1234:5678"
+        ),
         WatchCommand.cinemaMatch(
             sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000002")!,
+            stamp: nil,
             enTime: 0
         ),
         WatchCommand.cinemaMatch(
             sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000003")!,
+            stamp: "film.shazamcatalog:1234:5678",
             enTime: 5432.125
         ),
     ])
@@ -75,6 +81,22 @@ struct WireProtocolTests {
         #expect(throws: DecodingError.self) {
             _ = try WatchCommand(propertyList: plist)
         }
+    }
+
+    @Test("cinemaMatch payload without a stamp decodes with a nil stamp")
+    func cinemaMatchMissingStampDecodesNil() throws {
+        let payload = #"{"kind": "cinemaMatch", "sessionID": "AA00BB00-CC00-DD00-EE00-FF0000000001", "enTime": 12.5}"#
+            .data(using: .utf8)!
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.command.rawValue,
+            WirePayloadKey.payload: payload,
+        ]
+        let decoded = try WatchCommand(propertyList: plist)
+        #expect(decoded == .cinemaMatch(
+            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000001")!,
+            stamp: nil,
+            enTime: 12.5
+        ))
     }
 
     @Test("WatchCommand rejects missing payload")
@@ -139,6 +161,24 @@ struct WireProtocolTests {
         #expect(decoded.activeTrackID == trackB.id)
     }
 
+    @Test("SessionMetadata round-trips catalogStamp")
+    func sessionMetadataRoundTripWithCatalogStamp() throws {
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 2,
+            title: "Dune",
+            duration: 9000.0,
+            cueCount: 900,
+            isPlaying: false,
+            currentTime: 12.5,
+            catalogStamp: "film.shazamcatalog:1024:1700000000000"
+        )
+        let plist = try meta.toPropertyList()
+        let decoded = try SessionMetadata(propertyList: plist)
+        #expect(decoded == meta)
+        #expect(decoded.catalogStamp == "film.shazamcatalog:1024:1700000000000")
+    }
+
     @Test("SessionMetadata decodes legacy payload without tracks fields")
     func sessionMetadataLegacyDecode() throws {
         let legacyJSON = """
@@ -159,6 +199,7 @@ struct WireProtocolTests {
         let decoded = try SessionMetadata(propertyList: plist)
         #expect(decoded.tracks.isEmpty)
         #expect(decoded.activeTrackID == nil)
+        #expect(decoded.catalogStamp == nil)
     }
 
     @Test("CueBundle round-trips via compression")

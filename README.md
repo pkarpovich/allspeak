@@ -148,7 +148,7 @@ audio host.
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
 `setVolume(_:)`, `requestCueBundle(sessionID:revision:)`, and
-`cinemaMatch(sessionID:enTime:)`. Session
+`cinemaMatch(sessionID:stamp:enTime:)`. Session
 metadata delivered to the watch carries a `tracks: [TrackInfo]` array
 plus the current `activeTrackID`. The wire contract lives in
 `Allspeak/Watch/WireProtocol.swift` — see the header comment there for

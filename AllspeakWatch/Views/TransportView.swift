@@ -61,8 +61,14 @@ struct TransportView: View {
             registerVolumeActivity()
         }
         // Manual-only rule: the mic must stop the moment the listen's context
-        // goes away — session switch, catalog removal, or leaving this screen.
+        // goes away — session switch, catalog removal or replacement (a promoted
+        // staged catalog changes the stamp while availability stays true, and a
+        // match against the old catalog must not reach the phone), or leaving
+        // this screen.
         .onChange(of: client.metadata?.sessionID) {
+            cinemaSync.cancelListening()
+        }
+        .onChange(of: client.metadata?.catalogStamp) {
             cinemaSync.cancelListening()
         }
         .onChange(of: client.hasCatalogForCurrentSession) { _, hasCatalog in
@@ -99,17 +105,28 @@ struct TransportView: View {
             .padding(.horizontal, 12)
     }
 
+    // With the 44pt sync button between the two skips, the roomy variant only
+    // fits the widest cases; ViewThatFits steps down so the row never clips on
+    // the narrower ones (40mm is 162pt total, minus 16pt content padding).
     private var coarseRow: some View {
-        HStack(spacing: 14) {
-            skipButton(icon: Tokens.Icon.skipBack, seconds: "3", prominent: true, action: handleSkipBackCoarse)
+        ViewThatFits(in: .horizontal) {
+            coarseRowContent(buttonSize: 60, spacing: 14)
+            coarseRowContent(buttonSize: 52, spacing: 10)
+            coarseRowContent(buttonSize: 44, spacing: 7)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func coarseRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "3", prominent: true, size: buttonSize, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
             if client.hasCatalogForCurrentSession {
                 syncButton
             }
-            skipButton(icon: Tokens.Icon.skipForward, seconds: "3", prominent: true, action: handleSkipForwardCoarse)
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "3", prominent: true, size: buttonSize, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // Cinema sync: listens through the watch mic and matches against the
@@ -139,9 +156,9 @@ struct TransportView: View {
 
     private var fineRow: some View {
         HStack(spacing: 14) {
-            skipButton(icon: Tokens.Icon.skipBack, seconds: "1", prominent: false, action: handleSkipBackFine)
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "1", prominent: false, size: 62, action: handleSkipBackFine)
                 .accessibilityLabel("Skip back 1 second")
-            skipButton(icon: Tokens.Icon.skipForward, seconds: "1", prominent: false, action: handleSkipForwardFine)
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "1", prominent: false, size: 62, action: handleSkipForwardFine)
                 .accessibilityLabel("Skip forward 1 second")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -207,6 +224,7 @@ struct TransportView: View {
         icon: String,
         seconds: String,
         prominent: Bool,
+        size: CGFloat,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -221,7 +239,7 @@ struct TransportView: View {
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
-        .frame(width: prominent ? 60 : 62, height: prominent ? 60 : 62)
+        .frame(width: size, height: size)
     }
 
     private var isPlaying: Bool {
@@ -233,12 +251,12 @@ struct TransportView: View {
     }
 
     private func handleSync() {
-        guard let sessionID = client.metadata?.sessionID,
+        guard let metadata = client.metadata,
               let catalogURL = client.catalogURLForCurrentSession() else {
             cinemaSync.cancelListening()
             return
         }
-        cinemaSync.tap(catalogURL: catalogURL, sessionID: sessionID)
+        cinemaSync.tap(catalogURL: catalogURL, sessionID: metadata.sessionID, stamp: metadata.catalogStamp)
     }
 
     private func scheduleSyncReset(for state: WatchCinemaSyncState) {

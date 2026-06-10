@@ -101,11 +101,11 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
         await sync.listenTask?.value
 
         #expect(sync.state == .sent)
-        #expect(sentCommands(sender) == [.cinemaMatch(sessionID: sessionID, enTime: 1842.5)])
+        #expect(sentCommands(sender) == [.cinemaMatch(sessionID: sessionID, stamp: "film:1:100", enTime: 1842.5)])
         #expect(haptics.played == [.success])
         #expect(session.cancelCount >= 1)
     }
@@ -118,10 +118,10 @@ struct WatchCinemaSyncTests {
         sender.nextReply = Self.snapshotReply(sessionID: sessionID)
         let sync = makeSync(session: session, sender: sender)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
         await sync.listenTask?.value
 
-        #expect(sentCommands(sender) == [.cinemaMatch(sessionID: sessionID, enTime: 99.25)])
+        #expect(sentCommands(sender) == [.cinemaMatch(sessionID: sessionID, stamp: "film:1:100", enTime: 99.25)])
     }
 
     @Test("reply for a different session surfaces failed, not a false success")
@@ -133,7 +133,7 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
         await sync.listenTask?.value
 
         #expect(sync.state == .failed)
@@ -147,7 +147,7 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         await sync.listenTask?.value
 
         #expect(sync.state == .failed)
@@ -161,7 +161,7 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         await sync.listenTask?.value
 
         #expect(sync.state == .failed)
@@ -176,7 +176,7 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         await sync.listenTask?.value
 
         #expect(sync.state == .failed)
@@ -190,7 +190,7 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics, timeout: .milliseconds(50))
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         #expect(sync.state == .listening)
         await sync.listenTask?.value
 
@@ -207,11 +207,11 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         #expect(sync.state == .listening)
         let task = sync.listenTask
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
 
         #expect(sync.state == .idle)
         #expect(session.cancelCount >= 1)
@@ -230,11 +230,11 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         let firstTask = sync.listenTask
         sync.cancelListening()
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         #expect(sync.state == .listening)
 
         await firstTask?.value
@@ -258,7 +258,7 @@ struct WatchCinemaSyncTests {
             checkPermission: { false }
         )
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         #expect(sync.state == .listening)
         await sync.listenTask?.value
 
@@ -284,11 +284,11 @@ struct WatchCinemaSyncTests {
             timeout: .milliseconds(50)
         )
 
-        sync.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
         await sync.listenTask?.value
 
         #expect(sync.state == .sent)
-        #expect(sentCommands(sender) == [.cinemaMatch(sessionID: sessionID, enTime: 1)])
+        #expect(sentCommands(sender) == [.cinemaMatch(sessionID: sessionID, stamp: "film:1:100", enTime: 1)])
     }
 
     @Test("cancel while the permission prompt is up stays idle with no haptic")
@@ -306,7 +306,7 @@ struct WatchCinemaSyncTests {
             }
         )
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         #expect(sync.state == .listening)
         let task = sync.listenTask
 
@@ -330,7 +330,7 @@ struct WatchCinemaSyncTests {
             haptics: haptics
         )
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
 
         #expect(sync.state == .failed)
         #expect(sync.listenTask == nil)
@@ -346,7 +346,7 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: session, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         await sync.listenTask?.value
 
         #expect(sync.state == .failed)
@@ -378,14 +378,14 @@ struct WatchCinemaSyncTests {
             session: MockMatchingSession(outcome: .match(subtitle: "abs_start=0", offset: 1)),
             sender: sentSender
         )
-        sent.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        sent.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
         await sent.listenTask?.value
         #expect(sent.state == .sent)
         sent.reset()
         #expect(sent.state == .idle)
 
         let failed = makeSync(session: MockMatchingSession(outcome: .noMatch))
-        failed.tap(catalogURL: catalogURL(), sessionID: UUID())
+        failed.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         await failed.listenTask?.value
         #expect(failed.state == .failed)
         failed.reset()
@@ -397,7 +397,7 @@ struct WatchCinemaSyncTests {
         let session = MockMatchingSession(outcome: nil)
         let sync = makeSync(session: session)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         #expect(sync.state == .listening)
 
         sync.reset()
@@ -413,11 +413,11 @@ struct WatchCinemaSyncTests {
         let haptics = MockHaptics()
         let sync = makeSync(session: failing, sender: sender, haptics: haptics)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         await sync.listenTask?.value
         #expect(sync.state == .failed)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID(), stamp: "film:1:100")
         #expect(sync.state == .listening)
         await sync.listenTask?.value
         #expect(sync.state == .failed)
@@ -432,11 +432,11 @@ struct WatchCinemaSyncTests {
         sender.nextReply = Self.snapshotReply(sessionID: sessionID)
         let sync = makeSync(session: session, sender: sender)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
         await sync.listenTask?.value
         #expect(sync.state == .sent)
 
-        sync.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
         #expect(sync.state == .listening)
         await sync.listenTask?.value
         #expect(sync.state == .sent)

@@ -29,7 +29,7 @@ struct WatchSessionHostTests {
     ]
 
     private func makeRunningSession() throws -> (PlaybackCoordinator, WatchSessionHost, URL) {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let audio = try Self.makeSilenceFile(seconds: 10)
         let uuid = UUID()
@@ -158,7 +158,7 @@ struct WatchSessionHostTests {
 
     @Test("dispatch(.setVolume) without active session returns empty snapshot")
     func dispatchSetVolumeWithoutSession() async {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
         let snap = await host.dispatch(.setVolume(0.5))
@@ -167,7 +167,7 @@ struct WatchSessionHostTests {
 
     @Test("dispatch without active session returns empty snapshot")
     func dispatchWithoutSession() async {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
         let snap = await host.dispatch(.play)
@@ -176,7 +176,7 @@ struct WatchSessionHostTests {
 
     @Test("currentMetadata is nil before session start and populated after")
     func metadataFromCoordinator() throws {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         #expect(coordinator.currentMetadata() == nil)
 
@@ -291,7 +291,7 @@ struct WatchSessionHostTests {
 
     @Test("broadcastSnapshot without active session is a no-op")
     func broadcastSnapshotNoSession() {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
         var sends: [[String: Any]] = []
@@ -334,7 +334,7 @@ struct WatchSessionHostTests {
 
     @Test("forceBroadcastSnapshot is a no-op without an active session")
     func forceBroadcastNoSession() {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
         var sends: [[String: Any]] = []
@@ -405,7 +405,7 @@ struct WatchSessionHostTests {
         try FileManager.default.moveItem(at: silenceA, to: t1URL)
         try FileManager.default.moveItem(at: silenceB, to: t2URL)
 
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         try await coordinator.startSession(sessionID: sessionID, repository: repo, persistence: persistence, storage: storage)
         let host = WatchSessionHost(coordinator: coordinator)
@@ -689,7 +689,7 @@ struct WatchSessionHostTests {
 
     @Test("broadcastCurrentSession without active session sends nothing")
     func broadcastCurrentSessionNoSession() {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
         var contexts: [[String: Any]] = []
@@ -703,6 +703,8 @@ struct WatchSessionHostTests {
         let coordinator: PlaybackCoordinator
         let host: WatchSessionHost
         let sessionUUID: UUID
+        let sessionID: NSManagedObjectID
+        let repo: SessionRepository
         let catalogName: String?
         let root: URL
     }
@@ -744,7 +746,7 @@ struct WatchSessionHostTests {
             persistence.viewContext.existingObject(with: sessionID).value(forKey: "id") as? UUID
         )
 
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         try await coordinator.startSession(
             sessionID: sessionID,
@@ -757,19 +759,21 @@ struct WatchSessionHostTests {
             coordinator: coordinator,
             host: host,
             sessionUUID: sessionUUID,
+            sessionID: sessionID,
+            repo: repo,
             catalogName: catalogName,
             root: root
         )
     }
 
-    @Test("sendCatalogIfNeeded queues the catalog file with kind/sessionID/filename metadata")
+    @Test("sendCatalogIfNeeded queues the catalog file with kind/sessionID/stamp metadata")
     func sendCatalogQueuesWithMetadata() async throws {
         let fixture = try await makeCatalogFixture(withCatalog: true)
         defer {
             fixture.coordinator.endSession()
             try? FileManager.default.removeItem(at: fixture.root)
         }
-        let catalogName = try #require(fixture.catalogName)
+        let stamp = try #require(fixture.coordinator.catalogStamp)
 
         var transfers: [(url: URL, metadata: [String: Any])] = []
         fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, metadata in
@@ -780,10 +784,11 @@ struct WatchSessionHostTests {
         #expect(transfers[0].url == fixture.coordinator.catalogURL)
         #expect(transfers[0].metadata["kind"] as? String == "catalog")
         #expect(transfers[0].metadata["sessionID"] as? String == fixture.sessionUUID.uuidString)
-        #expect(transfers[0].metadata["filename"] as? String == catalogName)
+        #expect(transfers[0].metadata["stamp"] as? String == stamp)
+        #expect(stamp.hasPrefix(try #require(fixture.catalogName)))
     }
 
-    @Test("sendCatalogIfNeeded skips a repeat send for the same session and filename")
+    @Test("sendCatalogIfNeeded skips a repeat send for the same session and catalog content")
     func sendCatalogSkipsRepeat() async throws {
         let fixture = try await makeCatalogFixture(withCatalog: true)
         defer {
@@ -805,9 +810,9 @@ struct WatchSessionHostTests {
             fixture.coordinator.endSession()
             try? FileManager.default.removeItem(at: fixture.root)
         }
-        let catalogName = try #require(fixture.catalogName)
+        let stamp = try #require(fixture.coordinator.catalogStamp)
         let outstanding = [
-            WatchSessionHost.catalogTransferMetadata(sessionID: fixture.sessionUUID, filename: catalogName)
+            WatchSessionHost.catalogTransferMetadata(sessionID: fixture.sessionUUID, stamp: stamp)
         ]
 
         var transfers: [URL] = []
@@ -816,17 +821,17 @@ struct WatchSessionHostTests {
         #expect(transfers.isEmpty)
     }
 
-    @Test("sendCatalogIfNeeded sends when outstanding transfers are for other sessions or files")
+    @Test("sendCatalogIfNeeded sends when outstanding transfers are for other sessions or stamps")
     func sendCatalogIgnoresUnrelatedOutstanding() async throws {
         let fixture = try await makeCatalogFixture(withCatalog: true)
         defer {
             fixture.coordinator.endSession()
             try? FileManager.default.removeItem(at: fixture.root)
         }
-        let catalogName = try #require(fixture.catalogName)
+        let stamp = try #require(fixture.coordinator.catalogStamp)
         let outstanding = [
-            WatchSessionHost.catalogTransferMetadata(sessionID: UUID(), filename: catalogName),
-            WatchSessionHost.catalogTransferMetadata(sessionID: fixture.sessionUUID, filename: "other.shazamcatalog"),
+            WatchSessionHost.catalogTransferMetadata(sessionID: UUID(), stamp: stamp),
+            WatchSessionHost.catalogTransferMetadata(sessionID: fixture.sessionUUID, stamp: "other:1:1"),
             WatchSessionHost.cueBundleTransferMetadata(sessionID: fixture.sessionUUID, revision: 1),
         ]
 
@@ -852,7 +857,7 @@ struct WatchSessionHostTests {
 
     @Test("sendCatalogIfNeeded is a no-op without an active session")
     func sendCatalogNoSession() {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
 
@@ -869,7 +874,7 @@ struct WatchSessionHostTests {
             fixture.coordinator.endSession()
             try? FileManager.default.removeItem(at: fixture.root)
         }
-        let catalogName = try #require(fixture.catalogName)
+        let stamp = try #require(fixture.coordinator.catalogStamp)
 
         var transfers: [URL] = []
         fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
@@ -878,7 +883,7 @@ struct WatchSessionHostTests {
         fixture.host.handleFileTransferFailure(
             metadata: WatchSessionHost.catalogTransferMetadata(
                 sessionID: fixture.sessionUUID,
-                filename: catalogName
+                stamp: stamp
             )
         )
 
@@ -886,7 +891,7 @@ struct WatchSessionHostTests {
         #expect(transfers.count == 2)
     }
 
-    @Test("handleFileTransferFailure ignores catalog metadata for a different file")
+    @Test("handleFileTransferFailure ignores catalog metadata for a different stamp")
     func handleCatalogTransferFailureIgnoresStale() async throws {
         let fixture = try await makeCatalogFixture(withCatalog: true)
         defer {
@@ -901,12 +906,215 @@ struct WatchSessionHostTests {
         fixture.host.handleFileTransferFailure(
             metadata: WatchSessionHost.catalogTransferMetadata(
                 sessionID: fixture.sessionUUID,
-                filename: "other.shazamcatalog"
+                stamp: "other:1:1"
             )
         )
 
         fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
         #expect(transfers.count == 1)
+    }
+
+    @Test("handleCatalogRequest clears dedupe so the next send retransfers")
+    func handleCatalogRequestForcesResend() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let stamp = try #require(fixture.coordinator.catalogStamp)
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+
+        fixture.host.handleCatalogRequest(
+            sessionID: fixture.sessionUUID,
+            stamp: stamp,
+            outstandingMetadata: []
+        )
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 2)
+    }
+
+    @Test("handleCatalogRequest keeps dedupe while the requested transfer is still in flight")
+    func handleCatalogRequestSkipsOutstandingTransfer() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let stamp = try #require(fixture.coordinator.catalogStamp)
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+
+        fixture.host.handleCatalogRequest(
+            sessionID: fixture.sessionUUID,
+            stamp: stamp,
+            outstandingMetadata: [
+                WatchSessionHost.catalogTransferMetadata(sessionID: fixture.sessionUUID, stamp: stamp)
+            ]
+        )
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+    }
+
+    @Test("handleCatalogRequest ignores a stale stamp")
+    func handleCatalogRequestIgnoresStaleStamp() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+
+        fixture.host.handleCatalogRequest(
+            sessionID: fixture.sessionUUID,
+            stamp: "other:1:1",
+            outstandingMetadata: []
+        )
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+    }
+
+    @Test("dispatch(.requestCatalog) routes through handleCatalogRequest")
+    func dispatchRequestCatalogRoutes() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let stamp = try #require(fixture.coordinator.catalogStamp)
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+
+        _ = await fixture.host.dispatch(.requestCatalog(sessionID: fixture.sessionUUID, stamp: stamp))
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 2)
+    }
+
+    @Test("replacing the catalog under the same filename changes the stamp and resends")
+    func sendCatalogResendsAfterSameFilenameReplacement() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let catalogName = try #require(fixture.catalogName)
+        let firstStamp = try #require(fixture.coordinator.catalogStamp)
+
+        var transfers: [(url: URL, metadata: [String: Any])] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, metadata in
+            transfers.append((url, metadata))
+        }
+        #expect(transfers.count == 1)
+
+        let replacement = fixture.root.appendingPathComponent("inbox/\(catalogName)")
+        try Data([0x09, 0x08, 0x07, 0x06]).write(to: replacement)
+        try await fixture.repo.setCatalog(sessionID: fixture.sessionID, srcURL: replacement)
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, metadata in
+            transfers.append((url, metadata))
+        }
+        #expect(transfers.count == 2)
+        let secondStamp = try #require(transfers[1].metadata["stamp"] as? String)
+        #expect(secondStamp != firstStamp)
+        #expect(secondStamp == fixture.coordinator.catalogStamp)
+    }
+
+    @Test("clearing the catalog drops it from broadcast metadata and stops transfers")
+    func clearedCatalogStopsTransfersAndClearsStamp() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        #expect(fixture.coordinator.currentMetadata()?.catalogStamp != nil)
+
+        try await fixture.repo.clearCatalog(sessionID: fixture.sessionID)
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+
+        #expect(fixture.coordinator.catalogStamp == nil)
+        #expect(fixture.coordinator.currentMetadata()?.catalogStamp == nil)
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.isEmpty)
+    }
+
+    @Test("clearing the catalog then re-attaching identical content resends it")
+    func clearedCatalogResendsIdenticalReattachment() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let firstStamp = try #require(fixture.coordinator.catalogStamp)
+
+        var transfers: [(url: URL, metadata: [String: Any])] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, metadata in
+            transfers.append((url, metadata))
+        }
+        #expect(transfers.count == 1)
+
+        try await fixture.repo.clearCatalog(sessionID: fixture.sessionID)
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, metadata in
+            transfers.append((url, metadata))
+        }
+        #expect(transfers.count == 1)
+
+        let catalogName = try #require(fixture.catalogName)
+        let reattached = fixture.root.appendingPathComponent("inbox/\(catalogName)")
+        try Data([0x01, 0x02, 0x03]).write(to: reattached)
+        try await fixture.repo.setCatalog(sessionID: fixture.sessionID, srcURL: reattached)
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, metadata in
+            transfers.append((url, metadata))
+        }
+        #expect(transfers.count == 2)
+        #expect(transfers[1].metadata["stamp"] as? String == firstStamp)
+    }
+
+    @Test("resetTransferDedupKeys clears catalog and bundle dedup so a new watch gets both")
+    func resetTransferDedupKeysForcesResend() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        var catalogs: [URL] = []
+        var bundles: [CueBundle] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in catalogs.append(url) }
+        fixture.host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(catalogs.count == 1)
+        #expect(bundles.count == 1)
+
+        fixture.host.resetTransferDedupKeys()
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in catalogs.append(url) }
+        fixture.host.broadcastCurrentSession(
+            sendContext: { _ in },
+            sendFile: { bundles.append($0); return true }
+        )
+        #expect(catalogs.count == 2)
+        #expect(bundles.count == 2)
     }
 
     @Test("broadcastSessionEnded clears the catalog dedupe key so a re-opened session resends")
@@ -931,13 +1139,13 @@ struct WatchSessionHostTests {
 
     @Test("dispatch(.cinemaMatch) compensates and seeks the controller")
     func dispatchCinemaMatchSeeks() async throws {
-        let (coordinator, host, audio) = try makeRunningSession()
+        let fixture = try await makeCatalogFixture(withCatalog: true)
         let priorCompensation = UserDefaults.standard.object(
             forKey: CinemaSyncService.latencyCompensationDefaultsKey
         )
         defer {
-            coordinator.endSession()
-            try? FileManager.default.removeItem(at: audio)
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
             if let priorCompensation {
                 UserDefaults.standard.set(priorCompensation, forKey: CinemaSyncService.latencyCompensationDefaultsKey)
             } else {
@@ -945,15 +1153,16 @@ struct WatchSessionHostTests {
             }
         }
         UserDefaults.standard.set(0.5, forKey: CinemaSyncService.latencyCompensationDefaultsKey)
-        let sessionUUID = try #require(coordinator.sessionUUID)
+        let sessionUUID = try #require(fixture.coordinator.sessionUUID)
+        let stamp = try #require(fixture.coordinator.catalogStamp)
 
-        let snap = await host.dispatch(.cinemaMatch(sessionID: sessionUUID, enTime: 2.0))
+        let snap = await fixture.host.dispatch(.cinemaMatch(sessionID: sessionUUID, stamp: stamp, enTime: 2.0))
 
         #expect(abs(snap.currentTime - 2.5) < 0.05)
-        #expect(abs((coordinator.controller?.currentTime ?? 0) - 2.5) < 0.05)
+        #expect(abs((fixture.coordinator.controller?.currentTime ?? 0) - 2.5) < 0.05)
     }
 
-    @Test("dispatch(.cinemaMatch) for a different session leaves playback untouched")
+    @Test("dispatch(.cinemaMatch) for a different session leaves playback untouched and replies empty")
     func dispatchCinemaMatchIgnoresOtherSession() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
         defer {
@@ -961,9 +1170,28 @@ struct WatchSessionHostTests {
             try? FileManager.default.removeItem(at: audio)
         }
 
-        _ = await host.dispatch(.cinemaMatch(sessionID: UUID(), enTime: 4.0))
+        let snap = await host.dispatch(.cinemaMatch(sessionID: UUID(), stamp: nil, enTime: 4.0))
 
+        #expect(snap == PlaybackSnapshot.empty)
         #expect(abs((coordinator.controller?.currentTime ?? -1) - 0.0) < 0.05)
+    }
+
+    @Test("dispatch(.cinemaMatch) with a stale catalog stamp replies empty so the watch surfaces failure")
+    func dispatchCinemaMatchRejectsStaleStamp() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let sessionUUID = try #require(fixture.coordinator.sessionUUID)
+        #expect(fixture.coordinator.catalogStamp != nil)
+
+        let snap = await fixture.host.dispatch(
+            .cinemaMatch(sessionID: sessionUUID, stamp: "film.shazamcatalog:replaced", enTime: 2.0)
+        )
+
+        #expect(snap == PlaybackSnapshot.empty)
+        #expect(abs((fixture.coordinator.controller?.currentTime ?? -1) - 0.0) < 0.05)
     }
 
     @Test("handleFileTransferFailure still clears the cue bundle key when metadata carries the cuebundle kind")
@@ -1006,7 +1234,7 @@ struct WatchSessionHostTests {
 
     @Test("isCatalogTransfer recognizes only catalog metadata")
     func isCatalogTransferRouting() {
-        let catalog = WatchSessionHost.catalogTransferMetadata(sessionID: UUID(), filename: "f.shazamcatalog")
+        let catalog = WatchSessionHost.catalogTransferMetadata(sessionID: UUID(), stamp: "f.shazamcatalog:3:1")
         let bundle = WatchSessionHost.cueBundleTransferMetadata(sessionID: UUID(), revision: 1)
         #expect(WatchSessionHost.isCatalogTransfer(metadata: catalog) == true)
         #expect(WatchSessionHost.isCatalogTransfer(metadata: bundle) == false)
@@ -1016,7 +1244,7 @@ struct WatchSessionHostTests {
 
     @Test("broadcastSnapshot empty-session calls do not consume the rate-limit slot")
     func broadcastSnapshotEmptyDoesNotConsumeSlot() throws {
-        let coordinator = PlaybackCoordinator.shared
+        let coordinator = PlaybackCoordinator()
         coordinator.endSession()
         let host = WatchSessionHost(coordinator: coordinator)
 

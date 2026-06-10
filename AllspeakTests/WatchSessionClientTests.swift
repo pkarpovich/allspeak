@@ -36,15 +36,25 @@ struct WatchSessionClientTests {
     }
 
     private func makeClientWithCatalogStore() throws -> (WatchSessionClient, CatalogStore, URL) {
+        let (client, store, _, dir) = try makeClientWithCatalogStoreAndSender()
+        return (client, store, dir)
+    }
+
+    private func makeClientWithCatalogStoreAndSender() throws -> (WatchSessionClient, CatalogStore, MockSender, URL) {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("client-catalog-\(UUID().uuidString)", isDirectory: true)
         let cache = try CueCache(baseURL: dir.appendingPathComponent("cues", isDirectory: true))
         let store = try CatalogStore(baseURL: dir.appendingPathComponent("catalogs", isDirectory: true))
-        let client = WatchSessionClient(sender: MockSender(), cache: cache, catalogStore: store)
-        return (client, store, dir)
+        let sender = MockSender()
+        let client = WatchSessionClient(sender: sender, cache: cache, catalogStore: store)
+        return (client, store, sender, dir)
     }
 
-    private func makeMetadata(sessionID: UUID, cueCount: Int = 0) -> SessionMetadata {
+    private func makeMetadata(
+        sessionID: UUID,
+        cueCount: Int = 0,
+        catalogStamp: String? = nil
+    ) -> SessionMetadata {
         SessionMetadata(
             sessionID: sessionID,
             revision: 1,
@@ -52,7 +62,8 @@ struct WatchSessionClientTests {
             duration: 60,
             cueCount: cueCount,
             isPlaying: false,
-            currentTime: 0
+            currentTime: 0,
+            catalogStamp: catalogStamp
         )
     }
 
@@ -1118,6 +1129,155 @@ struct WatchSessionClientTests {
         #expect(decoded == .requestCueBundle(sessionID: sessionID, revision: 4))
     }
 
+    @Test("context announcing a catalog the watch lacks sends requestCatalog")
+    func receiveContextRequestsMissingCatalog() async throws {
+        let (client, _, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+
+        #expect(sender.sentMessages.count == 1)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[0])
+        #expect(decoded == .requestCatalog(sessionID: sessionID, stamp: "film:1:100"))
+    }
+
+    @Test("repeated contexts for the same missing catalog request only once")
+    func catalogRequestDeduplicatesPerStamp() async throws {
+        let (client, _, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let context = try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        client.handleReceivedApplicationContext(context)
+        client.handleReceivedApplicationContext(context)
+
+        #expect(sender.sentMessages.count == 1)
+    }
+
+    @Test("no catalog request when the stored catalog matches the announced stamp")
+    func noCatalogRequestWhenCatalogPresent() async throws {
+        let (client, store, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        try store.save(data: Data([0x01]), sessionID: sessionID, stamp: "film:1:100")
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("requestCatalog send error clears dedup key, allowing later retry")
+    func requestCatalogErrorClearsDedupKey() async throws {
+        let (client, _, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let context = try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+
+        sender.nextError = WatchMessageError.notReachable
+        client.handleReceivedApplicationContext(context)
+        #expect(sender.sentMessages.count == 1)
+
+        try await Task.sleep(for: .milliseconds(50))
+
+        sender.nextError = nil
+        client.handleReceivedApplicationContext(context)
+
+        #expect(sender.sentMessages.count == 2)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[1])
+        #expect(decoded == .requestCatalog(sessionID: sessionID, stamp: "film:1:100"))
+    }
+
+    @Test("unreadable catalog receipt re-arms the request so the next context resends")
+    func failedCatalogReceiptRearmsRequest() async throws {
+        let (client, _, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let context = try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        client.handleReceivedApplicationContext(context)
+        #expect(sender.sentMessages.count == 1)
+
+        client.handleReceivedFile(data: nil, metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+
+        client.handleReceivedApplicationContext(context)
+        #expect(sender.sentMessages.count == 2)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[1])
+        #expect(decoded == .requestCatalog(sessionID: sessionID, stamp: "film:1:100"))
+    }
+
+    @Test("catalog save failure re-arms the request so the next context resends")
+    func catalogSaveFailureRearmsRequest() async throws {
+        let (client, store, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let context = try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        client.handleReceivedApplicationContext(context)
+        #expect(sender.sentMessages.count == 1)
+
+        try FileManager.default.removeItem(at: store.baseURL)
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+        #expect(client.hasCatalogForCurrentSession == false)
+
+        try FileManager.default.createDirectory(at: store.baseURL, withIntermediateDirectories: true)
+        client.handleReceivedApplicationContext(context)
+        #expect(sender.sentMessages.count == 2)
+    }
+
+    @Test("recovery promotes a pending catalog left by a failed promotion")
+    func recoveryPromotesPendingCatalog() async throws {
+        let (client, store, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+        #expect(sender.sentMessages.count == 1)
+
+        store.stagePending(data: Data([0x01]), sessionID: sessionID, stamp: "film:1:100")
+        #expect(client.hasCatalogForCurrentSession == false)
+
+        client.recoverCatalogIfNeeded()
+
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(store.hasPending(sessionID: sessionID, stamp: "film:1:100") == false)
+        #expect(sender.sentMessages.count == 1)
+    }
+
+    @Test("recovery re-requests a catalog that never arrived")
+    func recoveryRerequestsMissingCatalog() async throws {
+        let (client, _, sender, dir) = try makeClientWithCatalogStoreAndSender()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+        #expect(sender.sentMessages.count == 1)
+
+        client.recoverCatalogIfNeeded()
+
+        #expect(sender.sentMessages.count == 2)
+        let decoded = try WatchCommand(propertyList: sender.sentMessages[1])
+        #expect(decoded == .requestCatalog(sessionID: sessionID, stamp: "film:1:100"))
+    }
+
     @Test("file-receive revision bump preserves tracks and activeTrackID")
     func fileReceiveRevisionBumpPreservesTracks() async throws {
         let (client, _, dir) = try makeClient()
@@ -1233,12 +1393,15 @@ struct WatchSessionClientTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let sessionID = UUID()
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
         #expect(client.hasCatalogForCurrentSession == false)
 
         client.handleReceivedFile(data: Data([0x01]), metadata: [
             "kind": "catalog",
             "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
         ])
 
         #expect(client.hasCatalogForCurrentSession == true)
@@ -1269,10 +1432,13 @@ struct WatchSessionClientTests {
 
         let activeID = UUID()
         let staleID = UUID()
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: activeID).toPropertyList())
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: activeID, catalogStamp: "film:1:100").toPropertyList()
+        )
         client.handleReceivedFile(data: Data([0x01]), metadata: [
             "kind": "catalog",
             "sessionID": activeID.uuidString,
+            "stamp": "film:1:100",
         ])
         #expect(client.hasCatalogForCurrentSession == true)
 
@@ -1291,10 +1457,13 @@ struct WatchSessionClientTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let sessionA = UUID()
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionA).toPropertyList())
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionA, catalogStamp: "a:1:1").toPropertyList()
+        )
         client.handleReceivedFile(data: Data([0x01]), metadata: [
             "kind": "catalog",
             "sessionID": sessionA.uuidString,
+            "stamp": "a:1:1",
         ])
         #expect(client.hasCatalogForCurrentSession == true)
 
@@ -1302,8 +1471,10 @@ struct WatchSessionClientTests {
         client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionB).toPropertyList())
         #expect(client.hasCatalogForCurrentSession == false)
 
-        try store.save(data: Data([0x02]), sessionID: sessionB)
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionB).toPropertyList())
+        try store.save(data: Data([0x02]), sessionID: sessionB, stamp: "b:1:1")
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionB, catalogStamp: "b:1:1").toPropertyList()
+        )
         #expect(client.hasCatalogForCurrentSession == true)
     }
 
@@ -1315,12 +1486,15 @@ struct WatchSessionClientTests {
         let sessionID = UUID()
         #expect(client.catalogURLForCurrentSession() == nil)
 
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
         #expect(client.catalogURLForCurrentSession() == nil)
 
         client.handleReceivedFile(data: Data([0x01]), metadata: [
             "kind": "catalog",
             "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
         ])
 
         #expect(client.catalogURLForCurrentSession() == store.catalogURL(for: sessionID))
@@ -1333,10 +1507,13 @@ struct WatchSessionClientTests {
 
         let activeID = UUID()
         let otherID = UUID()
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: activeID).toPropertyList())
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: activeID, catalogStamp: "film:1:100").toPropertyList()
+        )
         client.handleReceivedFile(data: Data([0x01]), metadata: [
             "kind": "catalog",
             "sessionID": otherID.uuidString,
+            "stamp": "film:1:100",
         ])
 
         #expect(client.catalogURLForCurrentSession() == nil)
@@ -1351,11 +1528,275 @@ struct WatchSessionClientTests {
         client.handleReceivedFile(data: Data([0x01]), metadata: [
             "kind": "catalog",
             "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
         ])
         #expect(client.hasCatalogForCurrentSession == false)
 
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
         #expect(client.hasCatalogForCurrentSession == true)
+    }
+
+    @Test("metadata without catalogStamp removes the stored catalog (cleared on the phone)")
+    func clearedCatalogRemovesStoredCopy() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+        #expect(store.catalogURL(for: sessionID) != nil)
+
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+
+        #expect(store.catalogURL(for: sessionID) == nil)
+        #expect(client.hasCatalogForCurrentSession == false)
+    }
+
+    @Test("metadata with a different catalogStamp removes the stale stored catalog")
+    func replacedCatalogRemovesStaleStoredCopy() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:2:200").toPropertyList()
+        )
+
+        #expect(store.catalogURL(for: sessionID) == nil)
+        #expect(client.hasCatalogForCurrentSession == false)
+    }
+
+    @Test("metadata with a matching catalogStamp keeps the stored catalog")
+    func matchingStampKeepsStoredCatalog() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+
+        #expect(store.catalogURL(for: sessionID) != nil)
+        #expect(client.hasCatalogForCurrentSession == true)
+    }
+
+    @Test("legacy stored catalog without a stamp is replaced when stamped metadata arrives")
+    func legacyStoredCatalogInvalidatedByStampedMetadata() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        try store.save(data: Data([0x01]), sessionID: sessionID)
+        #expect(store.stamp(for: sessionID) == nil)
+
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+
+        #expect(store.catalogURL(for: sessionID) == nil)
+        #expect(client.hasCatalogForCurrentSession == false)
+    }
+
+    @Test("late catalog transfer with an obsolete stamp does not re-enable sync after a clear")
+    func lateObsoleteCatalogStaysUnavailableAfterClear() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+
+        #expect(client.hasCatalogForCurrentSession == false)
+        #expect(client.catalogURLForCurrentSession() == nil)
+        #expect(store.catalogURL(for: sessionID) == nil)
+        #expect(store.hasPending(sessionID: sessionID, stamp: "film:1:100"))
+    }
+
+    @Test("late obsolete transfer does not clobber the catalog matching current metadata")
+    func lateObsoleteTransferKeepsMatchingCatalog() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:2:200").toPropertyList()
+        )
+        client.handleReceivedFile(data: Data([0x02]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:2:200",
+        ])
+        #expect(client.hasCatalogForCurrentSession == true)
+
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(store.stamp(for: sessionID) == "film:2:200")
+    }
+
+    @Test("a context announcing a stamp prunes pendings staged for stamps never announced")
+    func contextPrunesObsoletePendings() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+        client.handleReceivedFile(data: Data([0x02]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:2:200",
+        ])
+        client.handleReceivedFile(data: Data([0x03]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:3:300",
+        ])
+        #expect(store.hasPending(sessionID: sessionID, stamp: "film:2:200"))
+        #expect(store.hasPending(sessionID: sessionID, stamp: "film:3:300"))
+
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:3:300").toPropertyList()
+        )
+
+        #expect(!store.hasPending(sessionID: sessionID, stamp: "film:2:200"))
+        #expect(!store.hasPending(sessionID: sessionID, stamp: "film:3:300"))
+        #expect(store.stamp(for: sessionID) == "film:3:300")
+        #expect(client.hasCatalogForCurrentSession == true)
+    }
+
+    @Test("mismatched transfer is staged and becomes available when its metadata arrives")
+    func mismatchedTransferStagedUntilContextArrives() async throws {
+        let (client, _, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+        client.handleReceivedFile(data: Data([0x02]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:2:200",
+        ])
+        #expect(client.hasCatalogForCurrentSession == false)
+        #expect(client.catalogURLForCurrentSession() == nil)
+
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:2:200").toPropertyList()
+        )
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(client.catalogURLForCurrentSession() != nil)
+    }
+
+    @Test("replacement transfer arriving before its context does not evict the matching catalog and is promoted once announced")
+    func replacementTransferBeforeContextIsPromoted() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
+        ])
+        #expect(client.hasCatalogForCurrentSession == true)
+
+        client.handleReceivedFile(data: Data([0x02]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:2:200",
+        ])
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(store.stamp(for: sessionID) == "film:1:100")
+
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:2:200").toPropertyList()
+        )
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(store.stamp(for: sessionID) == "film:2:200")
+        let url = try #require(client.catalogURLForCurrentSession())
+        #expect(try Data(contentsOf: url) == Data([0x02]))
+    }
+
+    @Test("late obsolete transfer does not displace a staged replacement awaiting its context")
+    func lateObsoleteTransferKeepsStagedReplacement() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
+        client.handleReceivedFile(data: Data([0x03]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:3:300",
+        ])
+        client.handleReceivedFile(data: Data([0x02]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+            "stamp": "film:2:200",
+        ])
+
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:3:300").toPropertyList()
+        )
+
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(store.stamp(for: sessionID) == "film:3:300")
+        let url = try #require(client.catalogURLForCurrentSession())
+        #expect(try Data(contentsOf: url) == Data([0x03]))
+    }
+
+    @Test("unstamped stored catalog never matches metadata without a catalogStamp")
+    func unstampedCatalogDoesNotMatchNilStamp() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": sessionID.uuidString,
+        ])
+
+        #expect(store.catalogURL(for: sessionID) != nil)
+        #expect(client.catalogURLForCurrentSession() == nil)
+        #expect(client.hasCatalogForCurrentSession == false)
     }
 
     @Test("hasCatalogForCurrentSession resets on sessionEnded")
@@ -1364,10 +1805,13 @@ struct WatchSessionClientTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let sessionID = UUID()
-        client.handleReceivedApplicationContext(try makeMetadata(sessionID: sessionID).toPropertyList())
+        client.handleReceivedApplicationContext(
+            try makeMetadata(sessionID: sessionID, catalogStamp: "film:1:100").toPropertyList()
+        )
         client.handleReceivedFile(data: Data([0x01]), metadata: [
             "kind": "catalog",
             "sessionID": sessionID.uuidString,
+            "stamp": "film:1:100",
         ])
         #expect(client.hasCatalogForCurrentSession == true)
 
