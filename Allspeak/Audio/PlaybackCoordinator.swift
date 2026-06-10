@@ -56,6 +56,7 @@ final class PlaybackCoordinator {
     private var storage: DocumentsStorage = .default
     private var persistence: PersistenceController = .shared
     var liveActivity: LiveActivityCoordinator = LiveActivityCoordinator()
+    var diagnostics: DiagnosticsLog = .shared
 
     init() {}
 
@@ -200,6 +201,7 @@ final class PlaybackCoordinator {
         self.storage = storage
         self.persistence = persistence
         self.revision += 1
+        diagnostics.begin(filmTitle: snap.name, hasCatalog: snap.catalogFilename != nil)
         liveActivity.sessionStarted(
             id: snap.uuid,
             title: snap.name,
@@ -270,6 +272,7 @@ final class PlaybackCoordinator {
         self.dtwMapURL = nil
         self.dtwMapping = nil
         self.revision += 1
+        diagnostics.begin(filmTitle: title, hasCatalog: false)
         liveActivity.sessionStarted(
             id: sessionUUID,
             title: title,
@@ -555,6 +558,7 @@ final class PlaybackCoordinator {
 
     func endSession() {
         loadGeneration += 1
+        diagnostics.end()
         guard let controller else { return }
         controller.onTick = nil
         controller.onStateChange = nil

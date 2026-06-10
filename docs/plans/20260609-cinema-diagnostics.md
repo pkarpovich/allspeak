@@ -119,12 +119,16 @@ Design decisions (settled, do not relitigate):
 
 ### Task 2: Wire begin/end to the player lifecycle
 
-- [ ] call `DiagnosticsLog.shared.begin(filmTitle:hasCatalog:)` where the
+- [x] call `DiagnosticsLog.shared.begin(filmTitle:hasCatalog:)` where the
       player/session opens (same place `PlaybackCoordinator` learns its
       session / `PlayerView` appears) and `end()` where it closes
-- [ ] write tests for the begin/end wiring (extract decision logic if the
-      call site is not directly testable)
-- [ ] run tests - must pass before task 3
+      (wired into `PlaybackCoordinator.startSession` both overloads + via
+      injectable `diagnostics` property mirroring `liveActivity`; `end()` in
+      `endSession` before the controller guard so it is idempotent)
+- [x] write tests for the begin/end wiring (extract decision logic if the
+      call site is not directly testable) - call site is directly testable
+      via injected `DiagnosticsLog(rootURL:now:)`, no extraction needed
+- [x] run tests - must pass before task 3
 
 ### Task 3: Log phone-button sync events
 
