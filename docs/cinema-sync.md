@@ -238,17 +238,20 @@ are written without a decimal point):
   only); the offset fields are omitted.
 - **`watch_attempt`** — sent by the watch over `transferUserInfo` after every
   watch listen (queued delivery, so it arrives even if the phone was briefly
-  unreachable). `result`, `listenSeconds` (always present), `error` (optional).
-  A successful watch sync therefore appears twice: this `watch_attempt` (has
-  `listenSeconds`) and a paired `sync` with `source:"watch"` (has
-  `playerBefore`/`delta`) — join them by their adjacent `ts`.
-- **`skip`** — a manual +/-1s or +/-3s nudge. `seconds` (signed), `source`.
-  Between two syncs these are Pavel's "I heard ~Ns of desync" signals.
-- **`seek`** — a jump to an absolute position (subtitle / cue tap). `time`,
-  `source`.
+  unreachable). `result`, `listenSeconds` (both always present; the failure kind
+  is in `result`, so no separate error message is sent). A successful watch
+  sync therefore appears twice: this `watch_attempt` (has `listenSeconds`) and a
+  paired `sync` with `source:"watch"` (has `playerBefore`/`delta`) — join them
+  by their adjacent `ts`.
+- **`skip`** — a manual nudge. `seconds` (signed), `source`. The phone player
+  buttons step +/-0.5s each; the watch sends coalesced fine (1s) / coarse (3s)
+  taps, so a watch `seconds` can be an accumulated multiple. Between two syncs
+  these are Pavel's "I heard ~Ns of desync" signals.
+- **`seek`** — a jump to an absolute position (subtitle / cue tap, or dragging
+  the transport scrubber). `time`, `source`.
 - **`pause`** / **`play`** — envelope only.
 
 **Analysis**: the measured drift rate is `delta / (ts - previous-sync-ts)`,
 excluding intervals that contain a `seek` or `pause`; compare it against the
-DTW prediction from `drift_diagnostic.py` for that film. The +/-1s `skip` events
+DTW prediction from `drift_diagnostic.py` for that film. The small `skip` events
 between syncs map the perceived micro-drift the syncs are too coarse to show.

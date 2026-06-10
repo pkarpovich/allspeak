@@ -223,8 +223,7 @@ final class WatchSessionHost: NSObject {
         guard let resultRaw = userInfo["result"] as? String,
               let result = DiagnosticsEvent.MatchResult(rawValue: resultRaw),
               let listenSeconds = userInfo["listenSeconds"] as? Double else { return }
-        let error = userInfo["error"] as? String
-        diagnostics.log(.watchAttempt(result: result, listenSeconds: listenSeconds, error: error))
+        diagnostics.log(.watchAttempt(result: result, listenSeconds: listenSeconds))
     }
 
     func handleCueBundleRequest(sessionID: UUID, revision: Int) {

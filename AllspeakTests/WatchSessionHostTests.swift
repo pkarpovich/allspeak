@@ -1316,25 +1316,6 @@ struct WatchSessionHostTests {
         ])
     }
 
-    @Test("handleReceivedUserInfo carries the error message when present")
-    func receivedSyncAttemptLogsError() throws {
-        let (host, log, root) = makeDiagnosticsHost()
-        defer { try? FileManager.default.removeItem(at: root) }
-        log.begin(filmTitle: "Dune", hasCatalog: true)
-
-        host.handleReceivedUserInfo([
-            "kind": "syncAttempt",
-            "result": "error",
-            "listenSeconds": 2.0,
-            "error": "mic denied",
-        ])
-
-        let url = try #require(log.currentFileURL)
-        #expect(try readLines(url) == [
-            #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"error","listenSeconds":2,"error":"mic denied"}"#
-        ])
-    }
-
     @Test("handleReceivedUserInfo ignores payloads whose kind is not syncAttempt")
     func receivedNonAttemptIgnored() throws {
         let (host, log, root) = makeDiagnosticsHost()

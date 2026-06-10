@@ -25,7 +25,7 @@ enum DiagnosticsEvent {
         listenSeconds: Double?,
         error: String?
     )
-    case watchAttempt(result: MatchResult, listenSeconds: Double, error: String?)
+    case watchAttempt(result: MatchResult, listenSeconds: Double)
     case skip(seconds: Double, source: Source)
     case seek(time: Double, source: Source)
     case pause
@@ -61,10 +61,9 @@ enum DiagnosticsEvent {
             builder.addIfPresent("absStart", absStart)
             builder.addIfPresent("listenSeconds", listenSeconds)
             builder.addIfPresent("error", error)
-        case let .watchAttempt(result, listenSeconds, error):
+        case let .watchAttempt(result, listenSeconds):
             builder.add("result", result.rawValue)
             builder.add("listenSeconds", listenSeconds)
-            builder.addIfPresent("error", error)
         case let .skip(seconds, source):
             builder.add("seconds", seconds)
             builder.add("source", source.rawValue)

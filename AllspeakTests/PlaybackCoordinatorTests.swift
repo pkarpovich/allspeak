@@ -1318,6 +1318,41 @@ struct PlaybackCoordinatorTests {
         #expect(record["listenSeconds"] == nil)
     }
 
+    @Test("a rejected watch match writes no sync record")
+    func applyCinemaMatchRejectedLogsNothing() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let uuid = try #require(coordinator.sessionUUID)
+
+        let applied = coordinator.applyCinemaMatch(
+            sessionID: uuid,
+            stamp: "film.shazamcatalog:replaced",
+            enTime: 3.0,
+            defaults: try Self.makeLatencyDefaults(0.5)
+        )
+        #expect(applied == false)
+
+        let url = try #require(log.currentFileURL)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test("watch transport commands log skip, seek, pause, and play with the watch source")
     func watchTransportCommandsLogEvents() async throws {
         let imported = try await Self.importSession(withCatalog: true)

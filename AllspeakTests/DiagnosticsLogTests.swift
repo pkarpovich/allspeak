@@ -68,17 +68,17 @@ struct DiagnosticsLogTests {
         #expect(line == #"{"ts":"2026-06-12T19:43:02.115Z","event":"sync","source":"phone","result":"noMatch","latencyComp":0.9,"listenSeconds":4,"error":"no match"}"#)
     }
 
-    @Test("watch attempt encodes result, listenSeconds and optional error")
+    @Test("watch attempt encodes result and listenSeconds")
     func watchAttemptRecords() {
-        let matched = DiagnosticsEvent.watchAttempt(result: .matched, listenSeconds: 3.5, error: nil)
+        let matched = DiagnosticsEvent.watchAttempt(result: .matched, listenSeconds: 3.5)
         #expect(
             matched.jsonLine(timestamp: "2026-06-12T19:43:02.000Z")
                 == #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"matched","listenSeconds":3.5}"#
         )
-        let failed = DiagnosticsEvent.watchAttempt(result: .error, listenSeconds: 2.0, error: "mic denied")
+        let failed = DiagnosticsEvent.watchAttempt(result: .error, listenSeconds: 2.0)
         #expect(
             failed.jsonLine(timestamp: "2026-06-12T19:43:02.000Z")
-                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"error","listenSeconds":2,"error":"mic denied"}"#
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"error","listenSeconds":2}"#
         )
     }
 
@@ -105,14 +105,21 @@ struct DiagnosticsLogTests {
 
     @Test("error message with quotes is escaped")
     func escapesErrorMessage() {
-        let event = DiagnosticsEvent.watchAttempt(
+        let event = DiagnosticsEvent.sync(
+            source: .phone,
             result: .error,
-            listenSeconds: 1.0,
+            enTime: nil,
+            ruTime: nil,
+            playerBefore: nil,
+            delta: nil,
+            latencyComp: nil,
+            absStart: nil,
+            listenSeconds: nil,
             error: "broke \"hard\"\nline"
         )
         let line = event.jsonLine(timestamp: "2026-06-12T19:43:02.000Z")
         #expect(
-            line == #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"error","listenSeconds":1,"error":"broke \"hard\"\nline"}"#
+            line == #"{"ts":"2026-06-12T19:43:02.000Z","event":"sync","source":"phone","result":"error","error":"broke \"hard\"\nline"}"#
         )
         #expect(line.filter { $0 == "\n" }.isEmpty)
     }
@@ -179,6 +186,17 @@ struct DiagnosticsLogTests {
 
         let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
         #expect(Set(files) == ["dune-20260612-1943.jsonl", "dune-20260612-2110.jsonl"])
+
+        let first = try String(
+            contentsOf: diagnosticsDir(root).appendingPathComponent("dune-20260612-1943.jsonl"),
+            encoding: .utf8
+        )
+        let second = try String(
+            contentsOf: diagnosticsDir(root).appendingPathComponent("dune-20260612-2110.jsonl"),
+            encoding: .utf8
+        )
+        #expect(first == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n")
+        #expect(second == #"{"ts":"2026-06-12T21:10:00.000Z","event":"play"}"# + "\n")
     }
 
     @Test("filename slug is derived from the film title")
