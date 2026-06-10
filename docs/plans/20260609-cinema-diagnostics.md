@@ -158,20 +158,32 @@ Design decisions (settled, do not relitigate):
 
 ### Task 4: Log watch-originated sync + transport events
 
-- [ ] in `PlaybackCoordinator.applyCinemaMatch(enTime:)` log
+- [x] in `PlaybackCoordinator.applyCinemaMatch(enTime:)` log
       `sync(source: .watch, ...)` with playerBefore/delta around the seek
-- [ ] in `PlaybackCoordinator.apply(_:)` log `skip(seconds:, source: .watch)`,
+      (logs enTime=compensated enOffset, ruTime, latencyComp; absStart and
+      listenSeconds nil - the watch already folds abs_start into enTime and
+      the paired `watch_attempt` carries listenSeconds)
+- [x] in `PlaybackCoordinator.apply(_:)` log `skip(seconds:, source: .watch)`,
       `seek(time:, source: .watch)`, `pause`, `play` for the corresponding
-      commands
-- [ ] log phone-UI transport actions (pause/play/skip/seek from the player
-      screen) at the point where phone controls converge on
-      `AudioController` / `PlaybackCoordinator`, tagged `source: .phone` -
-      locate the convergence point first; if phone UI calls `AudioController`
-      directly, add the log calls in the controller methods with a source
-      parameter defaulting to `.phone`
-- [ ] write tests: each watch command produces its event; phone pause/play
-      produce events; events suppressed without catalog
-- [ ] run tests - must pass before task 5
+      commands (apply now routes through the shared transport methods below
+      with `source: .watch`; togglePlayPause resolves to play/pause)
+- [x] log phone-UI transport actions (pause/play/skip/seek from the player
+      screen) tagged `source: .phone`. DESIGN NOTE: did NOT add logging to the
+      low-level `AudioController` methods - `skip()` calls `seek()` internally
+      and the coordinator's own restore seeks (startSession, switchTrack,
+      refreshIfActive, applySyncOffset, applyCinemaMatch) all call
+      `controller.seek()`, so logging there would double-log and emit spurious
+      events. Instead added user-transport methods on `PlaybackCoordinator`
+      (`play/pause/togglePlayPause/skip(by:source:)/seek(to:source:)`, source
+      defaults to `.phone`) as the single convergence point; `PlayerView`
+      routes its controls through them. Lock-screen remote commands stay
+      unlogged (out of "player screen" scope)
+- [x] write tests: each watch command produces its event; phone pause/play
+      produce events; events suppressed without catalog (4 new tests:
+      applyCinemaMatch watch sync record, watch transport, phone transport,
+      no-catalog suppression)
+- [x] run tests - must pass before task 5 (full iOS suite: 535 tests in 38
+      suites passed)
 
 ### Task 5: Watch attempt reports over transferUserInfo
 

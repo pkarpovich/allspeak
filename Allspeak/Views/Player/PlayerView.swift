@@ -46,7 +46,7 @@ struct PlayerView: View {
                     cues: controller.subtitles,
                     currentIndex: controller.currentIndex,
                     cinema: cinema,
-                    onSeek: { controller.seek(to: $0) },
+                    onSeek: { PlaybackCoordinator.shared.seek(to: $0) },
                     onCinemaInput: { applyCinema($0) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -81,10 +81,10 @@ struct PlayerView: View {
                         currentTime: controller.currentTime,
                         duration: controller.duration,
                         isPlaying: controller.isPlaying,
-                        onPlayPause: { controller.togglePlayPause() },
-                        onSkipBack: { controller.skip(by: -0.5) },
-                        onSkipForward: { controller.skip(by: 0.5) },
-                        onScrub: { controller.seek(to: $0) }
+                        onPlayPause: { PlaybackCoordinator.shared.togglePlayPause() },
+                        onSkipBack: { PlaybackCoordinator.shared.skip(by: -0.5) },
+                        onSkipForward: { PlaybackCoordinator.shared.skip(by: 0.5) },
+                        onScrub: { PlaybackCoordinator.shared.seek(to: $0) }
                     )
                     .padding(.bottom, 28)
                 }

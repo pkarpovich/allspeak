@@ -647,6 +647,45 @@ final class PlaybackCoordinator {
         ))
     }
 
+    // User-initiated transport convergence point. The phone player screen and
+    // the watch both route play/pause/skip/seek here so each action is logged
+    // exactly once with its source - the low-level AudioController methods stay
+    // log-free because skip() calls seek() internally and the coordinator's own
+    // restore seeks (startSession, switchTrack, refreshIfActive, sync) would
+    // otherwise emit spurious events.
+    func play() {
+        guard let controller else { return }
+        controller.play()
+        diagnostics.log(.play)
+    }
+
+    func pause() {
+        guard let controller else { return }
+        controller.pause()
+        diagnostics.log(.pause)
+    }
+
+    func togglePlayPause() {
+        guard let controller else { return }
+        if controller.isPlaying {
+            pause()
+        } else {
+            play()
+        }
+    }
+
+    func skip(by seconds: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
+        guard let controller else { return }
+        controller.skip(by: seconds)
+        diagnostics.log(.skip(seconds: seconds, source: source))
+    }
+
+    func seek(to time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
+        guard let controller else { return }
+        controller.seek(to: time)
+        diagnostics.log(.seek(time: time, source: source))
+    }
+
     // The stamp identifies the catalog the watch matched against; both sides
     // must hold the same non-nil stamp. A mismatch means the phone replaced or
     // cleared the catalog after the watch started listening, so the matched
@@ -659,9 +698,23 @@ final class PlaybackCoordinator {
     @discardableResult
     func applyCinemaMatch(sessionID: UUID, stamp: String?, enTime: Double, defaults: UserDefaults = .standard) -> Bool {
         guard let controller, sessionUUID == sessionID, let stamp, stamp == catalogStamp else { return false }
-        let enOffset = enTime + CinemaSyncService.storedLatencyCompensation(defaults)
+        let latencyComp = CinemaSyncService.storedLatencyCompensation(defaults)
+        let enOffset = enTime + latencyComp
         let ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
+        let playerBefore = controller.currentTime
         controller.seek(to: ruOffset)
+        diagnostics.log(.sync(
+            source: .watch,
+            result: .matched,
+            enTime: enOffset,
+            ruTime: ruOffset,
+            playerBefore: playerBefore,
+            delta: ruOffset - playerBefore,
+            latencyComp: latencyComp,
+            absStart: nil,
+            listenSeconds: nil,
+            error: nil
+        ))
         return true
     }
 
@@ -669,15 +722,15 @@ final class PlaybackCoordinator {
         guard let controller else { return }
         switch command {
         case .play:
-            controller.play()
+            play()
         case .pause:
-            controller.pause()
+            pause()
         case .togglePlayPause:
-            controller.togglePlayPause()
+            togglePlayPause()
         case .skip(let seconds):
-            controller.skip(by: seconds)
+            skip(by: seconds, source: .watch)
         case .seek(let time):
-            controller.seek(to: time)
+            seek(to: time, source: .watch)
         case .switchTrack(let id):
             Task { [weak self] in
                 try? await self?.switchTrack(to: id)

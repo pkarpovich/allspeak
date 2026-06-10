@@ -1268,6 +1268,171 @@ struct PlaybackCoordinatorTests {
         let url = try #require(log.currentFileURL)
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
+
+    @Test("applyCinemaMatch logs a matched watch sync record with the player position and delta")
+    func applyCinemaMatchLogsWatchSyncRecord() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let controller = try #require(coordinator.controller)
+        controller.seek(to: 1.0)
+        let uuid = try #require(coordinator.sessionUUID)
+        let stamp = try #require(coordinator.catalogStamp)
+
+        let applied = coordinator.applyCinemaMatch(
+            sessionID: uuid,
+            stamp: stamp,
+            enTime: 3.0,
+            defaults: try Self.makeLatencyDefaults(0.5)
+        )
+        #expect(applied)
+
+        let url = try #require(log.currentFileURL)
+        let record = try #require(Self.readJSONLines(url).last)
+        #expect(record["event"] as? String == "sync")
+        #expect(record["source"] as? String == "watch")
+        #expect(record["result"] as? String == "matched")
+        // no DTW map -> identity mapping; enOffset = 3.0 + latencyComp 0.5
+        #expect(record["enTime"] as? Double == 3.5)
+        #expect(record["ruTime"] as? Double == 3.5)
+        #expect(record["playerBefore"] as? Double == 1.0)
+        #expect(record["delta"] as? Double == 2.5)
+        #expect(record["latencyComp"] as? Double == 0.5)
+        #expect(record["absStart"] == nil)
+        #expect(record["listenSeconds"] == nil)
+    }
+
+    @Test("watch transport commands log skip, seek, pause, and play with the watch source")
+    func watchTransportCommandsLogEvents() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        coordinator.apply(.skip(seconds: -1.0))
+        coordinator.apply(.seek(time: 2.0))
+        coordinator.apply(.pause)
+        coordinator.apply(.togglePlayPause)
+
+        let url = try #require(log.currentFileURL)
+        let records = try Self.readJSONLines(url)
+        #expect(records.count == 4)
+
+        #expect(records[0]["event"] as? String == "skip")
+        #expect(records[0]["seconds"] as? Double == -1.0)
+        #expect(records[0]["source"] as? String == "watch")
+
+        #expect(records[1]["event"] as? String == "seek")
+        #expect(records[1]["time"] as? Double == 2.0)
+        #expect(records[1]["source"] as? String == "watch")
+
+        #expect(records[2]["event"] as? String == "pause")
+        #expect(records[3]["event"] as? String == "play")
+    }
+
+    @Test("phone transport via the coordinator logs play, pause, skip, and seek with the phone source")
+    func phoneTransportCommandsLogEvents() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        coordinator.play()
+        coordinator.pause()
+        coordinator.skip(by: 0.5)
+        coordinator.seek(to: 2.0)
+
+        let url = try #require(log.currentFileURL)
+        let records = try Self.readJSONLines(url)
+        #expect(records.count == 4)
+
+        #expect(records[0]["event"] as? String == "play")
+        #expect(records[1]["event"] as? String == "pause")
+
+        #expect(records[2]["event"] as? String == "skip")
+        #expect(records[2]["seconds"] as? Double == 0.5)
+        #expect(records[2]["source"] as? String == "phone")
+
+        #expect(records[3]["event"] as? String == "seek")
+        #expect(records[3]["time"] as? Double == 2.0)
+        #expect(records[3]["source"] as? String == "phone")
+    }
+
+    @Test("watch and phone transport without a catalog log nothing")
+    func transportWithoutCatalogLogsNothing() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Quick", audio: audio, subtitles: Self.cues)
+
+        coordinator.apply(.skip(seconds: 1.0))
+        coordinator.apply(.seek(time: 2.0))
+        coordinator.apply(.pause)
+        coordinator.play()
+        coordinator.skip(by: 0.5)
+        coordinator.seek(to: 1.0)
+        coordinator.togglePlayPause()
+
+        let url = try #require(log.currentFileURL)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
 }
 
 #endif
