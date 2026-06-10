@@ -215,15 +215,25 @@ Design decisions (settled, do not relitigate):
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (sync deltas,
-      manual nudges, watch failures, gating, OSLog mirror, no UI)
-- [ ] verify edge cases: session without catalog (zero files), first sync of a
-      screening (delta present but meaningless - analysis concern, just ensure
-      it is recorded), crash mid-write (append-only file stays parseable up to
-      the last full line - document, no code needed)
-- [ ] run full test suite (iOS scheme) - all green
-- [ ] build AllspeakWatch scheme for watchOS simulator - compiles clean
-- [ ] run linter if configured - all issues fixed
+- [x] verify all requirements from Overview are implemented (sync deltas,
+      manual nudges, watch failures, gating, OSLog mirror, no UI) - confirmed:
+      sync deltas via `sync(playerBefore,delta)` at PlaybackCoordinator:636,706;
+      manual nudges via `skip`/`seek` source-tagged at :680,686; watch failures
+      via `watch_attempt` (WatchSessionHost:227) + phone failures
+      (CinemaSyncService:216); gating via `guard hasCatalog` in DiagnosticsLog +
+      `catalogFilename != nil` at begin; OSLog mirror via `logger.log` per line;
+      no UI (only Audio/Watch/Diagnostics code references the log)
+- [x] verify edge cases: session without catalog (zero files - `guard hasCatalog`
+      blocks lazy file creation, covered by tests), first sync of a screening
+      (delta = ruTime - playerBefore is always recorded regardless of meaning),
+      crash mid-write (append-only `FileHandle` with per-line write+synchronize
+      keeps the file parseable up to the last full line - documented, no code)
+- [x] run full test suite (iOS scheme) - all green (546 tests in 38 suites
+      passed, TEST SUCCEEDED)
+- [x] build AllspeakWatch scheme for watchOS simulator - compiles clean
+      (BUILD SUCCEEDED, watchOS 26.5, Apple Watch Series 11)
+- [x] run linter if configured - no linter configured (swiftlint not installed,
+      no .swiftlint.yml), nothing to fix
 
 ### Task 7: Update documentation
 
