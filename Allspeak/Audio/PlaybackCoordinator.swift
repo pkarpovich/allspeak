@@ -368,6 +368,7 @@ final class PlaybackCoordinator {
         sessionTitle = snap.name
         catalogURL = newCatalogURL
         catalogStamp = newCatalogStamp
+        diagnostics.setHasCatalog(snap.catalogFilename != nil)
         dtwMapURL = newDTWMapURL
         dtwMapping = newDTWMapping
         tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }

@@ -40,10 +40,30 @@ final class DiagnosticsLog {
     func begin(filmTitle: String, hasCatalog: Bool) {
         closeHandle()
         let stamp = stampFormatter.string(from: now())
-        let name = "\(Self.slug(filmTitle))-\(stamp).jsonl"
-        fileURL = rootURL
-            .appendingPathComponent("diagnostics", isDirectory: true)
-            .appendingPathComponent(name)
+        let directory = rootURL.appendingPathComponent("diagnostics", isDirectory: true)
+        fileURL = Self.uniqueFileURL(in: directory, slug: Self.slug(filmTitle), stamp: stamp, fileManager: fileManager)
+        self.hasCatalog = hasCatalog
+    }
+
+    // A new screening must never append to a prior screening's file. Minute-
+    // resolution stamps collide when the same film is restarted within one
+    // minute (home testing), so probe for an unused name and suffix on collision.
+    private static func uniqueFileURL(in directory: URL, slug: String, stamp: String, fileManager: FileManager) -> URL {
+        let base = directory.appendingPathComponent("\(slug)-\(stamp).jsonl")
+        if !fileManager.fileExists(atPath: base.path) { return base }
+        var counter = 2
+        while true {
+            let candidate = directory.appendingPathComponent("\(slug)-\(stamp)-\(counter).jsonl")
+            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
+            counter += 1
+        }
+    }
+
+    // Catalog state can change on an active session (a catalog attached or
+    // cleared via the edit flow, surfaced through refreshIfActive). Gating
+    // must track it: an attached catalog must start logging, a cleared one
+    // must stop, without renaming the in-progress screening's file.
+    func setHasCatalog(_ hasCatalog: Bool) {
         self.hasCatalog = hasCatalog
     }
 

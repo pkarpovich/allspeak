@@ -223,6 +223,15 @@ final class WatchSessionHost: NSObject {
         guard let resultRaw = userInfo["result"] as? String,
               let result = DiagnosticsEvent.MatchResult(rawValue: resultRaw),
               let listenSeconds = userInfo["listenSeconds"] as? Double else { return }
+        // Queued delivery can land a report after the phone has moved on to a
+        // different screening. Drop it rather than writing one film's attempt
+        // into another film's log. Reports without a sessionID (older watch
+        // builds) stay backward-compatible and are logged against the active log.
+        if let reportedID = userInfo["sessionID"] as? String,
+           let current = coordinator.sessionUUID,
+           reportedID != current.uuidString {
+            return
+        }
         diagnostics.log(.watchAttempt(result: result, listenSeconds: listenSeconds))
     }
 

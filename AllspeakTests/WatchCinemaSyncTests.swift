@@ -557,6 +557,40 @@ struct WatchCinemaSyncTests {
         #expect(attemptReports(sender).isEmpty)
     }
 
+    @Test("a catalog load error transfers an error attempt report with zero listen time")
+    func catalogLoadErrorSendsAttemptReport() async throws {
+        let sessionID = UUID()
+        let sender = MockSender()
+        let sync = WatchCinemaSync(
+            makeSession: { _ in throw NSError(domain: "test", code: 1) },
+            sender: sender,
+            haptics: MockHaptics()
+        )
+
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["result"] as? String == "error")
+        #expect(reports[0]["listenSeconds"] as? Double == 0)
+        #expect(reports[0]["sessionID"] as? String == sessionID.uuidString)
+    }
+
+    @Test("an attempt report carries the sessionID it listened against")
+    func attemptReportCarriesSessionID() async throws {
+        let sessionID = UUID()
+        let session = MockMatchingSession(outcome: .noMatch)
+        let sender = MockSender()
+        let sync = makeSync(session: session, sender: sender)
+
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID, stamp: "film:1:100")
+        await sync.listenTask?.value
+
+        let reports = attemptReports(sender)
+        #expect(reports.count == 1)
+        #expect(reports[0]["sessionID"] as? String == sessionID.uuidString)
+    }
+
     @Test("cancel during the permission prompt transfers no attempt report")
     func cancelDuringPermissionSendsNoAttemptReport() async throws {
         let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=0", offset: 1))

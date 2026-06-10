@@ -199,6 +199,34 @@ struct DiagnosticsLogTests {
         #expect(second == #"{"ts":"2026-06-12T21:10:00.000Z","event":"play"}"# + "\n")
     }
 
+    @Test("restarting the same film within the same minute creates a separate file")
+    func sameMinuteRestartSeparateFile() throws {
+        let root = makeTempRoot()
+        let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
+
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.log(.play)
+        log.end()
+
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.log(.pause)
+        log.end()
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
+        #expect(Set(files) == ["dune-20260612-1943.jsonl", "dune-20260612-1943-2.jsonl"])
+
+        let first = try String(
+            contentsOf: diagnosticsDir(root).appendingPathComponent("dune-20260612-1943.jsonl"),
+            encoding: .utf8
+        )
+        let second = try String(
+            contentsOf: diagnosticsDir(root).appendingPathComponent("dune-20260612-1943-2.jsonl"),
+            encoding: .utf8
+        )
+        #expect(first == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n")
+        #expect(second == #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause"}"# + "\n")
+    }
+
     @Test("filename slug is derived from the film title")
     func filenameSlug() throws {
         let root = makeTempRoot()

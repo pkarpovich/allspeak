@@ -1316,6 +1316,38 @@ struct WatchSessionHostTests {
         ])
     }
 
+    @Test("handleReceivedUserInfo drops a report whose sessionID is for a different screening")
+    func receivedSyncAttemptForOtherSessionDropped() throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        let root = makeTempRoot()
+        let log = DiagnosticsLog(rootURL: root, now: { self.isoDate("2026-06-12T19:43:02.000Z") })
+        host.diagnostics = log
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+            try? FileManager.default.removeItem(at: root)
+        }
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+        let current = try #require(coordinator.sessionUUID)
+
+        host.handleReceivedUserInfo([
+            "kind": "syncAttempt",
+            "sessionID": UUID().uuidString,
+            "result": "matched",
+            "listenSeconds": 2.0,
+        ])
+        #expect(log.currentFileURL.map { FileManager.default.fileExists(atPath: $0.path) } != true)
+
+        host.handleReceivedUserInfo([
+            "kind": "syncAttempt",
+            "sessionID": current.uuidString,
+            "result": "matched",
+            "listenSeconds": 2.0,
+        ])
+        let url = try #require(log.currentFileURL)
+        #expect(try readLines(url).count == 1)
+    }
+
     @Test("handleReceivedUserInfo ignores payloads whose kind is not syncAttempt")
     func receivedNonAttemptIgnored() throws {
         let (host, log, root) = makeDiagnosticsHost()

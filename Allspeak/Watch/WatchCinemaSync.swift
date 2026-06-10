@@ -170,6 +170,10 @@ final class WatchCinemaSync {
         do {
             session = try makeSession(catalogURL)
         } catch {
+            // A catalog that fails to load is still an attempt; report it so the
+            // phone's diagnostics log sees the failure (zero listen time, since
+            // listening never started). Matches the "report every attempt" rule.
+            reportAttempt(sessionID: sessionID, result: "error", listenSeconds: 0)
             state = .failed
             haptics.play(.failure)
             return
@@ -234,7 +238,7 @@ final class WatchCinemaSync {
         activeSession = nil
         listenTask = nil
         let listenSeconds = listenStartedAt.map { now().timeIntervalSince($0) } ?? 0
-        reportAttempt(result: Self.result(for: outcome), listenSeconds: listenSeconds)
+        reportAttempt(sessionID: sessionID, result: Self.result(for: outcome), listenSeconds: listenSeconds)
         switch outcome {
         case .match(let subtitle, let offset):
             let enTime = CinemaMatch.absStart(fromSubtitle: subtitle) + offset
@@ -260,10 +264,13 @@ final class WatchCinemaSync {
     // Queued (transferUserInfo) delivery so a failed/successful attempt is
     // recorded by the phone's diagnostics log even if the phone was briefly
     // unreachable. A cancelled attempt never reaches here (handleOutcome's
-    // guard returns first), so cancels report nothing.
-    private func reportAttempt(result: String, listenSeconds: Double) {
+    // guard returns first), so cancels report nothing. The sessionID lets the
+    // phone drop a report that the queue delivered after the phone moved on to
+    // a different screening - otherwise film A's attempt lands in film B's log.
+    private func reportAttempt(sessionID: UUID, result: String, listenSeconds: Double) {
         sender.transferUserInfo([
             "kind": "syncAttempt",
+            "sessionID": sessionID.uuidString,
             "result": result,
             "listenSeconds": listenSeconds,
         ])

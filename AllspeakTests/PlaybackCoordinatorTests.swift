@@ -1206,6 +1206,74 @@ struct PlaybackCoordinatorTests {
         #expect(try #require(log.currentFileURL).lastPathComponent.hasPrefix("bravo-"))
     }
 
+    @Test("attaching a catalog to an active session turns diagnostics logging on")
+    func refreshAttachingCatalogEnablesLogging() async throws {
+        let imported = try await Self.importSession(withCatalog: false)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let url = try #require(log.currentFileURL)
+        log.log(.play)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+
+        let catalogSrc = imported.root.appendingPathComponent("inbox/added.shazamcatalog")
+        try Data([0x07, 0x08, 0x09]).write(to: catalogSrc)
+        try await imported.repo.setCatalog(sessionID: imported.sessionID, srcURL: catalogSrc)
+        await coordinator.refreshIfActive(sessionID: imported.sessionID)
+
+        log.log(.pause)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("clearing a catalog on an active session turns diagnostics logging off")
+    func refreshClearingCatalogDisablesLogging() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let url = try #require(log.currentFileURL)
+        log.log(.play)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        let afterFirst = try String(contentsOf: url, encoding: .utf8)
+
+        try await imported.repo.clearCatalog(sessionID: imported.sessionID)
+        await coordinator.refreshIfActive(sessionID: imported.sessionID)
+
+        log.log(.pause)
+        let afterSecond = try String(contentsOf: url, encoding: .utf8)
+        #expect(afterFirst == afterSecond)
+    }
+
     @Test("applySyncOffset logs a matched phone sync record with the player position and delta")
     func applySyncOffsetLogsMatchedRecord() async throws {
         let imported = try await Self.importSession(withCatalog: true)

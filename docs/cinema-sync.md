@@ -194,7 +194,10 @@ after every line — a crash mid-screening leaves the file parseable up to the
 last complete line. `<film-slug>` is the session title lowercased with
 non-alphanumeric runs collapsed to `-` (e.g. `After the Light` ->
 `after-the-light`, empty -> `session`); the stamp is the UTC time of the
-`begin` call that opened the player.
+`begin` call that opened the player. The stamp is minute-resolution, so
+restarting the same film within the same minute (home testing) would collide;
+the later file gains a numeric suffix instead — `<film-slug>-<yyyyMMdd-HHmm>-2.jsonl`,
+then `-3`, and so on — so a new screening never appends to a prior one's file.
 
 **Pulling the file**: the app's `Documents` folder is exposed to the Files app
 (`UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace`). Open Files ->
