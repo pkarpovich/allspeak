@@ -1,3 +1,4 @@
+import AVFAudio
 import Foundation
 import Observation
 import ShazamKit
@@ -108,6 +109,7 @@ final class WatchCinemaSync {
     @ObservationIgnored private let makeSession: (URL) throws -> any WatchCinemaMatching
     @ObservationIgnored private let sender: any WatchMessageSender
     @ObservationIgnored private let haptics: any WatchSyncHapticsPlaying
+    @ObservationIgnored private let checkPermission: @Sendable () async -> Bool
     @ObservationIgnored private let timeout: Duration
 
     @ObservationIgnored private var activeSession: (any WatchCinemaMatching)?
@@ -121,11 +123,14 @@ final class WatchCinemaSync {
             = { try ManagedCinemaSession(catalogURL: $0) },
         sender: any WatchMessageSender = DefaultWatchMessageSender.shared,
         haptics: any WatchSyncHapticsPlaying,
+        checkPermission: @escaping @Sendable () async -> Bool
+            = { await WatchCinemaSync.requestMicrophonePermission() },
         timeout: Duration = .seconds(8)
     ) {
         self.makeSession = makeSession
         self.sender = sender
         self.haptics = haptics
+        self.checkPermission = checkPermission
         self.timeout = timeout
     }
 
@@ -168,10 +173,33 @@ final class WatchCinemaSync {
         activeSession = session
         state = .listening
         let timeout = timeout
+        let checkPermission = checkPermission
+        // Permission resolves before the timeout starts: the first-run system
+        // prompt must not eat into (or outlive) the listen window. Denial maps
+        // to .error, which surfaces as failed with the failure haptic.
         listenTask = Task { [weak self] in
-            let outcome = await Self.awaitOutcome(session: session, timeout: timeout)
+            let outcome: WatchCinemaMatchOutcome?
+            if await checkPermission() {
+                outcome = await Self.awaitOutcome(session: session, timeout: timeout)
+            } else {
+                outcome = .error
+            }
             session.cancel()
             await self?.handleOutcome(outcome, sessionID: sessionID, attempt: attempt)
+        }
+    }
+
+    @MainActor
+    static func requestMicrophonePermission() async -> Bool {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            return await AVAudioApplication.requestRecordPermission()
+        @unknown default:
+            return false
         }
     }
 

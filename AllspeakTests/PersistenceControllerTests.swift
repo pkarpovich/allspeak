@@ -4,6 +4,7 @@ import Testing
 @testable import Allspeak
 
 @Suite("PersistenceController", .tags(.coreData), .serialized)
+@MainActor
 struct PersistenceControllerTests {
 
     @Test("in-memory store boots successfully")

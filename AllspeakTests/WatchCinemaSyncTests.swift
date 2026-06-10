@@ -76,12 +76,14 @@ struct WatchCinemaSyncTests {
         session: MockMatchingSession,
         sender: MockSender = MockSender(),
         haptics: MockHaptics = MockHaptics(),
+        checkPermission: @escaping @Sendable () async -> Bool = { true },
         timeout: Duration = .seconds(60)
     ) -> WatchCinemaSync {
         WatchCinemaSync(
             makeSession: { _ in session },
             sender: sender,
             haptics: haptics,
+            checkPermission: checkPermission,
             timeout: timeout
         )
     }
@@ -242,6 +244,80 @@ struct WatchCinemaSyncTests {
         #expect(haptics.played.isEmpty)
 
         sync.cancelListening()
+    }
+
+    @Test("denied mic permission surfaces failed without ever listening")
+    func deniedPermissionFails() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=60", offset: 5))
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = makeSync(
+            session: session,
+            sender: sender,
+            haptics: haptics,
+            checkPermission: { false }
+        )
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        #expect(sync.state == .listening)
+        await sync.listenTask?.value
+
+        #expect(sync.state == .failed)
+        #expect(sender.sentMessages.isEmpty)
+        #expect(haptics.played == [.failure])
+        #expect(session.cancelCount >= 1)
+    }
+
+    @Test("timeout does not start until the permission prompt resolves")
+    func timeoutWaitsForPermission() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=0", offset: 1))
+        let sessionID = UUID()
+        let sender = MockSender()
+        sender.nextReply = Self.snapshotReply(sessionID: sessionID)
+        let sync = makeSync(
+            session: session,
+            sender: sender,
+            checkPermission: {
+                try? await Task.sleep(for: .milliseconds(200))
+                return true
+            },
+            timeout: .milliseconds(50)
+        )
+
+        sync.tap(catalogURL: catalogURL(), sessionID: sessionID)
+        await sync.listenTask?.value
+
+        #expect(sync.state == .sent)
+        #expect(sentCommands(sender) == [.cinemaMatch(sessionID: sessionID, enTime: 1)])
+    }
+
+    @Test("cancel while the permission prompt is up stays idle with no haptic")
+    func cancelDuringPermissionPrompt() async throws {
+        let session = MockMatchingSession(outcome: .match(subtitle: "abs_start=0", offset: 1))
+        let sender = MockSender()
+        let haptics = MockHaptics()
+        let sync = makeSync(
+            session: session,
+            sender: sender,
+            haptics: haptics,
+            checkPermission: {
+                try? await Task.sleep(for: .seconds(60))
+                return true
+            }
+        )
+
+        sync.tap(catalogURL: catalogURL(), sessionID: UUID())
+        #expect(sync.state == .listening)
+        let task = sync.listenTask
+
+        sync.cancelListening()
+        #expect(sync.state == .idle)
+
+        await task?.value
+
+        #expect(sync.state == .idle)
+        #expect(sender.sentMessages.isEmpty)
+        #expect(haptics.played.isEmpty)
     }
 
     @Test("catalog load error surfaces failed with failure haptic and no listening")
