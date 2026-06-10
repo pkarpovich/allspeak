@@ -137,6 +137,7 @@ final class WatchSessionHost: NSObject {
 
     func broadcastSessionEnded() {
         lastSentBundleKey = nil
+        lastSentCatalogKey = nil
         guard let session, session.activationState == .activated else { return }
         try? session.updateApplicationContext(SessionEndedSignal.propertyList())
     }

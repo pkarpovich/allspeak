@@ -129,11 +129,11 @@ final class WatchCinemaSync {
         self.timeout = timeout
     }
 
-    func tap(catalogURL: URL) {
+    func tap(catalogURL: URL, sessionID: UUID) {
         if state == .listening {
             cancelListening()
         } else {
-            startListening(catalogURL: catalogURL)
+            startListening(catalogURL: catalogURL, sessionID: sessionID)
         }
     }
 
@@ -154,7 +154,7 @@ final class WatchCinemaSync {
         state = .idle
     }
 
-    private func startListening(catalogURL: URL) {
+    private func startListening(catalogURL: URL, sessionID: UUID) {
         attemptID += 1
         let attempt = attemptID
         let session: any WatchCinemaMatching
@@ -171,7 +171,7 @@ final class WatchCinemaSync {
         listenTask = Task { [weak self] in
             let outcome = await Self.awaitOutcome(session: session, timeout: timeout)
             session.cancel()
-            await self?.handleOutcome(outcome, attempt: attempt)
+            await self?.handleOutcome(outcome, sessionID: sessionID, attempt: attempt)
         }
     }
 
@@ -196,26 +196,36 @@ final class WatchCinemaSync {
         }
     }
 
-    private func handleOutcome(_ outcome: WatchCinemaMatchOutcome?, attempt: Int) async {
+    private func handleOutcome(_ outcome: WatchCinemaMatchOutcome?, sessionID: UUID, attempt: Int) async {
         guard attempt == attemptID, state == .listening else { return }
         activeSession = nil
         listenTask = nil
         switch outcome {
         case .match(let subtitle, let offset):
             let enTime = CinemaMatch.absStart(fromSubtitle: subtitle) + offset
-            await sendMatch(enTime: enTime, attempt: attempt)
+            await sendMatch(sessionID: sessionID, enTime: enTime, attempt: attempt)
         case .noMatch, .error, nil:
             state = .failed
             haptics.play(.failure)
         }
     }
 
-    private func sendMatch(enTime: TimeInterval, attempt: Int) async {
+    // Success only when the phone's reply snapshot is for the session we
+    // matched against — an empty snapshot (phone session ended) or a different
+    // sessionID (phone switched sessions mid-listen) means nothing was seeked,
+    // so the wrist must not feel the success haptic.
+    private func sendMatch(sessionID: UUID, enTime: TimeInterval, attempt: Int) async {
         do {
-            try await send(.cinemaMatch(enTime: enTime))
+            let reply = try await send(.cinemaMatch(sessionID: sessionID, enTime: enTime))
             guard attempt == attemptID else { return }
-            state = .sent
-            haptics.play(.success)
+            let snapshot = try? PlaybackSnapshot(propertyList: reply)
+            if snapshot?.sessionID == sessionID {
+                state = .sent
+                haptics.play(.success)
+            } else {
+                state = .failed
+                haptics.play(.failure)
+            }
         } catch {
             guard attempt == attemptID else { return }
             state = .failed
@@ -223,14 +233,19 @@ final class WatchCinemaSync {
         }
     }
 
-    private func send(_ command: WatchCommand) async throws {
+    private func send(_ command: WatchCommand) async throws -> [String: Any] {
         let payload = try command.toPropertyList()
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+        let reply = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<SendableReply, any Error>) in
             sender.send(
                 message: payload,
-                replyHandler: { _ in continuation.resume() },
+                replyHandler: { continuation.resume(returning: SendableReply(value: $0)) },
                 errorHandler: { continuation.resume(throwing: $0) }
             )
         }
+        return reply.value
     }
+}
+
+private struct SendableReply: @unchecked Sendable {
+    let value: [String: Any]
 }

@@ -714,6 +714,12 @@ struct PlaybackCoordinatorTests {
         body()
     }
 
+    private static func makeLatencyDefaults(_ value: Double) throws -> UserDefaults {
+        let defaults = try #require(UserDefaults(suiteName: "PlaybackCoordinatorTests.\(UUID().uuidString)"))
+        defaults.set(value, forKey: CinemaSyncService.latencyCompensationDefaultsKey)
+        return defaults
+    }
+
     @Test("applyCinemaMatch seeks to the DTW-mapped RU time")
     func applyCinemaMatchMapsThroughDTW() async throws {
         let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
@@ -723,9 +729,11 @@ struct PlaybackCoordinatorTests {
         }
         let controller = try #require(fixture.coordinator.controller)
 
-        Self.withLatencyCompensation(0.0) {
-            fixture.coordinator.applyCinemaMatch(enTime: 4.0)
-        }
+        fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            enTime: 4.0,
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
 
         #expect(abs(controller.currentTime - 2.0) < 0.05)
     }
@@ -739,9 +747,11 @@ struct PlaybackCoordinatorTests {
         }
         let controller = try #require(fixture.coordinator.controller)
 
-        Self.withLatencyCompensation(2.0) {
-            fixture.coordinator.applyCinemaMatch(enTime: 2.0)
-        }
+        fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            enTime: 2.0,
+            defaults: try Self.makeLatencyDefaults(2.0)
+        )
 
         #expect(abs(controller.currentTime - 2.0) < 0.05)
     }
@@ -755,21 +765,43 @@ struct PlaybackCoordinatorTests {
         }
         let controller = try #require(fixture.coordinator.controller)
 
-        Self.withLatencyCompensation(1.5) {
-            fixture.coordinator.applyCinemaMatch(enTime: 1.0)
-        }
+        fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            enTime: 1.0,
+            defaults: try Self.makeLatencyDefaults(1.5)
+        )
 
         #expect(abs(controller.currentTime - 2.5) < 0.05)
     }
 
+    @Test("applyCinemaMatch for a different session does not seek")
+    func applyCinemaMatchIgnoresOtherSession() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        fixture.coordinator.applyCinemaMatch(
+            sessionID: UUID(),
+            enTime: 3.0,
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
+
+        #expect(abs(controller.currentTime - 0.0) < 0.05)
+    }
+
     @Test("applyCinemaMatch with no active session is a no-op")
-    func applyCinemaMatchIdleIsNoOp() {
+    func applyCinemaMatchIdleIsNoOp() throws {
         let coordinator = PlaybackCoordinator.shared
         coordinator.endSession()
 
-        Self.withLatencyCompensation(0.0) {
-            coordinator.applyCinemaMatch(enTime: 123.0)
-        }
+        coordinator.applyCinemaMatch(
+            sessionID: UUID(),
+            enTime: 123.0,
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
 
         #expect(coordinator.controller == nil)
     }
@@ -782,12 +814,13 @@ struct PlaybackCoordinatorTests {
         let audio = try Self.makeSilenceFile(seconds: 5)
         defer { try? FileManager.default.removeItem(at: audio) }
 
-        try coordinator.startSession(sessionUUID: UUID(), title: "Sync", audio: audio, subtitles: Self.cues)
+        let sessionUUID = UUID()
+        try coordinator.startSession(sessionUUID: sessionUUID, title: "Sync", audio: audio, subtitles: Self.cues)
         defer { coordinator.endSession() }
         let controller = try #require(coordinator.controller)
 
         Self.withLatencyCompensation(0.5) {
-            coordinator.apply(.cinemaMatch(enTime: 2.0))
+            coordinator.apply(.cinemaMatch(sessionID: sessionUUID, enTime: 2.0))
         }
 
         #expect(abs(controller.currentTime - 2.5) < 0.05)

@@ -36,8 +36,8 @@ struct CatalogStoreTests {
         #expect(store.catalogURL(for: UUID()) == nil)
     }
 
-    @Test("save prunes catalogs for other sessions")
-    func savePrunesOtherSessions() throws {
+    @Test("pruneStale removes catalogs outside the keep set")
+    func pruneStaleRemovesOthers() throws {
         let (store, dir) = try makeStore()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -46,8 +46,29 @@ struct CatalogStoreTests {
         try store.save(data: Data([0x01]), sessionID: oldSession)
         try store.save(data: Data([0x02]), sessionID: newSession)
 
+        store.pruneStale(keeping: [newSession])
+
         #expect(store.catalogURL(for: oldSession) == nil)
         #expect(store.catalogURL(for: newSession) != nil)
+    }
+
+    @Test("pruneStale keeps every session in the keep set")
+    func pruneStaleKeepsAllKept() throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let staleSession = UUID()
+        let currentSession = UUID()
+        let lateSession = UUID()
+        try store.save(data: Data([0x01]), sessionID: staleSession)
+        try store.save(data: Data([0x02]), sessionID: currentSession)
+        try store.save(data: Data([0x03]), sessionID: lateSession)
+
+        store.pruneStale(keeping: [currentSession, lateSession])
+
+        #expect(store.catalogURL(for: staleSession) == nil)
+        #expect(store.catalogURL(for: currentSession) != nil)
+        #expect(store.catalogURL(for: lateSession) != nil)
     }
 
     @Test("re-saving the same session overwrites in place")

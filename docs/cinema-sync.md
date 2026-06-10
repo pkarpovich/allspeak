@@ -72,7 +72,7 @@ once the session's catalog has been transferred to the watch.
 - **Tap** -> the watch listens through its own microphone via
   `SHManagedSession(catalog:)` and matches locally on the watch (8s timeout).
 - **Match** -> a success haptic plays and the watch sends the absolute English
-  timecode to the phone (`WatchCommand.cinemaMatch(enTime:)`). The phone treats
+  timecode to the phone (`WatchCommand.cinemaMatch(sessionID:enTime:)`). The phone treats
   it exactly like a phone-button match: it adds the Sync delay, DTW-maps
   EN -> RU (identity without a mapping), and seeks the dub track.
 - **No match / timeout / unreachable phone** -> a failure haptic plays and the

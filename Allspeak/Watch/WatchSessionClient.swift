@@ -285,6 +285,11 @@ final class WatchSessionClient: NSObject {
               let catalogStore
         else { return }
         try? catalogStore.save(data: data, sessionID: sessionID)
+        var keep: Set<UUID> = [sessionID]
+        if let current = metadata?.sessionID {
+            keep.insert(current)
+        }
+        catalogStore.pruneStale(keeping: keep)
         refreshHasCatalogForCurrentSession()
     }
 

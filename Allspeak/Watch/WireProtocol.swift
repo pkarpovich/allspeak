@@ -25,11 +25,14 @@ import Foundation
 //                     revision:)      miss (watch app reset / Application
 //                                     Support cleanup); host clears its
 //                                     dedup key and rebroadcasts the bundle
-//   .cinemaMatch(enTime:)             watch-local ShazamKit match result:
+//   .cinemaMatch(sessionID:enTime:)   watch-local ShazamKit match result:
 //                                     absolute English timecode in seconds
 //                                     (abs_start + predicted offset); host
 //                                     adds latency compensation, DTW-maps
-//                                     EN -> RU, then seeks
+//                                     EN -> RU, then seeks. sessionID guards
+//                                     against a stale match seeking a
+//                                     different session than the one the
+//                                     watch matched against
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -90,7 +93,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case switchTrack(id: UUID)
     case setVolume(Float)
     case requestCueBundle(sessionID: UUID, revision: Int)
-    case cinemaMatch(enTime: Double)
+    case cinemaMatch(sessionID: UUID, enTime: Double)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -140,8 +143,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(Kind.requestCueBundle, forKey: .kind)
             try container.encode(sessionID, forKey: .sessionID)
             try container.encode(revision, forKey: .revision)
-        case .cinemaMatch(let enTime):
+        case .cinemaMatch(let sessionID, let enTime):
             try container.encode(Kind.cinemaMatch, forKey: .kind)
+            try container.encode(sessionID, forKey: .sessionID)
             try container.encode(enTime, forKey: .enTime)
         }
     }
@@ -170,7 +174,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 revision: try container.decode(Int.self, forKey: .revision)
             )
         case .cinemaMatch:
-            self = .cinemaMatch(enTime: try container.decode(Double.self, forKey: .enTime))
+            self = .cinemaMatch(
+                sessionID: try container.decode(UUID.self, forKey: .sessionID),
+                enTime: try container.decode(Double.self, forKey: .enTime)
+            )
         }
     }
 }

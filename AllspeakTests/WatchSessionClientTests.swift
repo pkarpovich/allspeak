@@ -1262,6 +1262,29 @@ struct WatchSessionClientTests {
         #expect(store.catalogURL(for: otherID) != nil)
     }
 
+    @Test("late catalog for a previous session does not remove the current session's catalog")
+    func lateCatalogKeepsCurrentSessionCatalog() async throws {
+        let (client, store, dir) = try makeClientWithCatalogStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let activeID = UUID()
+        let staleID = UUID()
+        client.handleReceivedApplicationContext(try makeMetadata(sessionID: activeID).toPropertyList())
+        client.handleReceivedFile(data: Data([0x01]), metadata: [
+            "kind": "catalog",
+            "sessionID": activeID.uuidString,
+        ])
+        #expect(client.hasCatalogForCurrentSession == true)
+
+        client.handleReceivedFile(data: Data([0x02]), metadata: [
+            "kind": "catalog",
+            "sessionID": staleID.uuidString,
+        ])
+
+        #expect(client.hasCatalogForCurrentSession == true)
+        #expect(store.catalogURL(for: activeID) != nil)
+    }
+
     @Test("hasCatalogForCurrentSession flips false on session switch and true again when stored catalog matches")
     func hasCatalogTracksSessionSwitch() async throws {
         let (client, store, dir) = try makeClientWithCatalogStore()

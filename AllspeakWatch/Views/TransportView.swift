@@ -60,6 +60,19 @@ struct TransportView: View {
             volumeThrottler.update(Float(newVolume))
             registerVolumeActivity()
         }
+        // Manual-only rule: the mic must stop the moment the listen's context
+        // goes away — session switch, catalog removal, or leaving this screen.
+        .onChange(of: client.metadata?.sessionID) {
+            cinemaSync.cancelListening()
+        }
+        .onChange(of: client.hasCatalogForCurrentSession) { _, hasCatalog in
+            if !hasCatalog {
+                cinemaSync.cancelListening()
+            }
+        }
+        .onDisappear {
+            cinemaSync.cancelListening()
+        }
     }
 
     @ViewBuilder
@@ -220,12 +233,12 @@ struct TransportView: View {
     }
 
     private func handleSync() {
-        if cinemaSync.state == .listening {
+        guard let sessionID = client.metadata?.sessionID,
+              let catalogURL = client.catalogURLForCurrentSession() else {
             cinemaSync.cancelListening()
             return
         }
-        guard let catalogURL = client.catalogURLForCurrentSession() else { return }
-        cinemaSync.tap(catalogURL: catalogURL)
+        cinemaSync.tap(catalogURL: catalogURL, sessionID: sessionID)
     }
 
     private func scheduleSyncReset(for state: WatchCinemaSyncState) {

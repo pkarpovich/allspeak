@@ -26,7 +26,7 @@ they differ only in where the listening happens.
    (`CinemaMatch.swift`, shared with the watch target) reconstructs the absolute
    English position as `abs_start + offset`. Subtitles without the marker fall back
    to `abs_start = 0`. On the watch this absolute EN time is sent to the phone as
-   `WatchCommand.cinemaMatch(enTime:)` — the DTW map stays phone-only.
+   `WatchCommand.cinemaMatch(sessionID:enTime:)` — the DTW map stays phone-only.
 3. **Compensate latency** — the matched offset is anchored to when the mic *captured*
    the audio, but the seek only becomes audible after ShazamKit processing, MainActor
    hops, the SwiftUI render, and `AVAudioPlayer` start. The cinema keeps playing during
@@ -36,7 +36,7 @@ they differ only in where the listening happens.
    default `0.9s`, clamped `0...3s`); `PlayerView` reads it via
    `CinemaSyncService.storedLatencyCompensation()` each time a sync starts.
    Watch-triggered matches are compensated on the phone too —
-   `PlaybackCoordinator.applyCinemaMatch(enTime:)` adds the same stored value —
+   `PlaybackCoordinator.applyCinemaMatch(sessionID:enTime:)` adds the same stored value —
    so one Settings slider covers both entry points (the extra WCSession hop is
    absorbed by it as well).
 4. **Map EN → RU** — `DTWMapping.ruTime(forEnTime:)` looks up the Russian-dub timecode
@@ -46,7 +46,7 @@ they differ only in where the listening happens.
    through `CinemaSyncView.onSyncResult` → `PlaybackCoordinator.applySyncOffset(_:)` →
    `AudioController.seek(to:)`. Watch: `WatchSessionHost` dispatches the received
    `cinemaMatch` command to `PlaybackCoordinator.apply(_:)` →
-   `applyCinemaMatch(enTime:)`, which compensates, maps, and calls the same
+   `applyCinemaMatch(sessionID:enTime:)`, which compensates, maps, and calls the same
    `AudioController.seek(to:)`. The carried offset is `ruOffset`, so the dub lands on
    the DTW-mapped Russian time. Playback is `AVAudioPlayer`, not `AVPlayer` — there is
    no `CMTime` seek here.
@@ -103,9 +103,9 @@ The watch triggers the same sync without touching the phone's mic or audio route
   `Documents/catalogs/<sessionID>.shazamcatalog`.
 - `WatchCinemaSync` (shared file, `../Watch/WatchCinemaSync.swift`) wraps
   `SHManagedSession(catalog:)`, matches on the watch, and sends
-  `WatchCommand.cinemaMatch(enTime:)` with the absolute English time
+  `WatchCommand.cinemaMatch(sessionID:enTime:)` with the absolute English time
   (`CinemaMatch.absStart + predictedCurrentMatchOffset`).
-- `PlaybackCoordinator.applyCinemaMatch(enTime:)` adds the stored Sync delay,
+- `PlaybackCoordinator.applyCinemaMatch(sessionID:enTime:)` adds the stored Sync delay,
   maps EN → RU via the same `DTWMapping` (identity without one), and seeks.
 
 The DTW map never leaves the phone, and the manual-only rule applies on the watch

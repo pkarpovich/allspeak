@@ -909,6 +909,63 @@ struct WatchSessionHostTests {
         #expect(transfers.count == 1)
     }
 
+    @Test("broadcastSessionEnded clears the catalog dedupe key so a re-opened session resends")
+    func broadcastSessionEndedClearsCatalogKey() async throws {
+        let fixture = try await makeCatalogFixture(withCatalog: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        var transfers: [URL] = []
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 1)
+
+        fixture.host.broadcastSessionEnded()
+
+        fixture.host.sendCatalogIfNeeded(outstandingMetadata: []) { url, _ in transfers.append(url) }
+        #expect(transfers.count == 2)
+    }
+
+    @Test("dispatch(.cinemaMatch) compensates and seeks the controller")
+    func dispatchCinemaMatchSeeks() async throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        let priorCompensation = UserDefaults.standard.object(
+            forKey: CinemaSyncService.latencyCompensationDefaultsKey
+        )
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+            if let priorCompensation {
+                UserDefaults.standard.set(priorCompensation, forKey: CinemaSyncService.latencyCompensationDefaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: CinemaSyncService.latencyCompensationDefaultsKey)
+            }
+        }
+        UserDefaults.standard.set(0.5, forKey: CinemaSyncService.latencyCompensationDefaultsKey)
+        let sessionUUID = try #require(coordinator.sessionUUID)
+
+        let snap = await host.dispatch(.cinemaMatch(sessionID: sessionUUID, enTime: 2.0))
+
+        #expect(abs(snap.currentTime - 2.5) < 0.05)
+        #expect(abs((coordinator.controller?.currentTime ?? 0) - 2.5) < 0.05)
+    }
+
+    @Test("dispatch(.cinemaMatch) for a different session leaves playback untouched")
+    func dispatchCinemaMatchIgnoresOtherSession() async throws {
+        let (coordinator, host, audio) = try makeRunningSession()
+        defer {
+            coordinator.endSession()
+            try? FileManager.default.removeItem(at: audio)
+        }
+
+        _ = await host.dispatch(.cinemaMatch(sessionID: UUID(), enTime: 4.0))
+
+        #expect(abs((coordinator.controller?.currentTime ?? -1) - 0.0) < 0.05)
+    }
+
     @Test("handleFileTransferFailure still clears the cue bundle key when metadata carries the cuebundle kind")
     func handleFileTransferFailureWithKindClearsBundleKey() throws {
         let (coordinator, host, audio) = try makeRunningSession()

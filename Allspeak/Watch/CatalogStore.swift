@@ -24,7 +24,6 @@ final class CatalogStore {
     func save(data: Data, sessionID: UUID) throws {
         let url = fileURL(sessionID: sessionID)
         try data.write(to: url, options: .atomic)
-        pruneStale(keeping: sessionID)
     }
 
     func catalogURL(for sessionID: UUID) -> URL? {
@@ -37,10 +36,12 @@ final class CatalogStore {
         baseURL.appendingPathComponent("\(sessionID.uuidString).shazamcatalog")
     }
 
-    private func pruneStale(keeping sessionID: UUID) {
-        let keep = fileURL(sessionID: sessionID).lastPathComponent
+    // Keeping a set (not a single ID) lets the client preserve the current
+    // session's catalog when a stale transfer for an older session arrives late.
+    func pruneStale(keeping sessionIDs: Set<UUID>) {
+        let keep = Set(sessionIDs.map { fileURL(sessionID: $0).lastPathComponent })
         let urls = (try? fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil)) ?? []
-        for url in urls where url.lastPathComponent != keep {
+        for url in urls where !keep.contains(url.lastPathComponent) {
             try? fileManager.removeItem(at: url)
         }
     }
