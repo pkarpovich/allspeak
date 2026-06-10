@@ -237,10 +237,10 @@ Design decisions (settled, do not relitigate):
 
 ### Task 7: Update documentation
 
-- [ ] add a "Session diagnostics" section to `docs/cinema-sync.md`: file
+- [x] add a "Session diagnostics" section to `docs/cinema-sync.md`: file
       location, JSONL schema with one example line per event type, gating
       rule, how to pull files via the Files app, OSLog live-view tip
-- [ ] mention the diagnostics log in `README.md` cinema sync paragraph
+- [x] mention the diagnostics log in `README.md` cinema sync paragraph
 
 ## Technical Details
 

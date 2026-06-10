@@ -175,3 +175,80 @@ not part of the app (the `cinema-prep` skill's `build_catalog.py` and
   dub's timeline. See `Allspeak/Sync/README.md` for the JSON schema and the
   `DTWMapping` lookup contract. Only when no mapping is attached does the
   English offset map directly to the dub position.
+
+## Session diagnostics
+
+During a screening the app appends a JSONL event log — one file per screening —
+recording every sync attempt, manual nudge, and transport action. It is a
+debugging aid for measuring real drift and tuning the Sync delay, not a user
+feature: there is no in-app viewer. Pull the file off the phone afterward and
+analyze it on a Mac (`jq`, pandas).
+
+**Gating**: a file is only ever created for a session that carries a cinema
+catalog. Ordinary home listening (no `.shazamcatalog`) writes nothing — the log
+stays silent unless the session is a cinema session.
+
+**Location**: `Documents/diagnostics/<film-slug>-<yyyyMMdd-HHmm>.jsonl`, created
+lazily on the first event of a screening, append-only, flushed (`synchronize`)
+after every line — a crash mid-screening leaves the file parseable up to the
+last complete line. `<film-slug>` is the session title lowercased with
+non-alphanumeric runs collapsed to `-` (e.g. `After the Light` ->
+`after-the-light`, empty -> `session`); the stamp is the UTC time of the
+`begin` call that opened the player.
+
+**Pulling the file**: the app's `Documents` folder is exposed to the Files app
+(`UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace`). Open Files ->
+`On My iPhone` -> `Allspeak` -> `diagnostics`, then AirDrop or copy the `.jsonl`
+to the Mac. There is no retention policy — prune old files here by hand.
+
+**Live view**: every line is also mirrored to `Logger` (subsystem
+`dev.karpovich.allspeak`, category `diagnostics`). During a home test, open
+Console.app, select the device, and filter on that subsystem/category to watch
+events stream in real time without pulling the file.
+
+### Schema
+
+One JSON object per line. Every line has `ts` (wall-clock ISO8601 UTC with
+milliseconds) and `event` (the discriminator). The remaining fields depend on
+the event type, and optional fields are omitted when nil (whole-number values
+are written without a decimal point):
+
+```json
+{"ts":"2026-06-12T19:43:02.115Z","event":"play"}
+{"ts":"2026-06-12T19:45:10.402Z","event":"pause"}
+{"ts":"2026-06-12T19:46:01.880Z","event":"skip","seconds":-1,"source":"phone"}
+{"ts":"2026-06-12T19:47:22.310Z","event":"seek","time":1820,"source":"phone"}
+{"ts":"2026-06-12T19:50:03.927Z","event":"sync","source":"phone","result":"matched","enTime":2105.4,"ruTime":2112.8,"playerBefore":2098.1,"delta":14.7,"latencyComp":0.9,"absStart":1800,"listenSeconds":4.2}
+{"ts":"2026-06-12T19:52:40.118Z","event":"sync","source":"phone","result":"noMatch","latencyComp":0.9,"listenSeconds":6}
+{"ts":"2026-06-12T19:55:14.350Z","event":"watch_attempt","result":"matched","listenSeconds":3.8}
+{"ts":"2026-06-12T19:55:14.610Z","event":"sync","source":"watch","result":"matched","enTime":2480.2,"ruTime":2488,"playerBefore":2475.5,"delta":12.5,"latencyComp":0.9}
+```
+
+- **`sync`** — a cinema-sync result, from the phone button or the watch.
+  `source` (`phone`|`watch`), `result` (`matched`|`noMatch`|`timeout`|`error`).
+  A match adds `enTime` (compensated English seconds), `ruTime` (dub seconds
+  after DTW), `playerBefore` (dub position read just before the seek), `delta`
+  (`ruTime - playerBefore` — the jump the sync applied, i.e. accumulated drift
+  plus latency), and `latencyComp` (the Sync delay slider value at sync time).
+  Phone matches additionally carry `absStart` (the matched catalog chunk marker)
+  and `listenSeconds` (mic listen duration); watch matches omit both — the watch
+  folds `abs_start` into `enTime` and reports its listen duration in the paired
+  `watch_attempt`. Failures (`noMatch`/`timeout`/`error`) carry `latencyComp`,
+  `listenSeconds` (when a listen started), and `error` (message, `error` result
+  only); the offset fields are omitted.
+- **`watch_attempt`** — sent by the watch over `transferUserInfo` after every
+  watch listen (queued delivery, so it arrives even if the phone was briefly
+  unreachable). `result`, `listenSeconds` (always present), `error` (optional).
+  A successful watch sync therefore appears twice: this `watch_attempt` (has
+  `listenSeconds`) and a paired `sync` with `source:"watch"` (has
+  `playerBefore`/`delta`) — join them by their adjacent `ts`.
+- **`skip`** — a manual +/-1s or +/-3s nudge. `seconds` (signed), `source`.
+  Between two syncs these are Pavel's "I heard ~Ns of desync" signals.
+- **`seek`** — a jump to an absolute position (subtitle / cue tap). `time`,
+  `source`.
+- **`pause`** / **`play`** — envelope only.
+
+**Analysis**: the measured drift rate is `delta / (ts - previous-sync-ts)`,
+excluding intervals that contain a `seek` or `pause`; compare it against the
+DTW prediction from `drift_diagnostic.py` for that film. The +/-1s `skip` events
+between syncs map the perceived micro-drift the syncs are too coarse to show.

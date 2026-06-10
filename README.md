@@ -96,6 +96,13 @@ permission on the first tap (separate from the phone's). Generating the
 catalog and mapping files is a separate Mac-side step; see
 [`docs/cinema-sync.md`](docs/cinema-sync.md).
 
+For cinema sessions, the app also writes a per-screening JSONL diagnostics log
+(`Documents/diagnostics/`, pulled via the Files app) capturing every sync,
+manual skip, and transport action for after-the-fact drift analysis on the Mac.
+It is gated to sessions with a catalog — ordinary listening writes nothing — and
+has no UI. See
+[`docs/cinema-sync.md`](docs/cinema-sync.md#session-diagnostics).
+
 ## Apple Watch remote
 
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
