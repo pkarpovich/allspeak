@@ -95,12 +95,12 @@ Design decisions (settled, do not relitigate):
 
 ### Task 1: DiagnosticsLog service + event model
 
-- [ ] create `Allspeak/Diagnostics/DiagnosticsEvent.swift`: enum with cases
+- [x] create `Allspeak/Diagnostics/DiagnosticsEvent.swift`: enum with cases
       `sync(source:result:enTime:ruTime:playerBefore:delta:latencyComp:absStart:listenSeconds:error:)`
       (optionals where a field does not apply), `watchAttempt(result:listenSeconds:error:)`,
       `skip(seconds:source:)`, `seek(time:source:)`, `pause`, `play`; encodes to a
       single-line JSON object with `ts` (ISO8601 with ms) + `event` discriminator
-- [ ] create `Allspeak/Diagnostics/DiagnosticsLog.swift`: `@MainActor` class with
+- [x] create `Allspeak/Diagnostics/DiagnosticsLog.swift`: `@MainActor` class with
       `.shared`, init injectable `(rootURL: URL, now: () -> Date)`;
       `begin(filmTitle:hasCatalog:)` stores state (no file yet),
       `log(_ event:)` no-ops when not begun or no catalog, lazily creates
@@ -108,13 +108,14 @@ Design decisions (settled, do not relitigate):
       one line per event via `FileHandle` (flush each write), mirrors each line
       to `Logger(subsystem: "dev.karpovich.allspeak", category: "diagnostics")`;
       `end()` closes the handle and resets state
-- [ ] add new files to the Allspeak target (project.yml + `xcodegen generate`
-      if sources are listed explicitly; the iOS target uses a path glob - verify)
-- [ ] write tests: event JSON shape (each case, one line, stable keys), no file
+- [x] add new files to the Allspeak target (iOS target uses a `- path: Allspeak`
+      glob, so the new `Allspeak/Diagnostics/` files are picked up by
+      `xcodegen generate`; no project.yml edit needed - verified)
+- [x] write tests: event JSON shape (each case, one line, stable keys), no file
       before first event, gating (hasCatalog=false -> no file ever), append
       accumulates lines, end + new begin creates a second file, filename slug
       from film title
-- [ ] run tests - must pass before task 2
+- [x] run tests - must pass before task 2
 
 ### Task 2: Wire begin/end to the player lifecycle
 
