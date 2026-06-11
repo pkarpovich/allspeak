@@ -1,3 +1,4 @@
+import AVFAudio
 import CoreData
 import CryptoKit
 import Foundation
@@ -57,6 +58,7 @@ final class PlaybackCoordinator {
     private var persistence: PersistenceController = .shared
     var liveActivity: LiveActivityCoordinator = LiveActivityCoordinator()
     var diagnostics: DiagnosticsLog = .shared
+    var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
 
     init() {}
 
@@ -599,7 +601,8 @@ final class PlaybackCoordinator {
             currentIndex: controller.currentIndex,
             isPlaying: controller.isPlaying,
             serverDate: Date(),
-            activeTrackID: activeTrackID
+            activeTrackID: activeTrackID,
+            volume: systemVolumeReader()
         )
     }
 

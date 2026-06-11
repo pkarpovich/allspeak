@@ -3,15 +3,13 @@ import SwiftUI
 // Cinema transport, stacked layout: two coarse ±3s controls on top, a
 // full-width Play/Pause at center, two fine ±1s controls beneath. Tuned for
 // a dark hall — large round tap targets, the gold pill glowing as the obvious
-// primary action, no subtitle text to read. Digital Crown stays wired to
-// playback volume with haptic ticks at each detent; see VolumeThrottler for the
-// 100ms trailing-edge debounce that keeps WC traffic clean during a rapid spin.
+// primary action, no subtitle text to read. Digital Crown drives the REAL
+// system volume on the phone (via the hidden MPVolumeView there) — the same
+// knob the side buttons and AirPods stem move. Snapshots carry the phone's
+// outputVolume back, so the Crown position tracks outside changes; see
+// VolumeThrottler for the 100ms trailing-edge debounce that keeps WC traffic
+// clean during a rapid spin.
 struct TransportView: View {
-    // Watch-local UserDefaults key — mirrors AudioController.volumeDefaultsKey on
-    // the iOS side, but stored independently in the watch app's defaults so the
-    // Crown starts at the last value the user dialed in on this watch.
-    private static let watchVolumeDefaultsKey = "playback.volume"
-
     @Environment(WatchSessionClient.self) private var client
     @State private var skipper = TransportSkipper(
         coalescer: SkipCoalescer { delta in
@@ -20,20 +18,13 @@ struct TransportView: View {
         haptics: WatchDeviceHaptics()
     )
     @State private var volumeThrottler = VolumeThrottler { value in
-        UserDefaults.standard.set(value, forKey: TransportView.watchVolumeDefaultsKey)
         WatchSessionClient.shared.send(.setVolume(value))
     }
-    @State private var volume: Double = {
-        let stored = UserDefaults.standard.object(forKey: Self.watchVolumeDefaultsKey) as? Float
-        return Double(stored ?? 1.0)
-    }()
+    @State private var volume: Double = 0.5
     // Raw Crown position, inverted into `volume` via CrownVolume so Crown-up =
-    // louder. Initialised from the stored volume through the same (symmetric)
-    // mapping so the wheel starts where the loudness left off.
-    @State private var crown: Double = {
-        let stored = UserDefaults.standard.object(forKey: Self.watchVolumeDefaultsKey) as? Float
-        return CrownVolume.volume(forCrown: Double(stored ?? 1.0))
-    }()
+    // louder. Seeded (and re-synced while idle) from the phone's reported
+    // system volume through the same symmetric mapping.
+    @State private var crown: Double = CrownVolume.volume(forCrown: 0.5)
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
     @State private var cinemaSync = WatchCinemaSync(haptics: WatchDeviceHaptics())
@@ -59,6 +50,19 @@ struct TransportView: View {
             volume = newVolume
             volumeThrottler.update(Float(newVolume))
             registerVolumeActivity()
+        }
+        // The phone reports its real outputVolume in every snapshot. While the
+        // Crown is idle, follow it - side buttons, the AirPods stem, and Siri
+        // all move the same volume, and the wheel must not snap loudness back
+        // to a stale position on the next turn.
+        .onChange(of: client.lastSnapshot?.volume) { _, reported in
+            guard let reported, !isAdjustingVolume else { return }
+            volume = Double(reported)
+            crown = CrownVolume.volume(forCrown: Double(reported))
+        }
+        .digitalCrownAccessory {
+            Image(systemName: "speaker.wave.2.fill")
+                .foregroundStyle(Tokens.accent)
         }
         // Manual-only rule: the mic must stop the moment the listen's context
         // goes away — session switch, catalog removal or replacement (a promoted
@@ -90,7 +94,6 @@ struct TransportView: View {
                 coarseRow
                 playButton
                 fineRow
-                volumeBar
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -105,28 +108,14 @@ struct TransportView: View {
             .padding(.horizontal, 12)
     }
 
-    // With the 44pt sync button between the two skips, the roomy variant only
-    // fits the widest cases; ViewThatFits steps down so the row never clips on
-    // the narrower ones (40mm is 162pt total, minus 16pt content padding).
     private var coarseRow: some View {
-        ViewThatFits(in: .horizontal) {
-            coarseRowContent(buttonSize: 60, spacing: 14)
-            coarseRowContent(buttonSize: 52, spacing: 10)
-            coarseRowContent(buttonSize: 44, spacing: 7)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func coarseRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
-        HStack(spacing: spacing) {
-            skipButton(icon: Tokens.Icon.skipBack, seconds: "3", prominent: true, size: buttonSize, action: handleSkipBackCoarse)
+        HStack(spacing: 14) {
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "3", size: 60, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
-            if client.hasCatalogForCurrentSession {
-                syncButton
-            }
-            skipButton(icon: Tokens.Icon.skipForward, seconds: "3", prominent: true, size: buttonSize, action: handleSkipForwardCoarse)
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "3", size: 60, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // Cinema sync: listens through the watch mic and matches against the
@@ -143,7 +132,7 @@ struct TransportView: View {
                     ProgressView()
                 }
             }
-            .foregroundStyle(Tokens.accent)
+            .foregroundStyle(Tokens.text)
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
@@ -154,36 +143,28 @@ struct TransportView: View {
         }
     }
 
+    // With the 44pt sync button between the two skips, the roomy variant only
+    // fits the widest cases; ViewThatFits steps down so the row never clips on
+    // the narrower ones (40mm is 162pt total, minus 16pt content padding).
     private var fineRow: some View {
-        HStack(spacing: 14) {
-            skipButton(icon: Tokens.Icon.skipBack, seconds: "1", prominent: false, size: 62, action: handleSkipBackFine)
-                .accessibilityLabel("Skip back 1 second")
-            skipButton(icon: Tokens.Icon.skipForward, seconds: "1", prominent: false, size: 62, action: handleSkipForwardFine)
-                .accessibilityLabel("Skip forward 1 second")
+        ViewThatFits(in: .horizontal) {
+            fineRowContent(buttonSize: 62, spacing: 14)
+            fineRowContent(buttonSize: 52, spacing: 10)
+            fineRowContent(buttonSize: 44, spacing: 7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // Crown feedback bar. Fills left-to-right in proportion to `volume`, the same
-    // state the Crown drives and the value we send to the phone, so the on-screen
-    // scale can never disagree with the loudness. Brightens while the Crown is
-    // turning and settles dim when idle.
-    private var volumeBar: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Tokens.surface)
-                Capsule()
-                    .fill(Tokens.accent)
-                    .frame(width: max(0, geo.size.width * volume))
+    private func fineRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "1", size: buttonSize, action: handleSkipBackFine)
+                .accessibilityLabel("Skip back 1 second")
+            if client.hasCatalogForCurrentSession {
+                syncButton
             }
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "1", size: buttonSize, action: handleSkipForwardFine)
+                .accessibilityLabel("Skip forward 1 second")
         }
-        .frame(height: 4)
-        .opacity(isAdjustingVolume ? 1.0 : 0.4)
-        .padding(.horizontal, 2)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Volume")
-        .accessibilityValue("\(Int((volume * 100).rounded()))%")
     }
 
     private func registerVolumeActivity() {
@@ -223,19 +204,18 @@ struct TransportView: View {
     private func skipButton(
         icon: String,
         seconds: String,
-        prominent: Bool,
         size: CGFloat,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             ZStack {
                 Image(systemName: icon)
-                    .font(.system(size: prominent ? 26 : 28, weight: .medium))
+                    .font(.system(size: 26, weight: .medium))
                 Text(seconds)
-                    .font(.system(size: prominent ? 11 : 9, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .offset(y: 2)
             }
-            .foregroundStyle(prominent ? Tokens.text : Tokens.text2)
+            .foregroundStyle(Tokens.text)
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)

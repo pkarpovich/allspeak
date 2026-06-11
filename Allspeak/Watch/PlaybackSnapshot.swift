@@ -9,6 +9,10 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
     let isPlaying: Bool
     let serverDate: Date
     let activeTrackID: UUID?
+    // Real system output volume on the phone (AVAudioSession.outputVolume) so
+    // the watch Crown can start from - and stay in sync with - the one true
+    // volume, including changes made via side buttons or the AirPods stem.
+    let volume: Float?
 
     init(
         sessionID: UUID,
@@ -18,7 +22,8 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         currentIndex: Int,
         isPlaying: Bool,
         serverDate: Date,
-        activeTrackID: UUID? = nil
+        activeTrackID: UUID? = nil,
+        volume: Float? = nil
     ) {
         self.sessionID = sessionID
         self.revision = revision
@@ -28,10 +33,11 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         self.isPlaying = isPlaying
         self.serverDate = serverDate
         self.activeTrackID = activeTrackID
+        self.volume = volume
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionID, revision, currentTime, duration, currentIndex, isPlaying, serverDate, activeTrackID
+        case sessionID, revision, currentTime, duration, currentIndex, isPlaying, serverDate, activeTrackID, volume
     }
 
     init(from decoder: any Decoder) throws {
@@ -44,6 +50,7 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         self.isPlaying = try container.decode(Bool.self, forKey: .isPlaying)
         self.serverDate = try container.decode(Date.self, forKey: .serverDate)
         self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
+        self.volume = try container.decodeIfPresent(Float.self, forKey: .volume)
     }
 
     static let empty = PlaybackSnapshot(
@@ -54,6 +61,7 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         currentIndex: 0,
         isPlaying: false,
         serverDate: Date(timeIntervalSince1970: 0),
-        activeTrackID: nil
+        activeTrackID: nil,
+        volume: nil
     )
 }

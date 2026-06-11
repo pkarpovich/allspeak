@@ -7,7 +7,6 @@ import QuartzCore
 @MainActor
 @Observable
 final class AudioController {
-    static let volumeDefaultsKey = "playback.volume"
 
     private(set) var isPlaying: Bool = false
     private(set) var currentTime: TimeInterval = 0
@@ -21,7 +20,7 @@ final class AudioController {
     @ObservationIgnored private var playerDelegateProxy: PlayerDelegateProxy?
     @ObservationIgnored private let repository: SessionRepository?
     @ObservationIgnored private let sessionID: NSManagedObjectID?
-    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let systemVolume: any SystemVolumeSetting
     @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
     @ObservationIgnored var onTick: (@MainActor () -> Void)?
     @ObservationIgnored var onStateChange: (@MainActor () -> Void)?
@@ -30,11 +29,11 @@ final class AudioController {
     init(
         repository: SessionRepository? = nil,
         sessionID: NSManagedObjectID? = nil,
-        defaults: UserDefaults = .standard
+        systemVolume: (any SystemVolumeSetting)? = nil
     ) {
         self.repository = repository
         self.sessionID = sessionID
-        self.defaults = defaults
+        self.systemVolume = systemVolume ?? SystemVolume.shared
     }
 
     func load(audio: URL, subtitles: [Subtitle], title: String, trackLabel: String? = nil) throws {
@@ -44,8 +43,7 @@ final class AudioController {
             self?.playerDidFinish()
         }
         player.delegate = delegateProxy
-        let storedVolume = defaults.object(forKey: Self.volumeDefaultsKey) as? Float
-        player.volume = Self.clampVolume(storedVolume ?? 1.0)
+        player.volume = 1.0
         self.player = player
         self.playerDelegateProxy = delegateProxy
         self.subtitles = subtitles
@@ -130,9 +128,7 @@ final class AudioController {
     }
 
     func setVolume(_ value: Float) {
-        let clamped = Self.clampVolume(value)
-        player?.volume = clamped
-        defaults.set(clamped, forKey: Self.volumeDefaultsKey)
+        systemVolume.set(Self.clampVolume(value))
     }
 
     nonisolated static func clampVolume(_ value: Float) -> Float {

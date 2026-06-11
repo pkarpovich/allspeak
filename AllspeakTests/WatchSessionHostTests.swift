@@ -108,18 +108,12 @@ struct WatchSessionHostTests {
         #expect(abs(snap.currentTime - 2.5) < 0.05)
     }
 
-    @Test("dispatch(.setVolume) writes the value through to the controller's player")
+    @Test("dispatch(.setVolume) routes to system volume and leaves the player gain at 1.0")
     func dispatchSetVolume() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
-        let priorVolume = UserDefaults.standard.object(forKey: AudioController.volumeDefaultsKey)
         defer {
             coordinator.endSession()
             try? FileManager.default.removeItem(at: audio)
-            if let priorVolume {
-                UserDefaults.standard.set(priorVolume, forKey: AudioController.volumeDefaultsKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: AudioController.volumeDefaultsKey)
-            }
         }
 
         _ = await host.dispatch(.setVolume(0.3))
@@ -129,21 +123,15 @@ struct WatchSessionHostTests {
         let player = try #require(
             mirror.children.first(where: { $0.label == "player" })?.value as? AVAudioPlayer
         )
-        #expect(abs(player.volume - 0.3) < 0.0001)
+        #expect(abs(player.volume - 1.0) < 0.0001)
     }
 
-    @Test("dispatch(.setVolume) clamps out-of-range values before applying")
+    @Test("dispatch(.setVolume) with out-of-range value still leaves the player gain at 1.0")
     func dispatchSetVolumeClamps() async throws {
         let (coordinator, host, audio) = try makeRunningSession()
-        let priorVolume = UserDefaults.standard.object(forKey: AudioController.volumeDefaultsKey)
         defer {
             coordinator.endSession()
             try? FileManager.default.removeItem(at: audio)
-            if let priorVolume {
-                UserDefaults.standard.set(priorVolume, forKey: AudioController.volumeDefaultsKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: AudioController.volumeDefaultsKey)
-            }
         }
 
         _ = await host.dispatch(.setVolume(5.0))

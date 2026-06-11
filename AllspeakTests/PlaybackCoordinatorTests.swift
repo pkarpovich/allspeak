@@ -58,6 +58,25 @@ struct PlaybackCoordinatorTests {
         #expect(emptySnap == PlaybackSnapshot.empty)
     }
 
+    @Test("currentSnapshot reports the system output volume")
+    func currentSnapshotCarriesSystemVolume() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let previousReader = coordinator.systemVolumeReader
+        defer {
+            coordinator.systemVolumeReader = previousReader
+            coordinator.endSession()
+        }
+        coordinator.systemVolumeReader = { 0.37 }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Vol", audio: audio, subtitles: Self.cues)
+
+        #expect(coordinator.currentSnapshot().volume == 0.37)
+    }
+
     @Test("double-start with same uuid is a no-op")
     func doubleStartSameUUIDNoOp() throws {
         let coordinator = PlaybackCoordinator.shared
