@@ -58,6 +58,25 @@ struct PlaybackCoordinatorTests {
         #expect(emptySnap == PlaybackSnapshot.empty)
     }
 
+    @Test("currentSnapshot reports the system output volume")
+    func currentSnapshotCarriesSystemVolume() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        let previousReader = coordinator.systemVolumeReader
+        defer {
+            coordinator.systemVolumeReader = previousReader
+            coordinator.endSession()
+        }
+        coordinator.systemVolumeReader = { 0.37 }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Vol", audio: audio, subtitles: Self.cues)
+
+        #expect(coordinator.currentSnapshot().volume == 0.37)
+    }
+
     @Test("double-start with same uuid is a no-op")
     func doubleStartSameUUIDNoOp() throws {
         let coordinator = PlaybackCoordinator.shared
@@ -999,6 +1018,542 @@ struct PlaybackCoordinatorTests {
         fixture.coordinator.applySyncOffset(ruOffset)
 
         #expect(abs(controller.currentTime - ruOffset) < 0.05)
+    }
+
+    // MARK: - Diagnostics begin/end wiring
+
+    private struct UnstartedSession {
+        let sessionID: NSManagedObjectID
+        let repo: SessionRepository
+        let persistence: PersistenceController
+        let storage: DocumentsStorage
+        let root: URL
+    }
+
+    private static func importSession(withCatalog: Bool, name: String = "Movie") async throws -> UnstartedSession {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-coord-diag-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storage = DocumentsStorage(documentsURL: root)
+        let persistence = PersistenceController.makeInMemory()
+        let repo = SessionRepository(persistence: persistence, storage: storage)
+
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let initialAudio = try makeSilenceFile(seconds: 5)
+        let movedAudio = srcDir.appendingPathComponent("source.caf")
+        try FileManager.default.moveItem(at: initialAudio, to: movedAudio)
+        let srtURL = srcDir.appendingPathComponent("subs.srt")
+        let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
+        try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
+
+        var catalogSrc: URL?
+        if withCatalog {
+            let url = srcDir.appendingPathComponent("film.shazamcatalog")
+            try Data([0x01, 0x02, 0x03]).write(to: url)
+            catalogSrc = url
+        }
+
+        let sessionID = try await repo.importSession(
+            name: name,
+            audioSrc: movedAudio,
+            srtSrc: srtURL,
+            catalogSrc: catalogSrc
+        )
+        persistence.viewContext.refreshAllObjects()
+
+        return UnstartedSession(sessionID: sessionID, repo: repo, persistence: persistence, storage: storage, root: root)
+    }
+
+    private static func makeTempDiagnostics() -> (log: DiagnosticsLog, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("allspeak-diag-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fixed = Date(timeIntervalSince1970: 1_780_000_000)
+        return (DiagnosticsLog(rootURL: root, now: { fixed }), root)
+    }
+
+    private static func diagnosticsDir(_ root: URL) -> URL {
+        root.appendingPathComponent("diagnostics", isDirectory: true)
+    }
+
+    private static func readJSONLines(_ url: URL) throws -> [[String: Any]] {
+        let text = try String(contentsOf: url, encoding: .utf8)
+        return text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
+            return obj
+        }
+    }
+
+    @Test("startSession with a catalog begins a gated-on diagnostics log named after the film")
+    func startSessionWithCatalogBeginsDiagnostics() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        let url = try #require(log.currentFileURL)
+        #expect(url.lastPathComponent.hasPrefix("movie-"))
+        log.log(.play)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("startSession without a catalog begins a gated-off diagnostics log that writes nothing")
+    func startSessionWithoutCatalogGatesDiagnosticsOff() async throws {
+        let imported = try await Self.importSession(withCatalog: false)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        let url = try #require(log.currentFileURL)
+        log.log(.play)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(!FileManager.default.fileExists(atPath: Self.diagnosticsDir(diagRoot).path))
+    }
+
+    @Test("endSession ends the diagnostics log")
+    func endSessionEndsDiagnostics() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer { coordinator.diagnostics = .shared }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        #expect(log.currentFileURL != nil)
+
+        coordinator.endSession()
+        #expect(log.currentFileURL == nil)
+    }
+
+    @Test("the lightweight startSession begins a gated-off diagnostics log")
+    func lightweightStartSessionGatesDiagnosticsOff() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Quick Play", audio: audio, subtitles: Self.cues)
+
+        let url = try #require(log.currentFileURL)
+        #expect(url.lastPathComponent.hasPrefix("quick-play-"))
+        log.log(.play)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("starting a different cinema session begins a fresh diagnostics log")
+    func startingDifferentSessionRebeginsDiagnostics() async throws {
+        let a = try await Self.importSession(withCatalog: true, name: "Alpha")
+        defer { try? FileManager.default.removeItem(at: a.root) }
+        let b = try await Self.importSession(withCatalog: true, name: "Bravo")
+        defer { try? FileManager.default.removeItem(at: b.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: a.sessionID,
+            repository: a.repo,
+            persistence: a.persistence,
+            storage: a.storage
+        )
+        #expect(try #require(log.currentFileURL).lastPathComponent.hasPrefix("alpha-"))
+
+        try await coordinator.startSession(
+            sessionID: b.sessionID,
+            repository: b.repo,
+            persistence: b.persistence,
+            storage: b.storage
+        )
+        #expect(try #require(log.currentFileURL).lastPathComponent.hasPrefix("bravo-"))
+    }
+
+    @Test("attaching a catalog to an active session turns diagnostics logging on")
+    func refreshAttachingCatalogEnablesLogging() async throws {
+        let imported = try await Self.importSession(withCatalog: false)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let url = try #require(log.currentFileURL)
+        log.log(.play)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+
+        let catalogSrc = imported.root.appendingPathComponent("inbox/added.shazamcatalog")
+        try Data([0x07, 0x08, 0x09]).write(to: catalogSrc)
+        try await imported.repo.setCatalog(sessionID: imported.sessionID, srcURL: catalogSrc)
+        await coordinator.refreshIfActive(sessionID: imported.sessionID)
+
+        log.log(.pause)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("clearing a catalog on an active session turns diagnostics logging off")
+    func refreshClearingCatalogDisablesLogging() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let url = try #require(log.currentFileURL)
+        log.log(.play)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        let afterFirst = try String(contentsOf: url, encoding: .utf8)
+
+        try await imported.repo.clearCatalog(sessionID: imported.sessionID)
+        await coordinator.refreshIfActive(sessionID: imported.sessionID)
+
+        log.log(.pause)
+        let afterSecond = try String(contentsOf: url, encoding: .utf8)
+        #expect(afterFirst == afterSecond)
+    }
+
+    @Test("applySyncOffset logs a matched phone sync record with the player position and delta")
+    func applySyncOffsetLogsMatchedRecord() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let controller = try #require(coordinator.controller)
+        controller.seek(to: 1.5)
+
+        coordinator.applySyncOffset(3.5, enTime: 4.4, latencyComp: 0.9, absStart: 1_800, listenSeconds: 4.0)
+
+        let url = try #require(log.currentFileURL)
+        let record = try #require(Self.readJSONLines(url).last)
+        #expect(record["event"] as? String == "sync")
+        #expect(record["source"] as? String == "phone")
+        #expect(record["result"] as? String == "matched")
+        #expect(record["enTime"] as? Double == 4.4)
+        #expect(record["ruTime"] as? Double == 3.5)
+        #expect(record["playerBefore"] as? Double == 1.5)
+        #expect(record["delta"] as? Double == 2.0)
+        #expect(record["latencyComp"] as? Double == 0.9)
+        #expect(record["absStart"] as? Double == 1_800)
+        #expect(record["listenSeconds"] as? Double == 4.0)
+    }
+
+    @Test("applySyncOffset without a catalog logs nothing")
+    func applySyncOffsetWithoutCatalogLogsNothing() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Quick", audio: audio, subtitles: Self.cues)
+        coordinator.applySyncOffset(2.5, enTime: 3.4, latencyComp: 0.9, absStart: 100, listenSeconds: 2.0)
+
+        let url = try #require(log.currentFileURL)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("applyCinemaMatch logs a matched watch sync record with the player position and delta")
+    func applyCinemaMatchLogsWatchSyncRecord() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let controller = try #require(coordinator.controller)
+        controller.seek(to: 1.0)
+        let uuid = try #require(coordinator.sessionUUID)
+        let stamp = try #require(coordinator.catalogStamp)
+
+        let applied = coordinator.applyCinemaMatch(
+            sessionID: uuid,
+            stamp: stamp,
+            enTime: 3.0,
+            defaults: try Self.makeLatencyDefaults(0.5)
+        )
+        #expect(applied)
+
+        let url = try #require(log.currentFileURL)
+        let record = try #require(Self.readJSONLines(url).last)
+        #expect(record["event"] as? String == "sync")
+        #expect(record["source"] as? String == "watch")
+        #expect(record["result"] as? String == "matched")
+        // no DTW map -> identity mapping; enOffset = 3.0 + latencyComp 0.5
+        #expect(record["enTime"] as? Double == 3.5)
+        #expect(record["ruTime"] as? Double == 3.5)
+        #expect(record["playerBefore"] as? Double == 1.0)
+        #expect(record["delta"] as? Double == 2.5)
+        #expect(record["latencyComp"] as? Double == 0.5)
+        #expect(record["absStart"] == nil)
+        #expect(record["listenSeconds"] == nil)
+    }
+
+    @Test("a rejected watch match writes no sync record")
+    func applyCinemaMatchRejectedLogsNothing() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        let uuid = try #require(coordinator.sessionUUID)
+
+        let applied = coordinator.applyCinemaMatch(
+            sessionID: uuid,
+            stamp: "film.shazamcatalog:replaced",
+            enTime: 3.0,
+            defaults: try Self.makeLatencyDefaults(0.5)
+        )
+        #expect(applied == false)
+
+        let url = try #require(log.currentFileURL)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("watch transport commands log skip, seek, pause, and play with the watch source")
+    func watchTransportCommandsLogEvents() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        coordinator.apply(.skip(seconds: -1.0))
+        coordinator.apply(.seek(time: 2.0))
+        coordinator.apply(.pause)
+        coordinator.apply(.togglePlayPause)
+
+        let url = try #require(log.currentFileURL)
+        let records = try Self.readJSONLines(url)
+        #expect(records.count == 4)
+
+        #expect(records[0]["event"] as? String == "skip")
+        #expect(records[0]["seconds"] as? Double == -1.0)
+        #expect(records[0]["source"] as? String == "watch")
+
+        #expect(records[1]["event"] as? String == "seek")
+        #expect(records[1]["time"] as? Double == 2.0)
+        #expect(records[1]["source"] as? String == "watch")
+
+        #expect(records[2]["event"] as? String == "pause")
+        #expect(records[3]["event"] as? String == "play")
+    }
+
+    @Test("phone transport via the coordinator logs play, pause, skip, and seek with the phone source")
+    func phoneTransportCommandsLogEvents() async throws {
+        let imported = try await Self.importSession(withCatalog: true)
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        coordinator.play()
+        coordinator.pause()
+        coordinator.skip(by: 0.5)
+        coordinator.seek(to: 2.0)
+
+        let url = try #require(log.currentFileURL)
+        let records = try Self.readJSONLines(url)
+        #expect(records.count == 4)
+
+        #expect(records[0]["event"] as? String == "play")
+        #expect(records[1]["event"] as? String == "pause")
+
+        #expect(records[2]["event"] as? String == "skip")
+        #expect(records[2]["seconds"] as? Double == 0.5)
+        #expect(records[2]["source"] as? String == "phone")
+
+        #expect(records[3]["event"] as? String == "seek")
+        #expect(records[3]["time"] as? Double == 2.0)
+        #expect(records[3]["source"] as? String == "phone")
+    }
+
+    @Test("watch and phone transport without a catalog log nothing")
+    func transportWithoutCatalogLogsNothing() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Quick", audio: audio, subtitles: Self.cues)
+
+        coordinator.apply(.skip(seconds: 1.0))
+        coordinator.apply(.seek(time: 2.0))
+        coordinator.apply(.pause)
+        coordinator.play()
+        coordinator.skip(by: 0.5)
+        coordinator.seek(to: 1.0)
+        coordinator.togglePlayPause()
+
+        let url = try #require(log.currentFileURL)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 }
 

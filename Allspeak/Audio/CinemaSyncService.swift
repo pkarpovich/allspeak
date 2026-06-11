@@ -73,11 +73,15 @@ final class CinemaSyncService {
     @ObservationIgnored private let makeSession: (URL) throws -> SHSessionMatching
     @ObservationIgnored private let checkPermission: @MainActor () async -> Bool
     @ObservationIgnored private let timeout: Duration
+    @ObservationIgnored private let diagnostics: DiagnosticsLog
+    @ObservationIgnored private let now: () -> Date
 
     @ObservationIgnored private var session: SHSessionMatching?
     @ObservationIgnored private var delegateProxy: MatchDelegateProxy?
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
     @ObservationIgnored private var savedConfiguration: SavedAudioConfig?
+    @ObservationIgnored private var listenStartedAt: Date?
+    @ObservationIgnored private(set) var lastMatch: CinemaSyncMatch?
 
     init(
         catalogURL: URL,
@@ -87,7 +91,9 @@ final class CinemaSyncService {
         capture: AudioInputCapturing = AVAudioEngineCapture(),
         makeSession: @escaping (URL) throws -> SHSessionMatching = CinemaSyncService.makeCatalogSession,
         checkPermission: @MainActor @escaping () async -> Bool = CinemaSyncService.requestMicrophonePermission,
-        timeout: Duration = .seconds(6)
+        timeout: Duration = .seconds(6),
+        diagnostics: DiagnosticsLog = .shared,
+        now: @escaping () -> Date = { Date() }
     ) {
         self.catalogURL = catalogURL
         self.mapping = mapping
@@ -97,6 +103,8 @@ final class CinemaSyncService {
         self.makeSession = makeSession
         self.checkPermission = checkPermission
         self.timeout = timeout
+        self.diagnostics = diagnostics
+        self.now = now
     }
 
     func start() async {
@@ -107,9 +115,11 @@ final class CinemaSyncService {
             break
         }
         state = .preparing
+        lastMatch = nil
+        listenStartedAt = nil
 
         guard await checkPermission() else {
-            state = .error(Self.microphoneDeniedMessage)
+            setError(Self.microphoneDeniedMessage)
             return
         }
         guard case .preparing = state else { return }
@@ -118,12 +128,12 @@ final class CinemaSyncService {
         do {
             session = try makeSession(catalogURL)
         } catch {
-            state = .error(Self.catalogLoadMessage)
+            setError(Self.catalogLoadMessage)
             return
         }
 
-        let proxy = MatchDelegateProxy { [weak self] offset in
-            Task { @MainActor in self?.ingestMatch(offset: offset) }
+        let proxy = MatchDelegateProxy { [weak self] offset, absStart in
+            Task { @MainActor in self?.ingestMatch(offset: offset, absStart: absStart) }
         }
         session.delegate = proxy
         self.session = session
@@ -145,7 +155,7 @@ final class CinemaSyncService {
             try audioSession.setActive(true, options: [])
         } catch {
             teardown()
-            state = .error(Self.audioSessionMessage)
+            setError(Self.audioSessionMessage)
             return
         }
 
@@ -156,10 +166,11 @@ final class CinemaSyncService {
             }
         } catch {
             teardown()
-            state = .error(Self.captureMessage)
+            setError(Self.captureMessage)
             return
         }
 
+        listenStartedAt = now()
         state = .listening
         startTimeout()
     }
@@ -169,22 +180,56 @@ final class CinemaSyncService {
         state = .idle
     }
 
-    func ingestMatch(offset: TimeInterval?) {
+    func ingestMatch(offset: TimeInterval?, absStart: TimeInterval = 0) {
         guard case .listening = state else { return }
         teardown()
         guard let offset else {
+            logSyncFailure(result: .noMatch, error: nil)
             state = .noMatch
             return
         }
         let enOffset = offset + latencyCompensation
         let ruOffset = mapping?.ruTime(forEnTime: enOffset) ?? enOffset
+        lastMatch = CinemaSyncMatch(
+            enOffset: enOffset,
+            ruOffset: ruOffset,
+            absStart: absStart,
+            latencyComp: latencyCompensation,
+            listenSeconds: listenElapsed() ?? 0
+        )
         state = .matched(enOffset: enOffset, ruOffset: ruOffset)
     }
 
     private func handleTimeout() {
         guard case .listening = state else { return }
         teardown()
+        logSyncFailure(result: .timeout, error: nil)
         state = .noMatch
+    }
+
+    private func setError(_ message: String) {
+        logSyncFailure(result: .error, error: message)
+        state = .error(message)
+    }
+
+    private func logSyncFailure(result: DiagnosticsEvent.MatchResult, error: String?) {
+        diagnostics.log(.sync(
+            source: .phone,
+            result: result,
+            enTime: nil,
+            ruTime: nil,
+            playerBefore: nil,
+            delta: nil,
+            latencyComp: latencyCompensation,
+            absStart: nil,
+            listenSeconds: listenElapsed(),
+            error: error
+        ))
+    }
+
+    private func listenElapsed() -> TimeInterval? {
+        guard let listenStartedAt else { return nil }
+        return now().timeIntervalSince(listenStartedAt)
     }
 
     private func startTimeout() {
@@ -248,21 +293,29 @@ private struct SessionBox: @unchecked Sendable {
     let session: SHSessionMatching
 }
 
-final class MatchDelegateProxy: NSObject, SHSessionDelegate, @unchecked Sendable {
-    private let onMatch: @Sendable (TimeInterval?) -> Void
+struct CinemaSyncMatch: Equatable {
+    let enOffset: TimeInterval
+    let ruOffset: TimeInterval
+    let absStart: TimeInterval
+    let latencyComp: TimeInterval
+    let listenSeconds: TimeInterval
+}
 
-    init(onMatch: @escaping @Sendable (TimeInterval?) -> Void) {
+final class MatchDelegateProxy: NSObject, SHSessionDelegate, @unchecked Sendable {
+    private let onMatch: @Sendable (TimeInterval?, TimeInterval) -> Void
+
+    init(onMatch: @escaping @Sendable (TimeInterval?, TimeInterval) -> Void) {
         self.onMatch = onMatch
         super.init()
     }
 
     func session(_ session: SHSession, didFind match: SHMatch) {
         guard let item = match.mediaItems.first else {
-            onMatch(nil)
+            onMatch(nil, 0)
             return
         }
         let absStart = CinemaMatch.absStart(fromSubtitle: item.subtitle)
-        onMatch(absStart + item.predictedCurrentMatchOffset)
+        onMatch(absStart + item.predictedCurrentMatchOffset, absStart)
     }
 }
 

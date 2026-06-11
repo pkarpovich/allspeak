@@ -123,6 +123,37 @@ struct WireProtocolTests {
         #expect(decoded == snapshot)
     }
 
+    @Test("PlaybackSnapshot round-trips the system volume")
+    func playbackSnapshotVolumeRoundTrip() throws {
+        let snapshot = PlaybackSnapshot(
+            sessionID: UUID(),
+            revision: 1,
+            currentTime: 1.0,
+            duration: 10.0,
+            currentIndex: 0,
+            isPlaying: false,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000),
+            volume: 0.62
+        )
+        let decoded = try PlaybackSnapshot(propertyList: try snapshot.toPropertyList())
+        #expect(decoded.volume == 0.62)
+    }
+
+    @Test("PlaybackSnapshot decodes a payload without volume (older phone build)")
+    func playbackSnapshotMissingVolume() throws {
+        let snapshot = PlaybackSnapshot(
+            sessionID: UUID(),
+            revision: 1,
+            currentTime: 1.0,
+            duration: 10.0,
+            currentIndex: 0,
+            isPlaying: false,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let decoded = try PlaybackSnapshot(propertyList: try snapshot.toPropertyList())
+        #expect(decoded.volume == nil)
+    }
+
     @Test("SessionMetadata round-trips via property list")
     func sessionMetadataRoundTrip() throws {
         let meta = SessionMetadata(

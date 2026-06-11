@@ -87,6 +87,30 @@ struct CinemaSyncServiceTests {
         return try DTWMapping(jsonData: Data(json.utf8))
     }
 
+    // A never-begun log: log() is a no-op, so failure-path tests that do not
+    // assert diagnostics stay off the shared singleton and the real filesystem.
+    private func quietDiagnostics() -> DiagnosticsLog {
+        DiagnosticsLog(rootURL: FileManager.default.temporaryDirectory)
+    }
+
+    private final class MutableClock: @unchecked Sendable {
+        var current: Date
+        init(_ date: Date) { current = date }
+    }
+
+    private func makeTempRoot() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func readLines(_ url: URL) throws -> [String] {
+        try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
     @Test("start transitions to listening and swaps audio session with mix options")
     func startSwapsAudioSession() async throws {
         let session = MockSHSession()
@@ -167,7 +191,8 @@ struct CinemaSyncServiceTests {
             capture: MockCapture(),
             makeSession: { _ in MockSHSession() },
             checkPermission: { true },
-            timeout: .seconds(60)
+            timeout: .seconds(60),
+            diagnostics: quietDiagnostics()
         )
 
         await service.start()
@@ -221,7 +246,8 @@ struct CinemaSyncServiceTests {
             capture: capture,
             makeSession: { _ in MockSHSession() },
             checkPermission: { true },
-            timeout: .milliseconds(80)
+            timeout: .milliseconds(80),
+            diagnostics: quietDiagnostics()
         )
 
         await service.start()
@@ -284,7 +310,8 @@ struct CinemaSyncServiceTests {
             capture: capture,
             makeSession: { _ in MockSHSession() },
             checkPermission: { false },
-            timeout: .seconds(60)
+            timeout: .seconds(60),
+            diagnostics: quietDiagnostics()
         )
 
         await service.start()
@@ -303,7 +330,8 @@ struct CinemaSyncServiceTests {
             audioSession: MockAudioSession(),
             capture: capture,
             checkPermission: { true },
-            timeout: .seconds(60)
+            timeout: .seconds(60),
+            diagnostics: quietDiagnostics()
         )
 
         await service.start()
@@ -323,7 +351,8 @@ struct CinemaSyncServiceTests {
             capture: capture,
             makeSession: { _ in MockSHSession() },
             checkPermission: { true },
-            timeout: .seconds(60)
+            timeout: .seconds(60),
+            diagnostics: quietDiagnostics()
         )
 
         await service.start()
@@ -343,7 +372,8 @@ struct CinemaSyncServiceTests {
             capture: capture,
             makeSession: { _ in MockSHSession() },
             checkPermission: { true },
-            timeout: .seconds(60)
+            timeout: .seconds(60),
+            diagnostics: quietDiagnostics()
         )
 
         await service.start()
@@ -503,5 +533,154 @@ struct CinemaSyncServiceTests {
     )
     func absStartParsing(subtitle: String?, expected: TimeInterval) {
         #expect(CinemaMatch.absStart(fromSubtitle: subtitle) == expected)
+    }
+
+    // MARK: - Diagnostics
+
+    private func isoDate(_ iso: String) -> Date {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: iso)!
+    }
+
+    @Test("a no-match logs a phone sync failure record with the listen duration")
+    func noMatchLogsFailureRecord() async throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = DiagnosticsLog(rootURL: root, now: { self.isoDate("2026-06-12T19:43:02.000Z") })
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+        let clock = MutableClock(isoDate("2026-06-12T19:43:00.000Z"))
+
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            latencyCompensation: 0.9,
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60),
+            diagnostics: log,
+            now: { clock.current }
+        )
+
+        await service.start()
+        clock.current = isoDate("2026-06-12T19:43:03.000Z")
+        service.ingestMatch(offset: nil)
+
+        let url = try #require(log.currentFileURL)
+        #expect(try readLines(url) == [
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"sync","source":"phone","result":"noMatch","latencyComp":0.9,"listenSeconds":3}"#
+        ])
+    }
+
+    @Test("a timeout logs a phone sync failure record with the timeout result")
+    func timeoutLogsFailureRecord() async throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = DiagnosticsLog(rootURL: root, now: { self.isoDate("2026-06-12T19:43:02.000Z") })
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+        let fixed = isoDate("2026-06-12T19:43:00.000Z")
+
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            latencyCompensation: 0.9,
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .milliseconds(80),
+            diagnostics: log,
+            now: { fixed }
+        )
+
+        await service.start()
+        try await Task.sleep(for: .milliseconds(250))
+
+        let url = try #require(log.currentFileURL)
+        #expect(try readLines(url) == [
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"sync","source":"phone","result":"timeout","latencyComp":0.9,"listenSeconds":0}"#
+        ])
+    }
+
+    @Test("a setup error logs a phone sync failure record carrying the message")
+    func errorLogsFailureRecord() async throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = DiagnosticsLog(rootURL: root, now: { self.isoDate("2026-06-12T19:43:02.000Z") })
+        log.begin(filmTitle: "Dune", hasCatalog: true)
+
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            latencyCompensation: 0.9,
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { false },
+            timeout: .seconds(60),
+            diagnostics: log,
+            now: { self.isoDate("2026-06-12T19:43:00.000Z") }
+        )
+
+        await service.start()
+
+        let url = try #require(log.currentFileURL)
+        #expect(try readLines(url) == [
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"sync","source":"phone","result":"error","latencyComp":0.9,"error":"Microphone access is off. Turn it on in Settings to sync with the cinema."}"#
+        ])
+    }
+
+    @Test("a session without a catalog logs no failure record")
+    func failureGatedOffWithoutCatalog() async throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = DiagnosticsLog(rootURL: root, now: { self.isoDate("2026-06-12T19:43:02.000Z") })
+        log.begin(filmTitle: "Dune", hasCatalog: false)
+
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60),
+            diagnostics: log,
+            now: { self.isoDate("2026-06-12T19:43:00.000Z") }
+        )
+
+        await service.start()
+        service.ingestMatch(offset: nil)
+
+        let url = try #require(log.currentFileURL)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("a match records the diagnostic fields for the phone seek path")
+    func matchPopulatesLastMatch() async throws {
+        let clock = MutableClock(isoDate("2026-06-12T19:43:00.000Z"))
+        let service = CinemaSyncService(
+            catalogURL: tempCatalogURL(),
+            mapping: try stubMapping(),
+            latencyCompensation: 10,
+            audioSession: MockAudioSession(),
+            capture: MockCapture(),
+            makeSession: { _ in MockSHSession() },
+            checkPermission: { true },
+            timeout: .seconds(60),
+            diagnostics: quietDiagnostics(),
+            now: { clock.current }
+        )
+
+        await service.start()
+        clock.current = isoDate("2026-06-12T19:43:04.000Z")
+        service.ingestMatch(offset: 100, absStart: 1_800)
+
+        #expect(service.lastMatch == CinemaSyncMatch(
+            enOffset: 110,
+            ruOffset: 99,
+            absStart: 1_800,
+            latencyComp: 10,
+            listenSeconds: 4
+        ))
     }
 }

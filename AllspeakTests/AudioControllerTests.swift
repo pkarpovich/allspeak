@@ -113,65 +113,49 @@ struct AudioControllerTests {
 @MainActor
 struct AudioControllerVolumeTests {
 
-    @Test("setVolume persists the clamped value to the injected defaults")
-    func setVolumePersists() {
-        let defaults = Self.makeEphemeralDefaults()
-        let controller = AudioController(defaults: defaults)
+    final class MockSystemVolume: SystemVolumeSetting {
+        private(set) var values: [Float] = []
+        func set(_ value: Float) {
+            values.append(value)
+        }
+    }
+
+    @Test("setVolume forwards the clamped value to the system volume")
+    func setVolumeForwards() {
+        let system = MockSystemVolume()
+        let controller = AudioController(systemVolume: system)
 
         controller.setVolume(0.42)
 
-        let stored = defaults.object(forKey: AudioController.volumeDefaultsKey) as? Float
-        #expect(stored == 0.42)
+        #expect(system.values == [0.42])
     }
 
-    @Test("setVolume clamps before persisting (negative)")
+    @Test("setVolume clamps before forwarding (negative)")
     func setVolumeClampsNegative() {
-        let defaults = Self.makeEphemeralDefaults()
-        let controller = AudioController(defaults: defaults)
+        let system = MockSystemVolume()
+        let controller = AudioController(systemVolume: system)
 
         controller.setVolume(-0.5)
 
-        let stored = defaults.object(forKey: AudioController.volumeDefaultsKey) as? Float
-        #expect(stored == 0.0)
+        #expect(system.values == [0.0])
     }
 
-    @Test("setVolume clamps before persisting (>1)")
+    @Test("setVolume clamps before forwarding (>1)")
     func setVolumeClampsHigh() {
-        let defaults = Self.makeEphemeralDefaults()
-        let controller = AudioController(defaults: defaults)
+        let system = MockSystemVolume()
+        let controller = AudioController(systemVolume: system)
 
         controller.setVolume(3.0)
 
-        let stored = defaults.object(forKey: AudioController.volumeDefaultsKey) as? Float
-        #expect(stored == 1.0)
+        #expect(system.values == [1.0])
     }
 
-    @Test("load restores the persisted volume onto the player")
-    func loadRestoresVolume() throws {
-        let defaults = Self.makeEphemeralDefaults()
-        defaults.set(Float(0.25), forKey: AudioController.volumeDefaultsKey)
-
+    @Test("load pins the player gain to 1.0 so system volume is the only knob")
+    func loadPinsPlayerGain() throws {
         let fixture = try Self.makeSilenceFile(seconds: 5)
         defer { try? FileManager.default.removeItem(at: fixture) }
 
-        let controller = AudioController(defaults: defaults)
-        try controller.load(audio: fixture, subtitles: [], title: "T")
-
-        let mirror = Mirror(reflecting: controller)
-        let player = try #require(
-            mirror.children.first(where: { $0.label == "player" })?.value as? AVAudioPlayer
-        )
-        #expect(abs(player.volume - 0.25) < 0.0001)
-    }
-
-    @Test("load defaults to 1.0 when no volume has been persisted")
-    func loadDefaultsToFullVolume() throws {
-        let defaults = Self.makeEphemeralDefaults()
-
-        let fixture = try Self.makeSilenceFile(seconds: 5)
-        defer { try? FileManager.default.removeItem(at: fixture) }
-
-        let controller = AudioController(defaults: defaults)
+        let controller = AudioController(systemVolume: MockSystemVolume())
         try controller.load(audio: fixture, subtitles: [], title: "T")
 
         let mirror = Mirror(reflecting: controller)
@@ -181,14 +165,13 @@ struct AudioControllerVolumeTests {
         #expect(abs(player.volume - 1.0) < 0.0001)
     }
 
-    @Test("setVolume after load writes through to the live player")
-    func setVolumeAfterLoadUpdatesPlayer() throws {
-        let defaults = Self.makeEphemeralDefaults()
-
+    @Test("setVolume after load leaves the player gain at 1.0")
+    func setVolumeLeavesPlayerGain() throws {
         let fixture = try Self.makeSilenceFile(seconds: 5)
         defer { try? FileManager.default.removeItem(at: fixture) }
 
-        let controller = AudioController(defaults: defaults)
+        let system = MockSystemVolume()
+        let controller = AudioController(systemVolume: system)
         try controller.load(audio: fixture, subtitles: [], title: "T")
 
         controller.setVolume(0.6)
@@ -197,14 +180,8 @@ struct AudioControllerVolumeTests {
         let player = try #require(
             mirror.children.first(where: { $0.label == "player" })?.value as? AVAudioPlayer
         )
-        #expect(abs(player.volume - 0.6) < 0.0001)
-    }
-
-    private static func makeEphemeralDefaults() -> UserDefaults {
-        let suite = "allspeak.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
+        #expect(abs(player.volume - 1.0) < 0.0001)
+        #expect(system.values == [0.6])
     }
 
     private static func makeSilenceFile(seconds: Double) throws -> URL {
