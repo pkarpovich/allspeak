@@ -46,7 +46,7 @@ struct PlayerView: View {
                     cues: controller.subtitles,
                     currentIndex: controller.currentIndex,
                     cinema: cinema,
-                    onSeek: { PlaybackCoordinator.shared.seek(to: $0) },
+                    onSeek: { PlaybackCoordinator.shared.seekToCue($0) },
                     onCinemaInput: { applyCinema($0) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

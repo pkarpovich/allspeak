@@ -33,6 +33,31 @@ struct DTWMappingTests {
         try DTWMapping(jsonData: Self.inlineJSON)
     }
 
+    @Test("enTime inverse lookup interpolates between pairs")
+    func inverseLookupInterpolates() throws {
+        let mapping = try tinyMapping()
+        #expect(mapping.enTime(forRuTime: 0.0) == 0.0)
+        #expect(abs(mapping.enTime(forRuTime: 1.5) - 1.0) < 0.0001)
+        #expect(abs(mapping.enTime(forRuTime: 4.0) - 2.5) < 0.0001)
+        #expect(abs(mapping.enTime(forRuTime: 14.0) - 9.0) < 0.0001)
+    }
+
+    @Test("enTime inverse clamps outside the pair range")
+    func inverseLookupClamps() throws {
+        let mapping = try tinyMapping()
+        #expect(mapping.enTime(forRuTime: -5.0) == 0.0)
+        #expect(mapping.enTime(forRuTime: 100.0) == 9.0)
+    }
+
+    @Test("enTime and ruTime round-trip within interpolation error")
+    func inverseRoundTrip() throws {
+        let mapping = try tinyMapping()
+        for ru in stride(from: 0.0, through: 14.0, by: 0.7) {
+            let en = mapping.enTime(forRuTime: ru)
+            #expect(abs(mapping.ruTime(forEnTime: en) - ru) < 0.0001)
+        }
+    }
+
     @Test("decodes metadata and pairs from the array-of-arrays form")
     func decodesMetadata() throws {
         let mapping = try tinyMapping()

@@ -107,6 +107,13 @@ struct WireProtocolTests {
         }
     }
 
+    @Test("deadReckonSeek round-trips via property list")
+    func deadReckonSeekRoundTrip() throws {
+        let command = WatchCommand.deadReckonSeek(sessionID: UUID())
+        let decoded = try WatchCommand(propertyList: try command.toPropertyList())
+        #expect(decoded == command)
+    }
+
     @Test("PlaybackSnapshot round-trips via property list")
     func playbackSnapshotRoundTrip() throws {
         let snapshot = PlaybackSnapshot(
