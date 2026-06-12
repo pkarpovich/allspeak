@@ -60,6 +60,34 @@ struct DTWMapping: Sendable, Equatable {
         pairs = payload.pairs
     }
 
+    // Inverse lookup for anchoring: maps a known RU position (e.g. a tapped
+    // subtitle cue) back to the cinema's EN timeline. Relies on pairs being
+    // monotonic in ruT as well as enT - true for exporter output (both axes
+    // are validated monotonic at build time).
+    func enTime(forRuTime ru: Double) -> Double {
+        guard let first = pairs.first, let last = pairs.last else { return ru }
+        if ru <= first.ruT { return first.enT }
+        if ru >= last.ruT { return last.enT }
+        var lo = 0
+        var hi = pairs.count - 1
+        while lo + 1 < hi {
+            let mid = (lo + hi) / 2
+            if pairs[mid].ruT <= ru {
+                lo = mid
+            } else {
+                hi = mid
+            }
+        }
+        let leftRu = pairs[lo].ruT
+        let rightRu = pairs[hi].ruT
+        let leftEn = pairs[lo].enT
+        let rightEn = pairs[hi].enT
+        let span = rightRu - leftRu
+        guard span > 0 else { return leftEn }
+        let fraction = (ru - leftRu) / span
+        return leftEn + fraction * (rightEn - leftEn)
+    }
+
     func ruTime(forEnTime en: Double) -> Double {
         guard let first = pairs.first, let last = pairs.last else { return en }
         if en <= first.enT { return first.ruT }

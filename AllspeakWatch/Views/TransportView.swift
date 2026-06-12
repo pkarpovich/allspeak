@@ -29,6 +29,8 @@ struct TransportView: View {
     @State private var volumeActivityTask: Task<Void, Never>?
     @State private var cinemaSync = WatchCinemaSync(haptics: WatchDeviceHaptics())
     @State private var syncResetTask: Task<Void, Never>?
+    @State private var deadReckon = WatchDeadReckon(haptics: WatchDeviceHaptics())
+    @State private var deadReckonResetTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -109,13 +111,46 @@ struct TransportView: View {
     }
 
     private var coarseRow: some View {
-        HStack(spacing: 14) {
-            skipButton(icon: Tokens.Icon.skipBack, seconds: "3", size: 60, action: handleSkipBackCoarse)
-                .accessibilityLabel("Skip back 3 seconds")
-            skipButton(icon: Tokens.Icon.skipForward, seconds: "3", size: 60, action: handleSkipForwardCoarse)
-                .accessibilityLabel("Skip forward 3 seconds")
+        ViewThatFits(in: .horizontal) {
+            coarseRowContent(buttonSize: 60, spacing: 14)
+            coarseRowContent(buttonSize: 52, spacing: 10)
+            coarseRowContent(buttonSize: 44, spacing: 7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func coarseRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            skipButton(icon: Tokens.Icon.skipBack, seconds: "3", size: buttonSize, action: handleSkipBackCoarse)
+                .accessibilityLabel("Skip back 3 seconds")
+            deadReckonButton
+            skipButton(icon: Tokens.Icon.skipForward, seconds: "3", size: buttonSize, action: handleSkipForwardCoarse)
+                .accessibilityLabel("Skip forward 3 seconds")
+        }
+    }
+
+    // Mic-free resync from the anchor (subtitle tap / last ShazamKit sync).
+    // Always visible during a session - no catalog required; the phone replies
+    // with failure (felt as the failure haptic) when no anchor exists yet.
+    private var deadReckonButton: some View {
+        Button(action: handleDeadReckon) {
+            ZStack {
+                if let glyph = deadReckon.state.buttonGlyph {
+                    Image(systemName: glyph)
+                        .font(.system(size: 16, weight: .medium))
+                } else {
+                    ProgressView()
+                }
+            }
+            .foregroundStyle(Tokens.text)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .frame(width: 44, height: 44)
+        .accessibilityLabel(deadReckon.state.buttonAccessibilityLabel)
+        .onChange(of: deadReckon.state) { _, newState in
+            scheduleDeadReckonReset(for: newState)
+        }
     }
 
     // Cinema sync: listens through the watch mic and matches against the
@@ -228,6 +263,21 @@ struct TransportView: View {
 
     private func handlePlayPause() {
         client.send(.togglePlayPause)
+    }
+
+    private func handleDeadReckon() {
+        guard let metadata = client.metadata else { return }
+        deadReckon.tap(sessionID: metadata.sessionID)
+    }
+
+    private func scheduleDeadReckonReset(for state: WatchDeadReckonState) {
+        deadReckonResetTask?.cancel()
+        guard state == .done || state == .failed else { return }
+        deadReckonResetTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            deadReckon.reset()
+        }
     }
 
     private func handleSync() {

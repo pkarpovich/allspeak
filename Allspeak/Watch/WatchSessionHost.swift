@@ -209,6 +209,12 @@ final class WatchSessionHost: NSObject {
             guard coordinator.applyCinemaMatch(sessionID: sessionID, stamp: stamp, enTime: enTime) else {
                 return .empty
             }
+        case .deadReckonSeek(let sessionID):
+            // Same empty-snapshot contract: no anchor yet (or another session)
+            // means nothing seeked, and the wrist must feel failure.
+            guard coordinator.applyDeadReckonSeek(sessionID: sessionID) else {
+                return .empty
+            }
         default:
             coordinator.apply(command)
         }

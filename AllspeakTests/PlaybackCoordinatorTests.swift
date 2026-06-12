@@ -774,6 +774,90 @@ struct PlaybackCoordinatorTests {
         return defaults
     }
 
+    @Test("dead-reckon seeks to the projected DTW position from a sync anchor")
+    func deadReckonProjectsFromSyncAnchor() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            stamp: try #require(fixture.coordinator.catalogStamp),
+            enTime: 1.0,
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
+
+        let applied = fixture.coordinator.applyDeadReckonSeek(
+            sessionID: fixture.sessionUUID,
+            now: Date().addingTimeInterval(2.0),
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
+
+        #expect(applied)
+        #expect(abs(controller.currentTime - 1.5) < 0.1)
+    }
+
+    @Test("subtitle-cue seek sets the anchor via the inverse mapping")
+    func seekToCueAnchorsViaInverseMapping() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        fixture.coordinator.seekToCue(1.0)
+
+        let applied = fixture.coordinator.applyDeadReckonSeek(
+            sessionID: fixture.sessionUUID,
+            now: Date().addingTimeInterval(1.0),
+            defaults: try Self.makeLatencyDefaults(0.0)
+        )
+
+        #expect(applied)
+        #expect(abs(controller.currentTime - 1.5) < 0.1)
+    }
+
+    @Test("dead-reckon fails without an anchor")
+    func deadReckonFailsWithoutAnchor() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        #expect(fixture.coordinator.applyDeadReckonSeek(sessionID: fixture.sessionUUID) == false)
+    }
+
+    @Test("plain seek does not anchor")
+    func plainSeekDoesNotAnchor() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        fixture.coordinator.seek(to: 2.0)
+
+        #expect(fixture.coordinator.applyDeadReckonSeek(sessionID: fixture.sessionUUID) == false)
+    }
+
+    @Test("dead-reckon fails for a different session")
+    func deadReckonRejectsForeignSession() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        fixture.coordinator.seekToCue(2.0)
+
+        #expect(fixture.coordinator.applyDeadReckonSeek(sessionID: UUID()) == false)
+    }
+
     @Test("applyCinemaMatch seeks to the DTW-mapped RU time")
     func applyCinemaMatchMapsThroughDTW() async throws {
         let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)

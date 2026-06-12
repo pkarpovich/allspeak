@@ -26,6 +26,7 @@ enum DiagnosticsEvent {
         error: String?
     )
     case watchAttempt(result: MatchResult, listenSeconds: Double)
+    case deadReckon(enTime: Double, ruTime: Double, playerBefore: Double, delta: Double)
     case skip(seconds: Double, source: Source)
     case seek(time: Double, source: Source)
     case pause
@@ -35,6 +36,7 @@ enum DiagnosticsEvent {
         switch self {
         case .sync: return "sync"
         case .watchAttempt: return "watch_attempt"
+        case .deadReckon: return "dead_reckon"
         case .skip: return "skip"
         case .seek: return "seek"
         case .pause: return "pause"
@@ -64,6 +66,11 @@ enum DiagnosticsEvent {
         case let .watchAttempt(result, listenSeconds):
             builder.add("result", result.rawValue)
             builder.add("listenSeconds", listenSeconds)
+        case let .deadReckon(enTime, ruTime, playerBefore, delta):
+            builder.add("enTime", enTime)
+            builder.add("ruTime", ruTime)
+            builder.add("playerBefore", playerBefore)
+            builder.add("delta", delta)
         case let .skip(seconds, source):
             builder.add("seconds", seconds)
             builder.add("source", source.rawValue)

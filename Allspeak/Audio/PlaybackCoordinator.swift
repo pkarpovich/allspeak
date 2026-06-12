@@ -59,6 +59,12 @@ final class PlaybackCoordinator {
     var liveActivity: LiveActivityCoordinator = LiveActivityCoordinator()
     var diagnostics: DiagnosticsLog = .shared
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
+    // Last trusted alignment between the cinema's EN timeline and wall time:
+    // (the cinema was at enTime when the clock read at). Set by every applied
+    // ShazamKit sync and every subtitle-cue tap (both are "we are aligned NOW"
+    // gestures). Cinemas play continuously at 1.0x, so the cinema's current
+    // position is anchor.enTime + elapsed - the basis for mic-free resync.
+    private(set) var cinemaAnchor: (enTime: Double, at: Date)?
 
     init() {}
 
@@ -561,6 +567,7 @@ final class PlaybackCoordinator {
 
     func endSession() {
         loadGeneration += 1
+        cinemaAnchor = nil
         diagnostics.end()
         guard let controller else { return }
         controller.onTick = nil
@@ -637,6 +644,9 @@ final class PlaybackCoordinator {
         guard let controller else { return }
         let playerBefore = controller.currentTime
         controller.seek(to: offset)
+        if let enTime {
+            cinemaAnchor = (enTime, Date())
+        }
         diagnostics.log(.sync(
             source: .phone,
             result: .matched,
@@ -690,6 +700,47 @@ final class PlaybackCoordinator {
         diagnostics.log(.seek(time: time, source: source))
     }
 
+    // Subtitle-cue taps are alignment gestures: Pavel taps the line that is
+    // sounding in the hall right now, so at that instant the RU position is
+    // trusted and the cinema's EN position follows from the inverse mapping.
+    // Plain scrubbing must NOT anchor - it is navigation, not alignment.
+    func seekToCue(_ time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
+        guard let controller else { return }
+        controller.seek(to: time)
+        if let dtwMapping {
+            cinemaAnchor = (dtwMapping.enTime(forRuTime: time), Date())
+        }
+        diagnostics.log(.seek(time: time, source: source))
+    }
+
+    // Mic-free resync: project the cinema's current EN position from the
+    // anchor plus elapsed wall time, DTW-map to RU, seek. The DTW map encodes
+    // the full drift (slope + zigzag), so this corrects exactly what has
+    // accumulated since the anchor. The same latency compensation as the mic
+    // path applies - the dominant terms (command hop, seek-to-audible delay)
+    // are shared.
+    @discardableResult
+    func applyDeadReckonSeek(
+        sessionID: UUID,
+        now: Date = Date(),
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard let controller, sessionUUID == sessionID, let anchor = cinemaAnchor else { return false }
+        let elapsed = now.timeIntervalSince(anchor.at)
+        guard elapsed >= 0 else { return false }
+        let enNow = anchor.enTime + elapsed + CinemaSyncService.storedLatencyCompensation(defaults)
+        let ruTarget = dtwMapping?.ruTime(forEnTime: enNow) ?? enNow
+        let playerBefore = controller.currentTime
+        controller.seek(to: ruTarget)
+        diagnostics.log(.deadReckon(
+            enTime: enNow,
+            ruTime: ruTarget,
+            playerBefore: playerBefore,
+            delta: ruTarget - playerBefore
+        ))
+        return true
+    }
+
     // The stamp identifies the catalog the watch matched against; both sides
     // must hold the same non-nil stamp. A mismatch means the phone replaced or
     // cleared the catalog after the watch started listening, so the matched
@@ -707,6 +758,7 @@ final class PlaybackCoordinator {
         let ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
         let playerBefore = controller.currentTime
         controller.seek(to: ruOffset)
+        cinemaAnchor = (enOffset, Date())
         diagnostics.log(.sync(
             source: .watch,
             result: .matched,
@@ -734,14 +786,14 @@ final class PlaybackCoordinator {
         case .skip(let seconds):
             skip(by: seconds, source: .watch)
         case .seek(let time):
-            seek(to: time, source: .watch)
+            seekToCue(time, source: .watch)
         case .switchTrack(let id):
             Task { [weak self] in
                 try? await self?.switchTrack(to: id)
             }
         case .setVolume(let value):
             controller.setVolume(value)
-        case .requestCueBundle, .requestCatalog:
+        case .requestCueBundle, .requestCatalog, .deadReckonSeek:
             break
         case .cinemaMatch(let sessionID, let stamp, let enTime):
             applyCinemaMatch(sessionID: sessionID, stamp: stamp, enTime: enTime)

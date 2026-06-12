@@ -34,6 +34,15 @@ import Foundation
 //                                     resend on its own); host clears its
 //                                     dedup key unless that transfer is
 //                                     still in flight, then rebroadcasts
+//   .deadReckonSeek(sessionID:)       mic-free resync from the stored anchor:
+//                                     the phone projects the cinema's current
+//                                     EN position from the last alignment
+//                                     anchor (subtitle tap or ShazamKit sync)
+//                                     plus elapsed wall time, DTW-maps it to
+//                                     RU, and seeks. Replies with the empty
+//                                     snapshot when it cannot seek (no anchor
+//                                     yet, no session, or another session) so
+//                                     the wrist feels failure.
 //   .cinemaMatch(sessionID:stamp:     watch-local ShazamKit match result:
 //                enTime:)             absolute English timecode in seconds
 //                                     (abs_start + predicted offset); host
@@ -108,6 +117,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case requestCueBundle(sessionID: UUID, revision: Int)
     case requestCatalog(sessionID: UUID, stamp: String)
     case cinemaMatch(sessionID: UUID, stamp: String?, enTime: Double)
+    case deadReckonSeek(sessionID: UUID)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -132,6 +142,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case requestCueBundle
         case requestCatalog
         case cinemaMatch
+        case deadReckonSeek
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -168,6 +179,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(sessionID, forKey: .sessionID)
             try container.encodeIfPresent(stamp, forKey: .stamp)
             try container.encode(enTime, forKey: .enTime)
+        case .deadReckonSeek(let sessionID):
+            try container.encode(Kind.deadReckonSeek, forKey: .kind)
+            try container.encode(sessionID, forKey: .sessionID)
         }
     }
 
@@ -204,6 +218,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 sessionID: try container.decode(UUID.self, forKey: .sessionID),
                 stamp: try container.decodeIfPresent(String.self, forKey: .stamp),
                 enTime: try container.decode(Double.self, forKey: .enTime)
+            )
+        case .deadReckonSeek:
+            self = .deadReckonSeek(
+                sessionID: try container.decode(UUID.self, forKey: .sessionID)
             )
         }
     }
