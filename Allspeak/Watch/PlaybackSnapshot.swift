@@ -13,6 +13,10 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
     // the watch Crown can start from - and stay in sync with - the one true
     // volume, including changes made via side buttons or the AirPods stem.
     let volume: Float?
+    // Seconds the dub has drifted from the cinema relative to the sync anchor.
+    // Positive = dub plays AHEAD of the cinema, negative = BEHIND. nil when no
+    // anchor exists yet (drift is only meaningful relative to an anchor).
+    let drift: Double?
 
     init(
         sessionID: UUID,
@@ -23,7 +27,8 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         isPlaying: Bool,
         serverDate: Date,
         activeTrackID: UUID? = nil,
-        volume: Float? = nil
+        volume: Float? = nil,
+        drift: Double? = nil
     ) {
         self.sessionID = sessionID
         self.revision = revision
@@ -34,10 +39,11 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         self.serverDate = serverDate
         self.activeTrackID = activeTrackID
         self.volume = volume
+        self.drift = drift
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionID, revision, currentTime, duration, currentIndex, isPlaying, serverDate, activeTrackID, volume
+        case sessionID, revision, currentTime, duration, currentIndex, isPlaying, serverDate, activeTrackID, volume, drift
     }
 
     init(from decoder: any Decoder) throws {
@@ -51,6 +57,7 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         self.serverDate = try container.decode(Date.self, forKey: .serverDate)
         self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
         self.volume = try container.decodeIfPresent(Float.self, forKey: .volume)
+        self.drift = try container.decodeIfPresent(Double.self, forKey: .drift)
     }
 
     static let empty = PlaybackSnapshot(
@@ -62,6 +69,7 @@ struct PlaybackSnapshot: Sendable, Equatable, Codable {
         isPlaying: false,
         serverDate: Date(timeIntervalSince1970: 0),
         activeTrackID: nil,
-        volume: nil
+        volume: nil,
+        drift: nil
     )
 }

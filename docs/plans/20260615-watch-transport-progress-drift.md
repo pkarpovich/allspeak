@@ -38,10 +38,10 @@
 - [x] build AllspeakWatch - no warnings/errors; existing test suite green
 
 ### Task 2: Add `drift` to the PlaybackSnapshot wire model
-- [ ] add `let drift: Double?` to `PlaybackSnapshot` (default nil in init), encode in `toPropertyList`, `decodeIfPresent` in `init(from:)` - mirror the `volume` optional exactly
-- [ ] write test: snapshot with a drift value round-trips via property list
-- [ ] write test: payload without drift decodes to `drift == nil` (older phone build)
-- [ ] run tests - must pass before next task
+- [x] add `let drift: Double?` to `PlaybackSnapshot` (default nil in init), encode in `toPropertyList`, `decodeIfPresent` in `init(from:)` - mirror the `volume` optional exactly
+- [x] write test: snapshot with a drift value round-trips via property list
+- [x] write test: payload without drift decodes to `drift == nil` (older phone build)
+- [x] run tests - must pass before next task
 
 ### Task 3: Compute drift on the phone
 - [ ] add a pure helper, e.g. `static func cinemaDrift(currentRU: Double, anchor: (enTime: Double, at: Date)?, now: Date, mapping: DTWMapping?, latency: Double) -> Double?` returning `currentRU - mapping.ruTime(forEnTime: anchor.enTime + (now - anchor.at) + latency)`, or `nil` when anchor is missing
