@@ -39,14 +39,14 @@
 ## Implementation Steps
 
 ### Task 1: Strip Live Activity wiring from PlaybackCoordinator
-- [ ] remove `var liveActivity: LiveActivityCoordinator = LiveActivityCoordinator()` (`PlaybackCoordinator.swift:59`)
-- [ ] remove both `liveActivity.sessionStarted(...)` calls (resume path ~213 and `startSession` ~284)
-- [ ] in `handleControllerStateChange()` remove the `emitActivityStateChange()` call; delete `emitActivityStateChange()` and `currentActivityState()`
-- [ ] remove `liveActivity.sessionEnded()` from `endSession()` and `liveActivity.playbackFinished()` from `handleControllerFinish()`; if `handleControllerFinish()` body is then empty, remove it and its `controller.onFinish = { ... }` wiring (its only effect was the live activity)
-- [ ] remove `currentTrackLabel()` if it is now unused (it was only called by the two helpers above); confirm `NowPlayingCenter` does not need it
-- [ ] update the file header comment (lines ~8-15) to drop the Live Activity / `TogglePlaybackIntent` description
-- [ ] update `AllspeakTests/PlaybackCoordinatorTests.swift`: remove the live-activity mock recorder (`func start/update` recorder ~288-295), the `coordinator.liveActivity = ...` assignments (~321, ~461-462) and any test whose sole purpose is asserting live-activity calls (~455-475 region); keep all other coordinator tests intact
-- [ ] build the `Allspeak` scheme and run the full test suite - must pass before Task 2 (LiveActivityCoordinator/AllspeakActivityAttributes files still exist and compile unused at this point)
+- [x] remove `var liveActivity: LiveActivityCoordinator = LiveActivityCoordinator()` (`PlaybackCoordinator.swift:59`)
+- [x] remove both `liveActivity.sessionStarted(...)` calls (resume path ~213 and `startSession` ~284)
+- [x] in `handleControllerStateChange()` remove the `emitActivityStateChange()` call; delete `emitActivityStateChange()` and `currentActivityState()`
+- [x] remove `liveActivity.sessionEnded()` from `endSession()` and `liveActivity.playbackFinished()` from `handleControllerFinish()`; if `handleControllerFinish()` body is then empty, remove it and its `controller.onFinish = { ... }` wiring (its only effect was the live activity)
+- [x] remove `currentTrackLabel()` if it is now unused (it was only called by the two helpers above); confirm `NowPlayingCenter` does not need it
+- [x] update the file header comment (lines ~8-15) to drop the Live Activity / `TogglePlaybackIntent` description
+- [x] update `AllspeakTests/PlaybackCoordinatorTests.swift`: remove the live-activity mock recorder (`func start/update` recorder ~288-295), the `coordinator.liveActivity = ...` assignments (~321, ~461-462) and any test whose sole purpose is asserting live-activity calls (~455-475 region); keep all other coordinator tests intact
+- [x] build the `Allspeak` scheme and run the full test suite - must pass before Task 2 (LiveActivityCoordinator/AllspeakActivityAttributes files still exist and compile unused at this point)
 
 ### Task 2: Delete Live Activity sources, target, and Info.plist flag; regenerate project
 - [ ] delete `Allspeak/Audio/LiveActivityCoordinator.swift` and `Allspeak/Audio/AllspeakActivityAttributes.swift`
