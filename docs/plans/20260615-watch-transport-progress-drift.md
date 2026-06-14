@@ -51,11 +51,11 @@
 - [x] run tests - must pass before next task (53 PlaybackCoordinator tests green incl. 3 new drift tests)
 
 ### Task 4: Film progress bar on the watch
-- [ ] in `TransportView`, between `playButton` and `fineRow`, add a thin track with gold fill plus elapsed (left) and remaining (right) labels, matching the mockups
-- [ ] drive position from snapshot `currentTime`/`duration`, advancing live while playing via a native timer view (`ProgressView(timerInterval:)` or `TimelineView`) - no manual `Timer`, no new resync
-- [ ] extract pure formatters `elapsedLabel(_:)` -> "0:42" and `remainingLabel(elapsed:duration:)` -> "-1:32" into testable funcs
-- [ ] write tests for the formatters (normal, zero, clamp at/below 0 and at duration)
-- [ ] run tests - must pass before next task
+- [x] in `TransportView`, between `playButton` and `fineRow`, add a thin track with gold fill plus elapsed (left) and remaining (right) labels, matching the mockups
+- [x] drive position from snapshot `currentTime`/`duration`, advancing live while playing via a native timer view (`ProgressView(timerInterval:)` or `TimelineView`) - no manual `Timer`, no new resync - used `TimelineView(.periodic)` + native linear `ProgressView` re-reading the dead-reckoned snapshot time
+- [x] extract pure formatters `elapsedLabel(_:)` -> "0:42" and `remainingLabel(elapsed:duration:)` -> "-1:32" into testable funcs - new `WatchTransportFormat` in `Allspeak/Watch/` (shared so the test target sees it)
+- [x] write tests for the formatters (normal, zero, clamp at/below 0 and at duration) - `WatchTransportFormatTests` (7 cases incl. hours, at-duration, past-duration)
+- [x] run tests - must pass before next task - full suite green (538 tests; AllspeakWatch scheme builds clean)
 
 ### Task 5: Sync drift indicator in the fine-row center
 - [ ] add a drift readout (big signed seconds + caption) in the fine-row center where the sync button was; states: BEHIND (`-`, gold, "v BEHIND"), AHEAD (`+`, gold, "^ AHEAD"), IN SYNC (gray, "±0.0s IN SYNC") within the 0.3s band, and muted "-- / NO SYNC" when `drift == nil`

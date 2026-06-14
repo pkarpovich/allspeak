@@ -117,6 +117,7 @@ struct TransportView: View {
             VStack(spacing: 8) {
                 coarseRow
                 playButton
+                progressBar
                 fineRow
             }
             .padding(.horizontal, 8)
@@ -253,6 +254,48 @@ struct TransportView: View {
         .buttonStyle(.plain)
         .shadow(color: Tokens.accent.opacity(0.45), radius: 10)
         .accessibilityLabel(isPlaying ? "Pause" : "Play")
+    }
+
+    // Non-interactive film position. Self-advances while playing via a native
+    // TimelineView redraw (no manual Timer, no resync) - it just re-reads the
+    // dead-reckoned snapshot time once a second. Gold linear fill with elapsed
+    // (left) and remaining (right) labels.
+    private var progressBar: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let elapsed = progressElapsed(at: context.date)
+            let duration = progressDuration
+            VStack(spacing: 3) {
+                ProgressView(value: progressFraction(elapsed: elapsed, duration: duration))
+                    .progressViewStyle(.linear)
+                    .tint(Tokens.accent)
+                HStack {
+                    Text(WatchTransportFormat.elapsedLabel(elapsed))
+                    Spacer(minLength: 4)
+                    Text(WatchTransportFormat.remainingLabel(elapsed: elapsed, duration: duration))
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Tokens.text2)
+                .monospacedDigit()
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Film position")
+    }
+
+    private func progressElapsed(at date: Date) -> Double {
+        if let snapshot = client.lastSnapshot {
+            return WatchSessionClient.interpolatedTime(snapshot: snapshot, now: date)
+        }
+        return client.metadata?.currentTime ?? 0
+    }
+
+    private var progressDuration: Double {
+        client.lastSnapshot?.duration ?? client.metadata?.duration ?? 0
+    }
+
+    private func progressFraction(elapsed: Double, duration: Double) -> Double {
+        guard duration > 0 else { return 0 }
+        return min(max(elapsed / duration, 0), 1)
     }
 
     private func skipButton(

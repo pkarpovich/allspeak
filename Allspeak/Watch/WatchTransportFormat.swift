@@ -1,0 +1,29 @@
+import Foundation
+
+// Pure display helpers for the watch transport progress bar. Kept out of the
+// SwiftUI view so they can be unit-tested in the Allspeak test target (the
+// AllspeakWatch view layer is not compiled into the tests).
+enum WatchTransportFormat {
+    // Elapsed film position, e.g. 42 -> "0:42", 92 -> "1:32", 3700 -> "1:01:40".
+    static func elapsedLabel(_ seconds: Double) -> String {
+        clockLabel(seconds)
+    }
+
+    // Time left, counted down from duration and prefixed with "-", e.g.
+    // elapsed 28 of 120 -> "-1:32". Clamps to "-0:00" at or past the end.
+    static func remainingLabel(elapsed: Double, duration: Double) -> String {
+        "-" + clockLabel(max(0, duration - elapsed))
+    }
+
+    private static func clockLabel(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "0:00" }
+        let total = max(0, Int(seconds.rounded(.down)))
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
+}

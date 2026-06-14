@@ -78,6 +78,7 @@ targets:
       - path: Allspeak/Watch/WatchDeadReckon.swift
       - path: Allspeak/Watch/SkipCoalescer.swift
       - path: Allspeak/Watch/VolumeThrottler.swift
+      - path: Allspeak/Watch/WatchTransportFormat.swift
     configFiles:
       Debug: AllspeakWatch/Signing.xcconfig
       Release: AllspeakWatch/Signing.xcconfig
