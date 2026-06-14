@@ -951,6 +951,41 @@ struct PlaybackCoordinatorTests {
         #expect(abs(mapped - identity) > 0.5)
     }
 
+    @Test("currentSnapshot reports nil drift with no anchor and a finite drift after a cinema match")
+    func currentSnapshotCarriesDrift() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        let standard = UserDefaults.standard
+        let latencyKey = CinemaSyncService.latencyCompensationDefaultsKey
+        let previousLatency = standard.object(forKey: latencyKey)
+        standard.set(0.0, forKey: latencyKey)
+        defer {
+            if let previousLatency {
+                standard.set(previousLatency, forKey: latencyKey)
+            } else {
+                standard.removeObject(forKey: latencyKey)
+            }
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        #expect(fixture.coordinator.currentSnapshot().drift == nil)
+
+        let matched = fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            stamp: try #require(fixture.coordinator.catalogStamp),
+            enTime: 4.0
+        )
+        #expect(matched)
+
+        // The match anchors at EN 4 and seeks the dub to the DTW-mapped RU (4 -> 2);
+        // currentSnapshot() re-projects EN 4 -> RU 2 with ~no elapsed time and the
+        // same (pinned 0) .standard latency, so the dub sits on the expected RU and
+        // drift reads ~0 - proving currentTime, the anchor, the mapping, and latency
+        // all reach the snapshot's drift field.
+        let drift = try #require(fixture.coordinator.currentSnapshot().drift)
+        #expect(abs(drift) < 0.2)
+    }
+
     // MARK: - Diagnostics begin/end wiring
 
     private struct UnstartedSession {

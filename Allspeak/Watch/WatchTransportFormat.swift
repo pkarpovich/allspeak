@@ -33,8 +33,9 @@ enum WatchTransportFormat {
         case behind, ahead, inSync, noSync
     }
 
-    // Anything within this many seconds of the anchor reads as "in sync" rather
-    // than a signed value - matches the dead-reckon correction's own tolerance.
+    // Drift within this many seconds reads as "in sync" rather than a signed
+    // value - a display-only deadband, not a corrector threshold (the
+    // dead-reckon seek has no tolerance and always seeks to the projected target).
     static let inSyncBand = 0.3
 
     // Maps the snapshot's drift seconds to the fine-row center readout.

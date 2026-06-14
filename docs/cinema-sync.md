@@ -65,9 +65,15 @@ category on exit.
 
 ## Syncing from the watch
 
-The AllspeakWatch transport screen has its own sync button (same
-waveform-with-magnifier glyph, between the coarse skip buttons). It appears only
-once the session's catalog has been transferred to the watch.
+> **Note**: the watch mic-sync button has been removed from the transport
+> screen (its slot now shows the passive sync drift readout). The mic-match
+> plumbing described below remains in the codebase but is dormant — no UI
+> currently triggers it. Resync from the wrist goes through the mic-free
+> dead-reckon button instead.
+
+The AllspeakWatch transport screen previously had its own sync button (same
+waveform-with-magnifier glyph). It appeared only once the session's catalog had
+been transferred to the watch.
 
 - **Tap** -> the watch listens through its own microphone via
   `SHManagedSession(catalog:)` and matches locally on the watch (8s timeout).
