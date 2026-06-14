@@ -893,6 +893,64 @@ struct PlaybackCoordinatorTests {
         #expect(abs(controller.currentTime - ruOffset) < 0.05)
     }
 
+    // MARK: - cinemaDrift pure helper
+
+    @Test("cinemaDrift is positive when the dub is ahead, negative when behind, zero in sync")
+    func cinemaDriftReportsSign() throws {
+        let at = Date(timeIntervalSince1970: 1_000)
+        let now = at.addingTimeInterval(10)
+        let anchor = (enTime: 0.0, at: at)
+
+        // No mapping -> expected RU = enTime + elapsed + latency = 0 + 10 + 0 = 10.
+        let ahead = try #require(
+            PlaybackCoordinator.cinemaDrift(currentRU: 12, anchor: anchor, now: now, mapping: nil, latency: 0)
+        )
+        let behind = try #require(
+            PlaybackCoordinator.cinemaDrift(currentRU: 8, anchor: anchor, now: now, mapping: nil, latency: 0)
+        )
+        let inSync = try #require(
+            PlaybackCoordinator.cinemaDrift(currentRU: 10, anchor: anchor, now: now, mapping: nil, latency: 0)
+        )
+
+        #expect(abs(ahead - 2.0) < 1e-9)
+        #expect(abs(behind - -2.0) < 1e-9)
+        #expect(abs(inSync) < 1e-9)
+    }
+
+    @Test("cinemaDrift returns nil when there is no anchor")
+    func cinemaDriftWithoutAnchorIsNil() {
+        let drift = PlaybackCoordinator.cinemaDrift(
+            currentRU: 5,
+            anchor: nil,
+            now: Date(),
+            mapping: nil,
+            latency: 0
+        )
+        #expect(drift == nil)
+    }
+
+    @Test("cinemaDrift maps the projected EN position through the DTW mapping")
+    func cinemaDriftAppliesMapping() throws {
+        let mapping = try DTWMapping(jsonData: Data(Self.dtwMapJSON.utf8))
+        let at = Date(timeIntervalSince1970: 1_000)
+        let now = at.addingTimeInterval(3)
+        let anchor = (enTime: 0.0, at: at)
+
+        // enNow = 0 + 3 + 1 = 4; the mapping bends 4 -> 2, so a dub at RU 2 is in sync.
+        let mapped = try #require(
+            PlaybackCoordinator.cinemaDrift(currentRU: 2, anchor: anchor, now: now, mapping: mapping, latency: 1)
+        )
+        #expect(abs(mapped) < 1e-9)
+
+        // Without the mapping the expected RU stays at enNow (4), proving the
+        // mapping changed the result rather than passing EN through unchanged.
+        let identity = try #require(
+            PlaybackCoordinator.cinemaDrift(currentRU: 2, anchor: anchor, now: now, mapping: nil, latency: 1)
+        )
+        #expect(abs(identity - -2.0) < 1e-9)
+        #expect(abs(mapped - identity) > 0.5)
+    }
+
     // MARK: - Diagnostics begin/end wiring
 
     private struct UnstartedSession {

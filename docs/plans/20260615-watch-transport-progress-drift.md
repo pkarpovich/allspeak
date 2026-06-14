@@ -44,11 +44,11 @@
 - [x] run tests - must pass before next task
 
 ### Task 3: Compute drift on the phone
-- [ ] add a pure helper, e.g. `static func cinemaDrift(currentRU: Double, anchor: (enTime: Double, at: Date)?, now: Date, mapping: DTWMapping?, latency: Double) -> Double?` returning `currentRU - mapping.ruTime(forEnTime: anchor.enTime + (now - anchor.at) + latency)`, or `nil` when anchor is missing
-- [ ] call it from `PlaybackCoordinator.currentSnapshot()` and pass the result into the new `drift` field
-- [ ] write test: ahead -> positive, behind -> negative, no anchor -> nil
-- [ ] write test: non-identity DTW mapping is applied (expected RU != enNow)
-- [ ] run tests - must pass before next task
+- [x] add a pure helper, e.g. `static func cinemaDrift(currentRU: Double, anchor: (enTime: Double, at: Date)?, now: Date, mapping: DTWMapping?, latency: Double) -> Double?` returning `currentRU - mapping.ruTime(forEnTime: anchor.enTime + (now - anchor.at) + latency)`, or `nil` when anchor is missing
+- [x] call it from `PlaybackCoordinator.currentSnapshot()` and pass the result into the new `drift` field
+- [x] write test: ahead -> positive, behind -> negative, no anchor -> nil
+- [x] write test: non-identity DTW mapping is applied (expected RU != enNow)
+- [x] run tests - must pass before next task (53 PlaybackCoordinator tests green incl. 3 new drift tests)
 
 ### Task 4: Film progress bar on the watch
 - [ ] in `TransportView`, between `playButton` and `fineRow`, add a thin track with gold fill plus elapsed (left) and remaining (right) labels, matching the mockups

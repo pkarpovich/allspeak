@@ -535,10 +535,31 @@ final class PlaybackCoordinator {
         #endif
     }
 
+    // How far the dub has drifted from the cinema, sharing the dead-reckon
+    // math: project the cinema's EN position from the anchor + elapsed wall
+    // time + latency, DTW-map to the expected RU position, then subtract it
+    // from where the dub actually is. Positive = dub plays AHEAD of the
+    // cinema, negative = BEHIND. nil when no anchor exists (drift is only
+    // meaningful relative to an anchor). Agrees with what a dead-reckon seek
+    // would correct, since both use the same anchor, mapping, and latency.
+    static func cinemaDrift(
+        currentRU: Double,
+        anchor: (enTime: Double, at: Date)?,
+        now: Date,
+        mapping: DTWMapping?,
+        latency: Double
+    ) -> Double? {
+        guard let anchor else { return nil }
+        let enNow = anchor.enTime + now.timeIntervalSince(anchor.at) + latency
+        let expectedRU = mapping?.ruTime(forEnTime: enNow) ?? enNow
+        return currentRU - expectedRU
+    }
+
     func currentSnapshot() -> PlaybackSnapshot {
         guard let controller, let sessionUUID else {
             return PlaybackSnapshot.empty
         }
+        let now = Date()
         return PlaybackSnapshot(
             sessionID: sessionUUID,
             revision: revision,
@@ -546,9 +567,16 @@ final class PlaybackCoordinator {
             duration: controller.duration,
             currentIndex: controller.currentIndex,
             isPlaying: controller.isPlaying,
-            serverDate: Date(),
+            serverDate: now,
             activeTrackID: activeTrackID,
-            volume: systemVolumeReader()
+            volume: systemVolumeReader(),
+            drift: Self.cinemaDrift(
+                currentRU: controller.currentTime,
+                anchor: cinemaAnchor,
+                now: now,
+                mapping: dtwMapping,
+                latency: CinemaSyncService.storedLatencyCompensation()
+            )
         )
     }
 
