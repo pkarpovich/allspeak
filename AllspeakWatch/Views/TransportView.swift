@@ -201,24 +201,70 @@ struct TransportView: View {
         }
     }
 
-    // With the 44pt sync button between the two skips, the roomy variant only
-    // fits the widest cases; ViewThatFits steps down so the row never clips on
-    // the narrower ones (40mm is 162pt total, minus 16pt content padding).
+    // The drift readout sits between the two ±1 skips. The widest variant only
+    // fits the largest watches; ViewThatFits steps down so the row never clips
+    // on the narrower ones (the compact variant totals 146pt, which is 40mm's
+    // 162pt minus the 16pt content padding).
     private var fineRow: some View {
         ViewThatFits(in: .horizontal) {
-            fineRowContent(buttonSize: 62, spacing: 14)
-            fineRowContent(buttonSize: 52, spacing: 10)
-            fineRowContent(buttonSize: 44, spacing: 7)
+            fineRowContent(buttonSize: 52, centerWidth: 64, spacing: 9)
+            fineRowContent(buttonSize: 48, centerWidth: 54, spacing: 7)
+            fineRowContent(buttonSize: 44, centerWidth: 48, spacing: 5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func fineRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
+    private func fineRowContent(buttonSize: CGFloat, centerWidth: CGFloat, spacing: CGFloat) -> some View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "1", size: buttonSize, action: handleSkipBackFine)
                 .accessibilityLabel("Skip back 1 second")
+            driftReadout
+                .frame(width: centerWidth)
             skipButton(icon: Tokens.Icon.skipForward, seconds: "1", size: buttonSize, action: handleSkipForwardFine)
                 .accessibilityLabel("Skip forward 1 second")
+        }
+    }
+
+    // Sync drift relative to the cinema, in the slot the Shazam sync button used
+    // to occupy. Rides existing snapshots (no new resync/timer): big signed
+    // seconds with a direction caption - gold when AHEAD/BEHIND, gray IN SYNC
+    // within the 0.3s band, muted "-- / NO SYNC" before an anchor exists.
+    private var driftReadout: some View {
+        let display = WatchTransportFormat.driftDisplay(client.lastSnapshot?.drift)
+        return VStack(spacing: 1) {
+            Text(display.value)
+                .font(.system(size: 17, weight: .semibold))
+                .monospacedDigit()
+            HStack(spacing: 2) {
+                if let arrow = driftArrow(display.kind) {
+                    Image(systemName: arrow)
+                        .font(.system(size: 8, weight: .bold))
+                }
+                Text(display.caption)
+                    .font(.system(size: 9, weight: .medium))
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+        .foregroundStyle(driftColor(display.kind))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Sync drift")
+        .accessibilityValue("\(display.value) \(display.caption)")
+    }
+
+    private func driftArrow(_ kind: WatchTransportFormat.DriftKind) -> String? {
+        switch kind {
+        case .behind: return "arrow.down"
+        case .ahead: return "arrow.up"
+        case .inSync, .noSync: return nil
+        }
+    }
+
+    private func driftColor(_ kind: WatchTransportFormat.DriftKind) -> Color {
+        switch kind {
+        case .behind, .ahead: return Tokens.accent
+        case .inSync: return Tokens.text2
+        case .noSync: return Tokens.text3
         }
     }
 

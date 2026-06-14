@@ -58,11 +58,11 @@
 - [x] run tests - must pass before next task - full suite green (538 tests; AllspeakWatch scheme builds clean)
 
 ### Task 5: Sync drift indicator in the fine-row center
-- [ ] add a drift readout (big signed seconds + caption) in the fine-row center where the sync button was; states: BEHIND (`-`, gold, "v BEHIND"), AHEAD (`+`, gold, "^ AHEAD"), IN SYNC (gray, "±0.0s IN SYNC") within the 0.3s band, and muted "-- / NO SYNC" when `drift == nil`
-- [ ] read drift from `client.lastSnapshot?.drift`
-- [ ] extract a pure helper `driftDisplay(_ drift: Double?) -> (value: String, caption: String, kind: DriftKind)` and use it from the view
-- [ ] write tests: behind / ahead / in-sync band / no-sync mapping, sign, and one-decimal formatting
-- [ ] run tests - must pass before next task
+- [x] add a drift readout (big signed seconds + caption) in the fine-row center where the sync button was; states: BEHIND (`-`, gold, "v BEHIND"), AHEAD (`+`, gold, "^ AHEAD"), IN SYNC (gray, "±0.0s IN SYNC") within the 0.3s band, and muted "-- / NO SYNC" when `drift == nil` - `driftReadout` in `TransportView`, gold via `Tokens.accent`, gray via `Tokens.text2`/`text3`, down/up SF Symbol arrow for behind/ahead
+- [x] read drift from `client.lastSnapshot?.drift`
+- [x] extract a pure helper `driftDisplay(_ drift: Double?) -> (value: String, caption: String, kind: DriftKind)` and use it from the view - added to shared `WatchTransportFormat` with nested `DriftKind`; band constant `inSyncBand = 0.3`
+- [x] write tests: behind / ahead / in-sync band / no-sync mapping, sign, and one-decimal formatting - `WatchDriftDisplayTests` (6 cases incl. band edge at exactly 0.3s)
+- [x] run tests - must pass before next task - full suite green (544 tests; AllspeakWatch builds clean on 40mm, no new warnings)
 
 ### Task 6: Verify acceptance criteria
 - [ ] full test suite green; build AllspeakWatch and Allspeak schemes
