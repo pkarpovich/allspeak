@@ -114,14 +114,14 @@ struct VolumeThrottlerTests {
 @Suite("CrownVolume")
 struct CrownVolumeTests {
 
-    @Test("crown at rest (0) maps to full volume")
-    func crownZeroIsFullVolume() {
-        #expect(CrownVolume.volume(forCrown: 0) == 1)
+    @Test("crown at rest (0) maps to silence")
+    func crownZeroIsSilent() {
+        #expect(CrownVolume.volume(forCrown: 0) == 0)
     }
 
-    @Test("crown at top (1) maps to silence")
-    func crownOneIsSilent() {
-        #expect(CrownVolume.volume(forCrown: 1) == 0)
+    @Test("crown at top (1) maps to full volume")
+    func crownOneIsFullVolume() {
+        #expect(CrownVolume.volume(forCrown: 1) == 1)
     }
 
     @Test("midpoint maps to half volume")
@@ -129,19 +129,19 @@ struct CrownVolumeTests {
         #expect(CrownVolume.volume(forCrown: 0.5) == 0.5)
     }
 
-    @Test("crown-up increases volume (monotonic inversion)")
+    @Test("crown-up increases volume")
     func upIsLouder() {
-        #expect(CrownVolume.volume(forCrown: 0.25) > CrownVolume.volume(forCrown: 0.75))
+        #expect(CrownVolume.volume(forCrown: 0.75) > CrownVolume.volume(forCrown: 0.25))
     }
 
-    @Test("input below 0 clamps to full volume")
+    @Test("input below 0 clamps to silence")
     func clampsBelowZero() {
-        #expect(CrownVolume.volume(forCrown: -0.3) == 1)
+        #expect(CrownVolume.volume(forCrown: -0.3) == 0)
     }
 
-    @Test("input above 1 clamps to silence")
+    @Test("input above 1 clamps to full volume")
     func clampsAboveOne() {
-        #expect(CrownVolume.volume(forCrown: 1.4) == 0)
+        #expect(CrownVolume.volume(forCrown: 1.4) == 1)
     }
 
     @Test("mapping is its own inverse so stored volume round-trips")
