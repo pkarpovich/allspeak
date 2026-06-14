@@ -42,7 +42,7 @@ struct TransportView: View {
             $crown,
             from: 0,
             through: 1,
-            by: 0.05,
+            by: 0.02,
             sensitivity: .low,
             isContinuous: false,
             isHapticFeedbackEnabled: true
@@ -61,10 +61,6 @@ struct TransportView: View {
             guard let reported, !isAdjustingVolume else { return }
             volume = Double(reported)
             crown = CrownVolume.volume(forCrown: Double(reported))
-        }
-        .digitalCrownAccessory {
-            Image(systemName: "speaker.wave.2.fill")
-                .foregroundStyle(Tokens.accent)
         }
         // Manual-only rule: the mic must stop the moment the listen's context
         // goes away — session switch, catalog removal or replacement (a promoted
