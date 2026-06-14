@@ -513,7 +513,6 @@ final class PlaybackCoordinator {
         guard let controller else { return }
         controller.onTick = nil
         controller.onStateChange = nil
-        controller.onFinish = nil
         controller.pause()
         Task { await controller.persistPosition() }
         #if os(iOS) || os(tvOS) || os(visionOS)

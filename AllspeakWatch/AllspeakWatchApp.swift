@@ -3,10 +3,8 @@ import SwiftUI
 import WatchKit
 #endif
 
-// Watch app URL contract: `allspeak://session/<UUID>` - used by the Live Activity
-// widget's tap target on the Smart Stack to bring the watch app forward into the
-// active session's player view. Parsing lives in `SessionURLParser` (shared with
-// the iPhone target so the same scheme works as a fallback).
+// Watch app URL contract: `allspeak://session/<UUID>` - opens the active session's
+// player view. Parsing lives in `SessionURLParser` (shared with the iPhone target).
 @main
 struct AllspeakWatchApp: App {
     #if os(watchOS)

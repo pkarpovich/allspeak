@@ -31,11 +31,6 @@ jobs:
           CODE_SIGN_IDENTITY =
           EOF
 
-          cat > AllspeakLiveActivity/Signing.xcconfig << 'EOF'
-          CODE_SIGN_STYLE = Automatic
-          CODE_SIGN_IDENTITY =
-          EOF
-
       - name: Generate Xcode project
         run: xcodegen generate
 
