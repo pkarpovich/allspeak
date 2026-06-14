@@ -7,11 +7,7 @@ struct ContentView: View {
         case trackList
     }
 
-    @Binding var selection: Page
-
-    init(selection: Binding<Page>) {
-        self._selection = selection
-    }
+    @State private var selection: Page = .currentLine
 
     var body: some View {
         TabView(selection: $selection) {
