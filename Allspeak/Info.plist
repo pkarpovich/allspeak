@@ -22,8 +22,6 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

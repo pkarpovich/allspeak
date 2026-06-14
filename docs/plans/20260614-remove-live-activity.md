@@ -49,13 +49,13 @@
 - [x] build the `Allspeak` scheme and run the full test suite - must pass before Task 2 (LiveActivityCoordinator/AllspeakActivityAttributes files still exist and compile unused at this point)
 
 ### Task 2: Delete Live Activity sources, target, and Info.plist flag; regenerate project
-- [ ] delete `Allspeak/Audio/LiveActivityCoordinator.swift` and `Allspeak/Audio/AllspeakActivityAttributes.swift`
-- [ ] delete test files `AllspeakTests/LiveActivityCoordinatorTests.swift`, `AllspeakActivityAttributesTests.swift`, `AllspeakActivityWidgetTests.swift`, `TogglePlaybackIntentTests.swift`
-- [ ] delete the `AllspeakLiveActivity/` directory
-- [ ] edit `project.yml`: remove the `AllspeakLiveActivity` target block; in the `Allspeak` target remove the `- target: AllspeakLiveActivity` dependency and the `- path: AllspeakLiveActivity/TogglePlaybackIntent.swift` source
-- [ ] remove `NSSupportsLiveActivities` from `Allspeak/Info.plist`
-- [ ] run `xcodegen generate`
-- [ ] build the `Allspeak` scheme and run the full test suite - must pass before Task 3
+- [x] delete `Allspeak/Audio/LiveActivityCoordinator.swift` and `Allspeak/Audio/AllspeakActivityAttributes.swift`
+- [x] delete test files `AllspeakTests/LiveActivityCoordinatorTests.swift`, `AllspeakActivityAttributesTests.swift`, `AllspeakActivityWidgetTests.swift`, `TogglePlaybackIntentTests.swift`
+- [x] delete the `AllspeakLiveActivity/` directory
+- [x] edit `project.yml`: remove the `AllspeakLiveActivity` target block; in the `Allspeak` target remove the `- target: AllspeakLiveActivity` dependency and the `- path: AllspeakLiveActivity/TogglePlaybackIntent.swift` source
+- [x] remove `NSSupportsLiveActivities` from `Allspeak/Info.plist`
+- [x] run `xcodegen generate`
+- [x] build the `Allspeak` scheme and run the full test suite - must pass before Task 3 (542 tests in 36 suites, TEST SUCCEEDED)
 
 ### Task 3: Verify acceptance criteria
 - [ ] `grep -rn` confirms zero remaining references to `LiveActivityCoordinator`, `AllspeakActivityAttributes`, `TogglePlaybackIntent`, `ActivityKit`, `NSSupportsLiveActivities` in `Allspeak/`, `AllspeakTests/`, `project.yml`
