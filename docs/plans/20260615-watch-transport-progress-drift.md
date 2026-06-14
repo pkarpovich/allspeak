@@ -65,9 +65,9 @@
 - [x] run tests - must pass before next task - full suite green (544 tests; AllspeakWatch builds clean on 40mm, no new warnings)
 
 ### Task 6: Verify acceptance criteria
-- [ ] full test suite green; build AllspeakWatch and Allspeak schemes
-- [ ] visual check on the watch simulator against the 3 mockups (progress bar + BEHIND / IN SYNC / AHEAD)
-- [ ] confirm no new resync/timer was added beyond the native progress redraw; manual-only rule intact
+- [x] full test suite green; build AllspeakWatch and Allspeak schemes - 544 tests pass; AllspeakWatch builds clean on 40mm (watchOS 26.5) and Allspeak (phone) BUILD SUCCEEDED
+- [x] visual check on the watch simulator against the 3 mockups (progress bar + BEHIND / IN SYNC / AHEAD) - manual visual check (skipped - not automatable: no mockup files in repo, drift states need a live session anchor; covered by Post-Completion on-device check)
+- [x] confirm no new resync/timer was added beyond the native progress redraw; manual-only rule intact - verified by code inspection: only `TimelineView(.periodic)` added (permitted native redraw); `startInterpolationTimer` is pre-existing (AllspeakWatchApp.swift untouched by feature commits); drift rides existing snapshots; ShazamKit handlers dormant
 
 ## Technical Details
 - Drift: `drift = currentRU - ruTime(forEnTime: anchorEN + elapsed + latency)`; positive = dub ahead. Same anchor + mapping + latency the dead-reckon button already uses, so the number agrees with what a dead-reckon would correct.
