@@ -20,11 +20,11 @@ struct TransportView: View {
     @State private var volumeThrottler = VolumeThrottler { value in
         WatchSessionClient.shared.send(.setVolume(value))
     }
+    // The Digital Crown drives system volume directly: the bound value IS the
+    // volume (0 = silent, 1 = full), so the native crown scale reads as loudness
+    // and Crown-up = louder with no inversion. Re-synced while idle from the
+    // phone's reported outputVolume.
     @State private var volume: Double = 0.5
-    // Raw Crown position, inverted into `volume` via CrownVolume so Crown-up =
-    // louder. Seeded (and re-synced while idle) from the phone's reported
-    // system volume through the same symmetric mapping.
-    @State private var crown: Double = CrownVolume.volume(forCrown: 0.5)
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
     @State private var cinemaSync = WatchCinemaSync(haptics: WatchDeviceHaptics())
@@ -39,7 +39,7 @@ struct TransportView: View {
         }
         .focusable()
         .digitalCrownRotation(
-            $crown,
+            $volume,
             from: 0,
             through: 1,
             by: 0.02,
@@ -47,9 +47,7 @@ struct TransportView: View {
             isContinuous: false,
             isHapticFeedbackEnabled: true
         )
-        .onChange(of: crown) { _, newCrown in
-            let newVolume = CrownVolume.volume(forCrown: newCrown)
-            volume = newVolume
+        .onChange(of: volume) { _, newVolume in
             volumeThrottler.update(Float(newVolume))
             registerVolumeActivity()
         }
@@ -60,7 +58,6 @@ struct TransportView: View {
         .onChange(of: client.lastSnapshot?.volume) { _, reported in
             guard let reported, !isAdjustingVolume else { return }
             volume = Double(reported)
-            crown = CrownVolume.volume(forCrown: Double(reported))
         }
         // Manual-only rule: the mic must stop the moment the listen's context
         // goes away — session switch, catalog removal or replacement (a promoted
