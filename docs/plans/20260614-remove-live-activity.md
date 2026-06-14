@@ -58,10 +58,10 @@
 - [x] build the `Allspeak` scheme and run the full test suite - must pass before Task 3 (542 tests in 36 suites, TEST SUCCEEDED)
 
 ### Task 3: Verify acceptance criteria
-- [ ] `grep -rn` confirms zero remaining references to `LiveActivityCoordinator`, `AllspeakActivityAttributes`, `TogglePlaybackIntent`, `ActivityKit`, `NSSupportsLiveActivities` in `Allspeak/`, `AllspeakTests/`, `project.yml`
-- [ ] confirm `NowPlayingCenter` still present and called from `endSession()` (native Now Playing intact)
-- [ ] run full test suite (expect the 4 deleted suites gone, all others green)
-- [ ] confirm app builds and installs to the iOS simulator without the extension
+- [x] `grep -rn` confirms zero remaining references to `LiveActivityCoordinator`, `AllspeakActivityAttributes`, `TogglePlaybackIntent`, `ActivityKit`, `NSSupportsLiveActivities` in `Allspeak/`, `AllspeakTests/`, `project.yml` (grep returns no matches)
+- [x] confirm `NowPlayingCenter` still present and called from `endSession()` (native Now Playing intact - `PlaybackCoordinator.swift:520` `NowPlayingCenter.shared.clear()`)
+- [x] run full test suite (expect the 4 deleted suites gone, all others green - 542 tests in 36 suites, TEST SUCCEEDED)
+- [x] confirm app builds and installs to the iOS simulator without the extension (BUILD SUCCEEDED, no `PlugIns/AllspeakLiveActivity.appex`, no `NSSupportsLiveActivities` in built Info.plist, simctl install OK)
 
 ## Technical Details
 - Removal order matters: Task 1 leaves the (now-unused) `LiveActivityCoordinator`/`AllspeakActivityAttributes` files in place so the project keeps building; Task 2 deletes files + target + regenerates atomically so there is never a state where the `.xcodeproj` references missing sources.
