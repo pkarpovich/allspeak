@@ -10,7 +10,6 @@ build/
 # Local signing config (CI generates its own with manual signing + pinned profile)
 Allspeak/Signing.xcconfig
 AllspeakWatch/Signing.xcconfig
-AllspeakLiveActivity/Signing.xcconfig
 
 # Release export artifacts
 export/

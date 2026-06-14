@@ -1,9 +1,0 @@
-// Local development defaults for the AllspeakLiveActivity widget extension.
-// Copy to Signing.xcconfig (which is git-ignored) and Xcode will use Automatic
-// signing with your personal Apple ID team.
-//
-// CI / TestFlight builds override these with Manual signing + a pinned
-// provisioning profile UUID via .github/workflows/deploy-testflight.yml.
-
-CODE_SIGN_STYLE = Automatic
-CODE_SIGN_IDENTITY = Apple Development

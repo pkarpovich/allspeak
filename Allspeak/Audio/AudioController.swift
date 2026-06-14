@@ -24,7 +24,6 @@ final class AudioController {
     @ObservationIgnored private var lastNowPlayingTickSecond: Int = -1
     @ObservationIgnored var onTick: (@MainActor () -> Void)?
     @ObservationIgnored var onStateChange: (@MainActor () -> Void)?
-    @ObservationIgnored var onFinish: (@MainActor () -> Void)?
 
     init(
         repository: SessionRepository? = nil,
@@ -222,7 +221,6 @@ final class AudioController {
         stopTicker()
         publishNowPlayingTime()
         onStateChange?()
-        onFinish?()
     }
 
     private func publishNowPlayingTime() {

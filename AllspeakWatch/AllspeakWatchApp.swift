@@ -3,17 +3,12 @@ import SwiftUI
 import WatchKit
 #endif
 
-// Watch app URL contract: `allspeak://session/<UUID>` - used by the Live Activity
-// widget's tap target on the Smart Stack to bring the watch app forward into the
-// active session's player view. Parsing lives in `SessionURLParser` (shared with
-// the iPhone target so the same scheme works as a fallback).
 @main
 struct AllspeakWatchApp: App {
     #if os(watchOS)
     @WKApplicationDelegateAdaptor(AllspeakWatchAppDelegate.self) private var delegate
     #endif
     @State private var client: WatchSessionClient
-    @State private var selection: ContentView.Page = .currentLine
 
     init() {
         let shared = WatchSessionClient.shared
@@ -25,17 +20,9 @@ struct AllspeakWatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(selection: $selection)
+            ContentView()
                 .environment(client)
-                .onOpenURL { url in
-                    handleOpenURL(url)
-                }
         }
-    }
-
-    private func handleOpenURL(_ url: URL) {
-        guard SessionURLParser.parseSessionURL(url) != nil else { return }
-        selection = .currentLine
     }
 }
 
