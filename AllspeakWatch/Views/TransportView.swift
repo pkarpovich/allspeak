@@ -20,10 +20,39 @@ struct TransportView: View {
     @State private var volumeThrottler = VolumeThrottler { value in
         WatchSessionClient.shared.send(.setVolume(value))
     }
-    // The Digital Crown drives system volume directly: the bound value IS the
-    // volume (0 = silent, 1 = full), so the native crown scale reads as loudness
-    // and Crown-up = louder with no inversion. Re-synced while idle from the
-    // phone's reported outputVolume.
+    // Digital Crown -> system volume. Read this before touching the crown binding
+    // below, because the "obvious" fix is wrong and we re-learned that over several
+    // PRs.
+    //
+    // `volume` is the SINGLE source of truth for loudness: 0 = silent, 1 = full.
+    // It is what we send to the phone (WCSession -> AudioController.setVolume ->
+    // SystemVolume.set, applied 1:1 with NO inversion on the phone side) and what
+    // the rest of the UI reads. So louder always means a larger `volume`.
+    //
+    // The subtlety is the native Digital Crown indicator (the green bar watchOS
+    // draws on rotation). It is a SCROLLBAR, not a level meter: its fill grows as
+    // the BOUND value approaches `from` (0) and shrinks as it approaches `through`
+    // (1). Measured on a real Apple Watch (2026-06-14) with a temporary on-screen
+    // readout: binding the crown straight to `volume` produced a FULL bar at
+    // `vol 0.00` (silent) and an EMPTY bar at `vol 1.00` (loud) - i.e. the bar
+    // read backwards ("smaller bar = louder"), which is what Pavel reported.
+    //
+    // Fix: bind the crown to the INVERSE, `1 - volume` (see the Binding below).
+    // Now the scrollbar's "1 - boundValue" fill == volume, so the bar fills with
+    // loudness: a FULL bar = max volume, an empty bar = silent. That is Pavel's
+    // hard requirement ("заполненная полоска = vol 1.0").
+    //
+    // Unavoidable trade-off: louder is now crown-DOWN (quieter is crown-up). On
+    // this native indicator the fill direction and the crown-up direction are
+    // locked together by the system, so "full bar = loud" and "crown-up = loud"
+    // are mutually exclusive. Pavel chose full-bar = loud.
+    //
+    // DO NOT try to make crown-up = louder by flipping the volume mapping again -
+    // that flips the BAR and the DIRECTION together and lands right back on the
+    // backwards bar (this exact mistake cost PRs #24 and #25 before #26 fixed it).
+    // The only way to get BOTH crown-up = louder AND full-bar = loud is to hide
+    // the native indicator (digitalCrownAccessory visibility) and draw a custom
+    // bar - ask Pavel before going there.
     @State private var volume: Double = 0.5
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
@@ -39,7 +68,7 @@ struct TransportView: View {
         }
         .focusable()
         .digitalCrownRotation(
-            $volume,
+            Binding(get: { 1 - volume }, set: { volume = 1 - $0 }),
             from: 0,
             through: 1,
             by: 0.02,
