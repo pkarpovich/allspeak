@@ -624,7 +624,7 @@ final class PlaybackCoordinator {
         listenSeconds: Double? = nil
     ) {
         guard let controller else { return }
-        let playerBefore = controller.currentTime
+        let playerBefore = controller.livePosition
         controller.seek(to: offset)
         if let enTime {
             cinemaAnchor = (enTime, Date(), appliedLatency: latencyComp ?? 0)
@@ -726,7 +726,7 @@ final class PlaybackCoordinator {
         let currentLatency = CinemaSyncService.storedLatencyCompensation(defaults)
         let enNow = projectedEN - anchor.appliedLatency + currentLatency
         let ruTarget = dtwMapping?.ruTime(forEnTime: enNow) ?? enNow
-        let playerBefore = controller.currentTime
+        let playerBefore = controller.livePosition
         controller.seek(to: ruTarget)
         cinemaAnchor = (enNow, now, appliedLatency: currentLatency)
         diagnostics.log(.deadReckon(
@@ -753,7 +753,7 @@ final class PlaybackCoordinator {
         let latencyComp = CinemaSyncService.storedLatencyCompensation(defaults)
         let enOffset = enTime + latencyComp
         let ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
-        let playerBefore = controller.currentTime
+        let playerBefore = controller.livePosition
         controller.seek(to: ruOffset)
         cinemaAnchor = (enOffset, Date(), appliedLatency: latencyComp)
         diagnostics.log(.sync(

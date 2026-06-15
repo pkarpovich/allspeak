@@ -14,6 +14,14 @@ final class AudioController {
     private(set) var subtitles: [Subtitle] = []
     private(set) var currentIndex: Int = 0
 
+    // Live playhead straight from the player. `currentTime` is only refreshed by
+    // the CADisplayLink, which pauses while the app is backgrounded, so it goes
+    // stale in the pocket - use this for diagnostics that must reflect the real
+    // position (e.g. dead-reckon/sync playerBefore).
+    var livePosition: TimeInterval {
+        player?.currentTime ?? currentTime
+    }
+
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var displayLink: CADisplayLink?
     @ObservationIgnored private var tickerProxy: TickerProxy?
