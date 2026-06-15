@@ -52,6 +52,33 @@ location after import. To add more tracks to an existing session (e.g.
 drop in a new dub when it becomes available), use the `Tracks` action in
 the session row's context menu.
 
+### Audio prep pipeline (`scripts/bifrost.fish`)
+
+The `.m4a` voice track is produced by `scripts/bifrost.fish` (fish, macOS):
+decode, optional FPS retime, Demucs vocal separation, Sidon speech
+restoration, then loudnorm. See the header comment in the script for full
+usage.
+
+Demucs runs on the Apple Silicon GPU via the
+[`demucs-mlx`](https://github.com/ssmall256/demucs-mlx) port (base `htdemucs`),
+roughly 20x faster than the old CPU path (~7 min vs ~3h for a 2h film). Base
+`htdemucs` is used rather than `htdemucs_ft`: the 4-model `_ft` ensemble is far
+heavier on this GPU for a quality difference that is inaudible after Sidon
+restoration on cam sources. Two pins are REQUIRED:
+
+- `mlx-audio-io==1.3.10` holds `mlx` at `0.31.0`; `mlx` `0.31.2` made GPU streams
+  thread-local and crashes the port with `There is no Stream(gpu, 1) in current
+  thread` (upstream regression,
+  [ml-explore/mlx-lm#1179](https://github.com/ml-explore/mlx-lm/issues/1179)).
+  Drop it only once `demucs-mlx` runs on `mlx >= 0.31.2`.
+- the `[convert]` extra converts `htdemucs`'s weights to MLX on first run (cached
+  in `~/.cache/demucs-mlx/`); only `htdemucs_ft` ships pre-converted weights.
+
+The port writes all four stems to `<out>/<track>/vocals.wav` (no per-model
+subdir), so the script resolves the vocals path with `find`. Sidon stays on CPU
+(~25 min for a 2h film): its checkpoints are CUDA-traced TorchScript with float64,
+which Apple's MPS backend does not support.
+
 Each session can also carry an optional `.shazamcatalog` file (the
 `Cinema sync catalog` row in the create / edit form). It is opt-in: sessions
 without one behave exactly as before. When attached, the catalog is copied

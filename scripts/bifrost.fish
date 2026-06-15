@@ -3,7 +3,7 @@
 #
 # Default pipeline (any input → voice-only track timed for the cinema):
 #   1. Decode input to WAV (44.1k stereo) + optional FPS retime → cinema-FPS (default 24)
-#   2. Demucs (htdemucs_ft) — extract vocal stem (drop music & SFX)
+#   2. Demucs (htdemucs via demucs-mlx, MLX/GPU on Apple Silicon) — extract vocal stem (drop music & SFX)
 #   3. Sidon (sarulab-speech/sidon-v0.1) — speech restoration (for low-quality input)
 #   4. ffmpeg loudnorm (I=-14 TP=-2 LRA=20) + encode to AAC mono 96k (.m4a)
 #
@@ -166,7 +166,13 @@ if test $do_retime -eq 1
     end
 end
 
+function _fmt_dur -a secs
+    echo (math "floor($secs / 60)")"m "(math "$secs % 60")"s"
+end
+
+set -l run_start (date +%s)
 set -l work (mktemp -d -t bifrost-XXXXXX)
+echo "[bifrost] started: "(date '+%Y-%m-%d %H:%M:%S')
 echo "[bifrost] work: $work"
 echo "[bifrost] out:  $outdir"
 test $do_retime -eq 1; and echo "[bifrost] retime: $source_fps → $cinema_fps fps (ratio $fps_ratio)"
@@ -213,12 +219,27 @@ end
 # Step 2: Demucs (always — we want voice-only)
 # ───────────────────────────────────────────────────────────────────────────
 
-echo "[2] demucs htdemucs_ft (vocal stem)..."
-uvx --from demucs --with torchcodec demucs -n htdemucs_ft --two-stems vocals -o $work/sep $work/in.wav
-or begin; echo "demucs failed" >&2; exit 1; end
+# demucs-mlx runs htdemucs natively on the Apple Silicon GPU (MLX), ~20x over the
+# old CPU torch path (~7 min for a 2h film). We use base htdemucs, not htdemucs_ft:
+# the 4-model _ft ensemble is ~11x heavier on this GPU for a difference Pavel could
+# not hear after Sidon restoration on cam sources. Two required pins:
+#   - mlx-audio-io==1.3.10 transitively pins mlx==0.31.0; mlx 0.31.2 made GPU
+#     streams thread-local and crashes the port's batched inference with
+#     "There is no Stream(gpu, 1) in current thread" (upstream MLX regression,
+#     ml-explore/mlx-lm#1179). Drop it once demucs-mlx works on mlx >= 0.31.2.
+#   - the [convert] extra (pulls torch) converts htdemucs's PyTorch weights to MLX
+#     on first run, cached at ~/.cache/demucs-mlx/. Only _ft ships pre-converted
+#     weights; base htdemucs must be converted locally once.
+echo "[2] demucs-mlx htdemucs (vocal stem, MLX/GPU)..."
+set -l demucs_start (date +%s)
+uvx --from 'demucs-mlx[convert]' --with 'mlx-audio-io==1.3.10' demucs-mlx -n htdemucs -o $work/sep $work/in.wav
+or begin; echo "demucs-mlx failed" >&2; exit 1; end
+echo "[2] demucs-mlx done in "(_fmt_dur (math (date +%s) - $demucs_start))
 
-set -l vocals $work/sep/htdemucs_ft/in/vocals.wav
-test -f $vocals; or begin; echo "demucs vocals not found: $vocals" >&2; exit 1; end
+# This port has no --two-stems; it writes all 4 stems as <out>/<track>/vocals.wav
+# (no per-model subdir like classic demucs), so resolve the vocals path via find.
+set -l vocals (find $work/sep -type f -name vocals.wav | head -n1)
+test -n "$vocals"; and test -f "$vocals"; or begin; echo "demucs-mlx vocals not found under $work/sep" >&2; exit 1; end
 
 # ───────────────────────────────────────────────────────────────────────────
 # Step 3: Sidon (skip with --no-sidon for already-clean inputs)
@@ -258,4 +279,5 @@ else
     echo "  $out"
 end
 
+echo "[bifrost] total: "(_fmt_dur (math (date +%s) - $run_start))
 rm -rf $work
