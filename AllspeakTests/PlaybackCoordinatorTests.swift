@@ -1019,6 +1019,84 @@ struct PlaybackCoordinatorTests {
         #expect(abs(drift) < 0.2)
     }
 
+    @Test("repeated dead-reckon resyncs do not accumulate latency compensation")
+    func deadReckonRepeatsDoNotAccumulateLatency() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        // A watch match latency-compensates EN 0.2 -> 1.1 and anchors the
+        // playhead there, already 0.9s ahead of the true cinema. Because that
+        // anchor carries the latency, each dead-reckon's projection IS the
+        // latency-compensated target - resyncs must NOT re-add 0.9 every tap.
+        fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            stamp: try #require(fixture.coordinator.catalogStamp),
+            enTime: 0.2,
+            defaults: try Self.makeLatencyDefaults(0.9)
+        )
+
+        // Two resyncs spanning 1.0s of wall time. Correct playhead after both:
+        // ruTime(EN 1.1 + 1.0) = ruTime(2.1) = 1.05 on the 0.5-slope map. The
+        // pre-fix double-count would re-add 0.9 each tap (EN ~3.9 -> RU ~1.95),
+        // and the drift readout would still show ~0 against its shifted anchor.
+        let base = Date()
+        #expect(fixture.coordinator.applyDeadReckonSeek(
+            sessionID: fixture.sessionUUID,
+            now: base.addingTimeInterval(0.5),
+            defaults: try Self.makeLatencyDefaults(0.9)
+        ))
+        #expect(fixture.coordinator.applyDeadReckonSeek(
+            sessionID: fixture.sessionUUID,
+            now: base.addingTimeInterval(1.0),
+            defaults: try Self.makeLatencyDefaults(0.9)
+        ))
+
+        #expect(abs(controller.currentTime - 1.05) < 0.1)
+        let anchorEN = try #require(fixture.coordinator.cinemaAnchor?.enTime)
+        #expect(abs(anchorEN - 2.1) < 0.1)
+    }
+
+    @Test("dead-reckon adopts the current Sync delay after the user changes it")
+    func deadReckonAdoptsChangedLatency() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+
+        // A watch match latency-compensates EN 0.2 -> 1.1 with a 0.9s Sync delay
+        // and anchors the playhead there. The user then lowers the delay to 0.2s
+        // because the dub kept landing ahead (the Settings footer tells them to).
+        // The next dead-reckon must honor the new 0.2s: strip the baked-in 0.9
+        // and re-add 0.2, not keep projecting the stale 0.9.
+        fixture.coordinator.applyCinemaMatch(
+            sessionID: fixture.sessionUUID,
+            stamp: try #require(fixture.coordinator.catalogStamp),
+            enTime: 0.2,
+            defaults: try Self.makeLatencyDefaults(0.9)
+        )
+
+        // 1.0s later: true cinema EN = (1.1 - 0.9) + 1.0 = 1.2; + the new 0.2
+        // delay = EN 1.4 -> RU 0.7 on the 0.5-slope map. The stale-latency bug
+        // would keep the 0.9 (EN 2.1 -> RU 1.05).
+        let applied = fixture.coordinator.applyDeadReckonSeek(
+            sessionID: fixture.sessionUUID,
+            now: Date().addingTimeInterval(1.0),
+            defaults: try Self.makeLatencyDefaults(0.2)
+        )
+
+        #expect(applied)
+        #expect(abs(controller.currentTime - 0.7) < 0.1)
+        let anchor = try #require(fixture.coordinator.cinemaAnchor)
+        #expect(abs(anchor.enTime - 1.4) < 0.1)
+        #expect(abs(anchor.appliedLatency - 0.2) < 0.0001)
+    }
+
     // MARK: - Diagnostics begin/end wiring
 
     private struct UnstartedSession {
