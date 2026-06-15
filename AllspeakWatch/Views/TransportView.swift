@@ -133,20 +133,23 @@ struct TransportView: View {
             .padding(.horizontal, 12)
     }
 
+    // Top row: ±3s coarse skips with the sync-drift readout in the center
+    // (swapped with the dead-reckon button, which now lives in the fine row).
     private var coarseRow: some View {
         ViewThatFits(in: .horizontal) {
-            coarseRowContent(buttonSize: 60, spacing: 14)
-            coarseRowContent(buttonSize: 52, spacing: 10)
-            coarseRowContent(buttonSize: 44, spacing: 7)
+            coarseRowContent(buttonSize: 52, centerWidth: 64, spacing: 9)
+            coarseRowContent(buttonSize: 48, centerWidth: 54, spacing: 7)
+            coarseRowContent(buttonSize: 44, centerWidth: 48, spacing: 5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func coarseRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
+    private func coarseRowContent(buttonSize: CGFloat, centerWidth: CGFloat, spacing: CGFloat) -> some View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "3", size: buttonSize, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
-            deadReckonButton
+            driftReadout
+                .frame(width: centerWidth)
             skipButton(icon: Tokens.Icon.skipForward, seconds: "3", size: buttonSize, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
@@ -201,34 +204,33 @@ struct TransportView: View {
         }
     }
 
-    // The drift readout sits between the two ±1 skips. The widest variant only
-    // fits the largest watches; ViewThatFits steps down so the row never clips
-    // on the narrower ones (the compact variant totals 146pt, which is 40mm's
-    // 162pt minus the 16pt content padding).
+    // Bottom row: ±1s fine skips with the dead-reckon resync button in the center
+    // (swapped down from the coarse row; the drift readout took its old slot up
+    // top). The center button is a fixed 44pt, so ViewThatFits only steps the ±1
+    // buttons; the compact variant totals 146pt (40mm's 162pt minus 16pt padding).
     private var fineRow: some View {
         ViewThatFits(in: .horizontal) {
-            fineRowContent(buttonSize: 52, centerWidth: 64, spacing: 9)
-            fineRowContent(buttonSize: 48, centerWidth: 54, spacing: 7)
-            fineRowContent(buttonSize: 44, centerWidth: 48, spacing: 5)
+            fineRowContent(buttonSize: 60, spacing: 14)
+            fineRowContent(buttonSize: 52, spacing: 10)
+            fineRowContent(buttonSize: 44, spacing: 7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func fineRowContent(buttonSize: CGFloat, centerWidth: CGFloat, spacing: CGFloat) -> some View {
+    private func fineRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "1", size: buttonSize, action: handleSkipBackFine)
                 .accessibilityLabel("Skip back 1 second")
-            driftReadout
-                .frame(width: centerWidth)
+            deadReckonButton
             skipButton(icon: Tokens.Icon.skipForward, seconds: "1", size: buttonSize, action: handleSkipForwardFine)
                 .accessibilityLabel("Skip forward 1 second")
         }
     }
 
-    // Sync drift relative to the cinema, in the slot the Shazam sync button used
-    // to occupy. Rides existing snapshots (no new resync/timer): big signed
-    // seconds with a direction caption - gold when AHEAD/BEHIND, gray IN SYNC
-    // within the 0.3s band, muted "-- / NO SYNC" before an anchor exists.
+    // Sync drift relative to the cinema, shown in the top row center. Rides
+    // existing snapshots (no new resync/timer): big signed seconds with a
+    // direction caption - gold when AHEAD/BEHIND, gray IN SYNC within the 0.3s
+    // band, muted "-- / NO SYNC" before an anchor exists.
     private var driftReadout: some View {
         let display = WatchTransportFormat.driftDisplay(client.lastSnapshot?.drift)
         return VStack(spacing: 1) {
