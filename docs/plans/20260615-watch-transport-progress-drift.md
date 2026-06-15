@@ -44,7 +44,7 @@
 - [x] run tests - must pass before next task
 
 ### Task 3: Compute drift on the phone
-- [x] add a pure helper, e.g. `static func cinemaDrift(currentRU: Double, anchor: (enTime: Double, at: Date)?, now: Date, mapping: DTWMapping?, latency: Double) -> Double?` returning `currentRU - mapping.ruTime(forEnTime: anchor.enTime + (now - anchor.at) + latency)`, or `nil` when anchor is missing
+- [x] add a pure helper, e.g. `static func cinemaDrift(currentRU: Double, anchor: (enTime: Double, at: Date)?, now: Date, mapping: DTWMapping?) -> Double?` returning `currentRU - mapping.ruTime(forEnTime: anchor.enTime + (now - anchor.at))`, or `nil` when anchor is missing (no latency term - the anchor already stores the playhead's latency-compensated EN, so re-adding latency would read ~-latency BEHIND right after a sync)
 - [x] call it from `PlaybackCoordinator.currentSnapshot()` and pass the result into the new `drift` field
 - [x] write test: ahead -> positive, behind -> negative, no anchor -> nil
 - [x] write test: non-identity DTW mapping is applied (expected RU != enNow)
@@ -70,7 +70,7 @@
 - [x] confirm no new resync/timer was added beyond the native progress redraw; manual-only rule intact - verified by code inspection: only `TimelineView(.periodic)` added (permitted native redraw); `startInterpolationTimer` is pre-existing (AllspeakWatchApp.swift untouched by feature commits); drift rides existing snapshots; ShazamKit handlers dormant
 
 ## Technical Details
-- Drift: `drift = currentRU - ruTime(forEnTime: anchorEN + elapsed + latency)`; positive = dub ahead. Same anchor + mapping + latency the dead-reckon button already uses, so the number agrees with what a dead-reckon would correct.
+- Drift: `drift = currentRU - ruTime(forEnTime: anchorEN + elapsed)`; positive = dub ahead. Same anchor + mapping the dead-reckon button uses, but NO latency term: latency compensates the seek-to-audible delay of an active seek (dead-reckon keeps it), whereas drift is a passive readout. Every anchor already stores the EN of the dub's playhead at anchor.at (sync paths anchor the latency-compensated enOffset they seeked to; a cue tap anchors the tapped RU's EN), so right after any anchor the dub sits on the projected RU and drift reads ~0. Re-adding latency here would double-count and show ~-latency BEHIND the instant a sync succeeds.
 - Progress: prefer `ProgressView(timerInterval: start...end)` seeded from `serverDate`-adjusted currentTime so it self-advances without a manual timer; fall back to `TimelineView(.periodic)` if exact fill control is needed.
 - Layout: stay within the existing `ViewThatFits` sizing discipline so 40/45/49mm don't clip.
 

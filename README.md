@@ -106,8 +106,8 @@ has no UI. See
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
 resync subtitles in a cinema without taking the iPhone out of your pocket.
 The watch is a thin remote: it sends commands (play/pause, skip ±1s / ±3s,
-seek-to-cue, set volume, cinema-sync match) to the iPhone, which remains the
-audio host.
+seek-to-cue, set volume, mic-free dead-reckon resync) to the iPhone, which
+remains the audio host.
 
 ### Pairing
 
@@ -159,8 +159,9 @@ audio host.
 
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
-`setVolume(_:)`, `requestCueBundle(sessionID:revision:)`, and
-`cinemaMatch(sessionID:stamp:enTime:)`. Session
+`setVolume(_:)`, `requestCueBundle(sessionID:revision:)`,
+`requestCatalog(sessionID:stamp:)`, `cinemaMatch(sessionID:stamp:enTime:)`, and
+`deadReckonSeek(sessionID:)`. Session
 metadata delivered to the watch carries a `tracks: [TrackInfo]` array
 plus the current `activeTrackID`. The wire contract lives in
 `Allspeak/Watch/WireProtocol.swift` — see the header comment there for

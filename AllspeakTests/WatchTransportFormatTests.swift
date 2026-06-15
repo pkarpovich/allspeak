@@ -39,6 +39,27 @@ struct WatchTransportFormatTests {
     func remainingClampsPastDuration() {
         #expect(WatchTransportFormat.remainingLabel(elapsed: 130, duration: 120) == "-0:00")
     }
+
+    @Test("fraction: normal mid-film position")
+    func fractionNormal() {
+        #expect(abs(WatchTransportFormat.progressFraction(elapsed: 30, duration: 120) - 0.25) < 1e-9)
+    }
+
+    @Test("fraction: zero duration reads empty")
+    func fractionZeroDuration() {
+        #expect(WatchTransportFormat.progressFraction(elapsed: 30, duration: 0) == 0)
+    }
+
+    @Test("fraction: clamps below zero")
+    func fractionClampsNegative() {
+        #expect(WatchTransportFormat.progressFraction(elapsed: -5, duration: 120) == 0)
+    }
+
+    @Test("fraction: clamps at and past duration")
+    func fractionClampsAtAndPastDuration() {
+        #expect(WatchTransportFormat.progressFraction(elapsed: 120, duration: 120) == 1)
+        #expect(WatchTransportFormat.progressFraction(elapsed: 130, duration: 120) == 1)
+    }
 }
 
 @Suite("Watch drift display")

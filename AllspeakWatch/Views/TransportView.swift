@@ -311,7 +311,7 @@ struct TransportView: View {
             let elapsed = progressElapsed(at: context.date)
             let duration = progressDuration
             VStack(spacing: 3) {
-                ProgressView(value: progressFraction(elapsed: elapsed, duration: duration))
+                ProgressView(value: WatchTransportFormat.progressFraction(elapsed: elapsed, duration: duration))
                     .progressViewStyle(.linear)
                     .tint(Tokens.accent)
                 HStack {
@@ -337,11 +337,6 @@ struct TransportView: View {
 
     private var progressDuration: Double {
         client.lastSnapshot?.duration ?? client.metadata?.duration ?? 0
-    }
-
-    private func progressFraction(elapsed: Double, duration: Double) -> Double {
-        guard duration > 0 else { return 0 }
-        return min(max(elapsed / duration, 0), 1)
     }
 
     private func skipButton(

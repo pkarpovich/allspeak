@@ -901,15 +901,15 @@ struct PlaybackCoordinatorTests {
         let now = at.addingTimeInterval(10)
         let anchor = (enTime: 0.0, at: at)
 
-        // No mapping -> expected RU = enTime + elapsed + latency = 0 + 10 + 0 = 10.
+        // No mapping -> expected RU = enTime + elapsed = 0 + 10 = 10.
         let ahead = try #require(
-            PlaybackCoordinator.cinemaDrift(currentRU: 12, anchor: anchor, now: now, mapping: nil, latency: 0)
+            PlaybackCoordinator.cinemaDrift(currentRU: 12, anchor: anchor, now: now, mapping: nil)
         )
         let behind = try #require(
-            PlaybackCoordinator.cinemaDrift(currentRU: 8, anchor: anchor, now: now, mapping: nil, latency: 0)
+            PlaybackCoordinator.cinemaDrift(currentRU: 8, anchor: anchor, now: now, mapping: nil)
         )
         let inSync = try #require(
-            PlaybackCoordinator.cinemaDrift(currentRU: 10, anchor: anchor, now: now, mapping: nil, latency: 0)
+            PlaybackCoordinator.cinemaDrift(currentRU: 10, anchor: anchor, now: now, mapping: nil)
         )
 
         #expect(abs(ahead - 2.0) < 1e-9)
@@ -923,8 +923,7 @@ struct PlaybackCoordinatorTests {
             currentRU: 5,
             anchor: nil,
             now: Date(),
-            mapping: nil,
-            latency: 0
+            mapping: nil
         )
         #expect(drift == nil)
     }
@@ -933,19 +932,19 @@ struct PlaybackCoordinatorTests {
     func cinemaDriftAppliesMapping() throws {
         let mapping = try DTWMapping(jsonData: Data(Self.dtwMapJSON.utf8))
         let at = Date(timeIntervalSince1970: 1_000)
-        let now = at.addingTimeInterval(3)
+        let now = at.addingTimeInterval(4)
         let anchor = (enTime: 0.0, at: at)
 
-        // enNow = 0 + 3 + 1 = 4; the mapping bends 4 -> 2, so a dub at RU 2 is in sync.
+        // enNow = 0 + 4 = 4; the mapping bends 4 -> 2, so a dub at RU 2 is in sync.
         let mapped = try #require(
-            PlaybackCoordinator.cinemaDrift(currentRU: 2, anchor: anchor, now: now, mapping: mapping, latency: 1)
+            PlaybackCoordinator.cinemaDrift(currentRU: 2, anchor: anchor, now: now, mapping: mapping)
         )
         #expect(abs(mapped) < 1e-9)
 
         // Without the mapping the expected RU stays at enNow (4), proving the
         // mapping changed the result rather than passing EN through unchanged.
         let identity = try #require(
-            PlaybackCoordinator.cinemaDrift(currentRU: 2, anchor: anchor, now: now, mapping: nil, latency: 1)
+            PlaybackCoordinator.cinemaDrift(currentRU: 2, anchor: anchor, now: now, mapping: nil)
         )
         #expect(abs(identity - -2.0) < 1e-9)
         #expect(abs(mapped - identity) > 0.5)
@@ -957,7 +956,7 @@ struct PlaybackCoordinatorTests {
         let standard = UserDefaults.standard
         let latencyKey = CinemaSyncService.latencyCompensationDefaultsKey
         let previousLatency = standard.object(forKey: latencyKey)
-        standard.set(0.0, forKey: latencyKey)
+        standard.set(0.9, forKey: latencyKey)
         defer {
             if let previousLatency {
                 standard.set(previousLatency, forKey: latencyKey)
@@ -973,15 +972,49 @@ struct PlaybackCoordinatorTests {
         let matched = fixture.coordinator.applyCinemaMatch(
             sessionID: fixture.sessionUUID,
             stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 4.0
+            enTime: 2.0
         )
         #expect(matched)
 
-        // The match anchors at EN 4 and seeks the dub to the DTW-mapped RU (4 -> 2);
-        // currentSnapshot() re-projects EN 4 -> RU 2 with ~no elapsed time and the
-        // same (pinned 0) .standard latency, so the dub sits on the expected RU and
-        // drift reads ~0 - proving currentTime, the anchor, the mapping, and latency
-        // all reach the snapshot's drift field.
+        // The match latency-compensates EN 2 -> 2.9 (0.9 latency) and seeks the
+        // dub to the DTW-mapped RU (2.9 -> 1.45); currentSnapshot() re-projects
+        // EN 2.9 -> RU 1.45 with ~no elapsed time, so the dub sits on the
+        // expected RU and drift reads ~0 - proving currentTime, the anchor, and
+        // the mapping all reach the snapshot's drift field, and that drift does
+        // NOT re-add the 0.9 latency the anchor already carries (a fresh sync
+        // reads IN SYNC, not ~-0.9 BEHIND).
+        //
+        // EN 2.9 is chosen so the buggy formula (re-adding 0.9 -> EN 3.8 -> RU
+        // 1.9, drift -0.45) stays inside the mapping's linear domain and trips
+        // this < 0.2 assertion. An EN that projected past the last pair (4.0)
+        // would clamp to RU 2.0 and sneak a tiny drift through, masking the
+        // regression.
+        let drift = try #require(fixture.coordinator.currentSnapshot().drift)
+        #expect(abs(drift) < 0.2)
+    }
+
+    @Test("currentSnapshot reports ~0 drift right after a dead-reckon resync")
+    func deadReckonResetsDrift() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+
+        // A cue tap at RU 1.0 anchors EN 2.0; the dead-reckon then seeks the
+        // playhead 0.9s ahead of the projected cinema position (EN 2.9 -> RU
+        // 1.45) to cover the seek-to-audible delay. A successful resync must
+        // read ~0 drift, not the +0.45 (0.9 latency through the 0.5-slope map)
+        // a stale, un-updated anchor would report - the dead-reckon re-anchors
+        // at its seek target exactly as the sync paths do.
+        fixture.coordinator.seekToCue(1.0)
+
+        let applied = fixture.coordinator.applyDeadReckonSeek(
+            sessionID: fixture.sessionUUID,
+            defaults: try Self.makeLatencyDefaults(0.9)
+        )
+        #expect(applied)
+
         let drift = try #require(fixture.coordinator.currentSnapshot().drift)
         #expect(abs(drift) < 0.2)
     }

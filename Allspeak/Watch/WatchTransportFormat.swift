@@ -15,6 +15,13 @@ enum WatchTransportFormat {
         "-" + clockLabel(max(0, duration - elapsed))
     }
 
+    // Linear fill fraction for the progress bar, clamped to 0...1. A zero or
+    // missing duration (no snapshot yet) reads as empty.
+    static func progressFraction(elapsed: Double, duration: Double) -> Double {
+        guard duration > 0 else { return 0 }
+        return min(max(elapsed / duration, 0), 1)
+    }
+
     private static func clockLabel(_ seconds: Double) -> String {
         guard seconds.isFinite else { return "0:00" }
         let total = max(0, Int(seconds.rounded(.down)))
