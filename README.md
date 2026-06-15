@@ -86,15 +86,13 @@ Playback is not interrupted during the listen — the audio session swaps to
 `.playAndRecord` with `.mixWithOthers` for the sync window and restores
 afterward. The button is hidden for sessions without a catalog.
 
-The watch transport screen has the same sync button: the phone transfers the
-session's catalog to the watch, the watch listens through its own mic and
-matches locally (so the phone's audio route — and AirPods playback quality — is
-never touched), then sends the matched English timecode to the phone, which
-applies the same Sync delay and DTW mapping before seeking. Success / failure
-is signalled by a wrist haptic. The watch asks for its own microphone
-permission on the first tap (separate from the phone's). Generating the
-catalog and mapping files is a separate Mac-side step; see
-[`docs/cinema-sync.md`](docs/cinema-sync.md).
+The watch transport screen no longer carries a mic-sync button. Resync from the
+wrist now goes through the always-available mic-free dead-reckon button (it
+re-projects the dub from the last sync anchor), and a passive drift readout
+shows how far the dub has drifted from the cinema. The watch's own ShazamKit
+mic-match plumbing (catalog transfer, local matching) remains in the codebase
+but is currently dormant; generating the catalog and mapping files is a separate
+Mac-side step; see [`docs/cinema-sync.md`](docs/cinema-sync.md).
 
 For cinema sessions, the app also writes a per-screening JSONL diagnostics log
 (`Documents/diagnostics/`, pulled via the Files app) capturing every sync,
@@ -108,8 +106,8 @@ has no UI. See
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
 resync subtitles in a cinema without taking the iPhone out of your pocket.
 The watch is a thin remote: it sends commands (play/pause, skip ±1s / ±3s,
-seek-to-cue, set volume, cinema-sync match) to the iPhone, which remains the
-audio host.
+seek-to-cue, set volume, mic-free dead-reckon resync) to the iPhone, which
+remains the audio host.
 
 ### Pairing
 
@@ -128,17 +126,24 @@ audio host.
 ### Usage
 
 - **Page 1** (default, transport): a stacked transport layout — a centered
-  pair of ±3s coarse skips on top (with the cinema sync button between them
-  when the session has a catalog), a full-width Play/Pause in the middle, a
-  centered pair of ±1s fine skips beneath, and a slim volume bar at the
-  bottom. The skip controls are circular glass buttons whose icon is a curved
-  arrow with the interval inside it (`3`, `1`); every skip tap plays a click
-  haptic. Play/Pause is a warm-tinted glowing pill. The Digital Crown is wired to playback volume
-  (`AVAudioPlayer.volume`, 0...1, persisted across launches) with haptic ticks
-  at each detent; rotating the Crown up raises the volume, and the bar fills in
-  proportion to the current level so the on-screen scale always matches the
-  loudness sent to the phone. The bar brightens while the Crown is turning and
-  dims when idle; rapid rotation coalesces into a single trailing-edge command.
+  pair of ±3s coarse skips on top (with a mic-free dead-reckon resync button
+  between them), a full-width Play/Pause, a non-interactive film progress bar
+  (gold fill with the elapsed time on the left and a remaining countdown on the
+  right, self-advancing while playing), and a centered pair of ±1s fine skips
+  beneath. Between the ±1s skips sits the **sync drift readout**: big signed
+  seconds plus a direction caption showing how far the dub has drifted from the
+  cinema since the last sync anchor — gold `+0.8s AHEAD` / `-1.4s BEHIND`, gray
+  `±0.0s IN SYNC` within a 0.3s band, and a muted `-- / NO SYNC` before any
+  anchor exists (drift rides the existing playback snapshots — no extra mic
+  listen or timer). The skip controls are circular glass buttons whose icon is a
+  curved arrow with the interval inside it (`3`, `1`); every skip tap plays a
+  click haptic. Play/Pause is a warm-tinted glowing pill. The Digital Crown
+  drives the phone's real system output volume (re-synced from the phone's
+  reported `outputVolume` while the Crown is idle) with haptic ticks at each
+  detent; the native Crown indicator fills with loudness so a full bar = max
+  volume. As a consequence of the system locking fill direction to rotation
+  direction, turning the Crown **down** raises the volume. Rapid rotation
+  coalesces into a single trailing-edge command.
 - **Page 2** (swipe up): scrollable list of all cues with the current line
   highlighted; tap any line to seek the iPhone audio to that timestamp.
 - **Page 3** (swipe up again): list of audio tracks on the current
@@ -154,8 +159,9 @@ audio host.
 
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
-`setVolume(_:)`, `requestCueBundle(sessionID:revision:)`, and
-`cinemaMatch(sessionID:stamp:enTime:)`. Session
+`setVolume(_:)`, `requestCueBundle(sessionID:revision:)`,
+`requestCatalog(sessionID:stamp:)`, `cinemaMatch(sessionID:stamp:enTime:)`, and
+`deadReckonSeek(sessionID:)`. Session
 metadata delivered to the watch carries a `tracks: [TrackInfo]` array
 plus the current `activeTrackID`. The wire contract lives in
 `Allspeak/Watch/WireProtocol.swift` — see the header comment there for

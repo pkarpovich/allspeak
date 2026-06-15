@@ -20,10 +20,39 @@ struct TransportView: View {
     @State private var volumeThrottler = VolumeThrottler { value in
         WatchSessionClient.shared.send(.setVolume(value))
     }
-    // The Digital Crown drives system volume directly: the bound value IS the
-    // volume (0 = silent, 1 = full), so the native crown scale reads as loudness
-    // and Crown-up = louder with no inversion. Re-synced while idle from the
-    // phone's reported outputVolume.
+    // Digital Crown -> system volume. Read this before touching the crown binding
+    // below, because the "obvious" fix is wrong and we re-learned that over several
+    // PRs.
+    //
+    // `volume` is the SINGLE source of truth for loudness: 0 = silent, 1 = full.
+    // It is what we send to the phone (WCSession -> AudioController.setVolume ->
+    // SystemVolume.set, applied 1:1 with NO inversion on the phone side) and what
+    // the rest of the UI reads. So louder always means a larger `volume`.
+    //
+    // The subtlety is the native Digital Crown indicator (the green bar watchOS
+    // draws on rotation). It is a SCROLLBAR, not a level meter: its fill grows as
+    // the BOUND value approaches `from` (0) and shrinks as it approaches `through`
+    // (1). Measured on a real Apple Watch (2026-06-14) with a temporary on-screen
+    // readout: binding the crown straight to `volume` produced a FULL bar at
+    // `vol 0.00` (silent) and an EMPTY bar at `vol 1.00` (loud) - i.e. the bar
+    // read backwards ("smaller bar = louder"), which is what Pavel reported.
+    //
+    // Fix: bind the crown to the INVERSE, `1 - volume` (see the Binding below).
+    // Now the scrollbar's "1 - boundValue" fill == volume, so the bar fills with
+    // loudness: a FULL bar = max volume, an empty bar = silent. That is Pavel's
+    // hard requirement ("заполненная полоска = vol 1.0").
+    //
+    // Unavoidable trade-off: louder is now crown-DOWN (quieter is crown-up). On
+    // this native indicator the fill direction and the crown-up direction are
+    // locked together by the system, so "full bar = loud" and "crown-up = loud"
+    // are mutually exclusive. Pavel chose full-bar = loud.
+    //
+    // DO NOT try to make crown-up = louder by flipping the volume mapping again -
+    // that flips the BAR and the DIRECTION together and lands right back on the
+    // backwards bar (this exact mistake cost PRs #24 and #25 before #26 fixed it).
+    // The only way to get BOTH crown-up = louder AND full-bar = loud is to hide
+    // the native indicator (digitalCrownAccessory visibility) and draw a custom
+    // bar - ask Pavel before going there.
     @State private var volume: Double = 0.5
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
@@ -39,7 +68,7 @@ struct TransportView: View {
         }
         .focusable()
         .digitalCrownRotation(
-            $volume,
+            Binding(get: { 1 - volume }, set: { volume = 1 - $0 }),
             from: 0,
             through: 1,
             by: 0.02,
@@ -88,6 +117,7 @@ struct TransportView: View {
             VStack(spacing: 8) {
                 coarseRow
                 playButton
+                progressBar
                 fineRow
             }
             .padding(.horizontal, 8)
@@ -103,20 +133,23 @@ struct TransportView: View {
             .padding(.horizontal, 12)
     }
 
+    // Top row: ±3s coarse skips with the sync-drift readout in the center
+    // (swapped with the dead-reckon button, which now lives in the fine row).
     private var coarseRow: some View {
         ViewThatFits(in: .horizontal) {
-            coarseRowContent(buttonSize: 60, spacing: 14)
-            coarseRowContent(buttonSize: 52, spacing: 10)
-            coarseRowContent(buttonSize: 44, spacing: 7)
+            coarseRowContent(buttonSize: 52, centerWidth: 64, spacing: 9)
+            coarseRowContent(buttonSize: 48, centerWidth: 54, spacing: 7)
+            coarseRowContent(buttonSize: 44, centerWidth: 48, spacing: 5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func coarseRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
+    private func coarseRowContent(buttonSize: CGFloat, centerWidth: CGFloat, spacing: CGFloat) -> some View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "3", size: buttonSize, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
-            deadReckonButton
+            driftReadout
+                .frame(width: centerWidth)
             skipButton(icon: Tokens.Icon.skipForward, seconds: "3", size: buttonSize, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
@@ -171,12 +204,13 @@ struct TransportView: View {
         }
     }
 
-    // With the 44pt sync button between the two skips, the roomy variant only
-    // fits the widest cases; ViewThatFits steps down so the row never clips on
-    // the narrower ones (40mm is 162pt total, minus 16pt content padding).
+    // Bottom row: ±1s fine skips with the dead-reckon resync button in the center
+    // (swapped down from the coarse row; the drift readout took its old slot up
+    // top). The center button is a fixed 44pt, so ViewThatFits only steps the ±1
+    // buttons; the compact variant totals 146pt (40mm's 162pt minus 16pt padding).
     private var fineRow: some View {
         ViewThatFits(in: .horizontal) {
-            fineRowContent(buttonSize: 62, spacing: 14)
+            fineRowContent(buttonSize: 60, spacing: 14)
             fineRowContent(buttonSize: 52, spacing: 10)
             fineRowContent(buttonSize: 44, spacing: 7)
         }
@@ -187,11 +221,52 @@ struct TransportView: View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "1", size: buttonSize, action: handleSkipBackFine)
                 .accessibilityLabel("Skip back 1 second")
-            if client.hasCatalogForCurrentSession {
-                syncButton
-            }
+            deadReckonButton
             skipButton(icon: Tokens.Icon.skipForward, seconds: "1", size: buttonSize, action: handleSkipForwardFine)
                 .accessibilityLabel("Skip forward 1 second")
+        }
+    }
+
+    // Sync drift relative to the cinema, shown in the top row center. Rides
+    // existing snapshots (no new resync/timer): big signed seconds with a
+    // direction caption - gold when AHEAD/BEHIND, gray IN SYNC within the 0.3s
+    // band, muted "-- / NO SYNC" before an anchor exists.
+    private var driftReadout: some View {
+        let display = WatchTransportFormat.driftDisplay(client.lastSnapshot?.drift)
+        return VStack(spacing: 1) {
+            Text(display.value)
+                .font(.system(size: 17, weight: .semibold))
+                .monospacedDigit()
+            HStack(spacing: 2) {
+                if let arrow = driftArrow(display.kind) {
+                    Image(systemName: arrow)
+                        .font(.system(size: 8, weight: .bold))
+                }
+                Text(display.caption)
+                    .font(.system(size: 9, weight: .medium))
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+        .foregroundStyle(driftColor(display.kind))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Sync drift")
+        .accessibilityValue("\(display.value) \(display.caption)")
+    }
+
+    private func driftArrow(_ kind: WatchTransportFormat.DriftKind) -> String? {
+        switch kind {
+        case .behind: return "arrow.down"
+        case .ahead: return "arrow.up"
+        case .inSync, .noSync: return nil
+        }
+    }
+
+    private func driftColor(_ kind: WatchTransportFormat.DriftKind) -> Color {
+        switch kind {
+        case .behind, .ahead: return Tokens.accent
+        case .inSync: return Tokens.text2
+        case .noSync: return Tokens.text3
         }
     }
 
@@ -227,6 +302,43 @@ struct TransportView: View {
         .buttonStyle(.plain)
         .shadow(color: Tokens.accent.opacity(0.45), radius: 10)
         .accessibilityLabel(isPlaying ? "Pause" : "Play")
+    }
+
+    // Non-interactive film position. Self-advances while playing via a native
+    // TimelineView redraw (no manual Timer, no resync) - it just re-reads the
+    // dead-reckoned snapshot time once a second. Gold linear fill with elapsed
+    // (left) and remaining (right) labels.
+    private var progressBar: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let elapsed = progressElapsed(at: context.date)
+            let duration = progressDuration
+            VStack(spacing: 3) {
+                ProgressView(value: WatchTransportFormat.progressFraction(elapsed: elapsed, duration: duration))
+                    .progressViewStyle(.linear)
+                    .tint(Tokens.accent)
+                HStack {
+                    Text(WatchTransportFormat.elapsedLabel(elapsed))
+                    Spacer(minLength: 4)
+                    Text(WatchTransportFormat.remainingLabel(elapsed: elapsed, duration: duration))
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Tokens.text2)
+                .monospacedDigit()
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Film position")
+    }
+
+    private func progressElapsed(at date: Date) -> Double {
+        if let snapshot = client.lastSnapshot {
+            return WatchSessionClient.interpolatedTime(snapshot: snapshot, now: date)
+        }
+        return client.metadata?.currentTime ?? 0
+    }
+
+    private var progressDuration: Double {
+        client.lastSnapshot?.duration ?? client.metadata?.duration ?? 0
     }
 
     private func skipButton(

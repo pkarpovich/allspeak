@@ -51,11 +51,20 @@ final class PlaybackCoordinator {
     var diagnostics: DiagnosticsLog = .shared
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
     // Last trusted alignment between the cinema's EN timeline and wall time:
-    // (the cinema was at enTime when the clock read at). Set by every applied
-    // ShazamKit sync and every subtitle-cue tap (both are "we are aligned NOW"
-    // gestures). Cinemas play continuously at 1.0x, so the cinema's current
-    // position is anchor.enTime + elapsed - the basis for mic-free resync.
-    private(set) var cinemaAnchor: (enTime: Double, at: Date)?
+    // (the dub playhead was at enTime when the clock read at). Set by every
+    // applied ShazamKit sync and every subtitle-cue tap (both are "we are
+    // aligned NOW" gestures). Cinemas play continuously at 1.0x, so the
+    // playhead's projected position is anchor.enTime + elapsed - the basis for
+    // mic-free resync.
+    //
+    // appliedLatency is the seek-to-audible offset already baked into enTime.
+    // The sync paths and a dead-reckon seek the playhead latency-ahead of the
+    // true cinema, so they store the latency they applied; a cue tap jumps the
+    // dub exactly onto the tapped line (no offset), so it stores 0. The
+    // dead-reckon strips this old offset and re-adds the current Sync delay, so
+    // repeated resyncs neither march the playhead further ahead each tap nor pin
+    // it to a stale latency after the user changes the setting.
+    private(set) var cinemaAnchor: (enTime: Double, at: Date, appliedLatency: Double)?
 
     init() {}
 
@@ -535,10 +544,38 @@ final class PlaybackCoordinator {
         #endif
     }
 
+    // How far the dub has drifted from the cinema: project the cinema's EN
+    // position from the anchor + elapsed wall time, DTW-map to the expected RU
+    // position, then subtract it from where the dub actually is. Positive =
+    // dub plays AHEAD of the cinema, negative = BEHIND. nil when no anchor
+    // exists (drift is only meaningful relative to an anchor).
+    //
+    // No latency term: every anchor stores the EN coordinate of the dub's
+    // playhead at anchor.at (the sync paths anchor the latency-compensated
+    // enOffset they seeked to, a cue tap anchors the EN of the tapped RU, a
+    // dead-reckon re-anchors at the EN it seeked to), so right after any anchor
+    // the dub already sits on the projected RU and drift reads ~0. Latency
+    // compensation belongs to an active seek (the dub turns
+    // audible ~latency after seeking, so applyDeadReckonSeek projects ahead by
+    // it), not to this passive readout - adding it here would double-count and
+    // show ~-latency BEHIND the instant a sync succeeds.
+    static func cinemaDrift(
+        currentRU: Double,
+        anchor: (enTime: Double, at: Date)?,
+        now: Date,
+        mapping: DTWMapping?
+    ) -> Double? {
+        guard let anchor else { return nil }
+        let enNow = anchor.enTime + now.timeIntervalSince(anchor.at)
+        let expectedRU = mapping?.ruTime(forEnTime: enNow) ?? enNow
+        return currentRU - expectedRU
+    }
+
     func currentSnapshot() -> PlaybackSnapshot {
         guard let controller, let sessionUUID else {
             return PlaybackSnapshot.empty
         }
+        let now = Date()
         return PlaybackSnapshot(
             sessionID: sessionUUID,
             revision: revision,
@@ -546,9 +583,15 @@ final class PlaybackCoordinator {
             duration: controller.duration,
             currentIndex: controller.currentIndex,
             isPlaying: controller.isPlaying,
-            serverDate: Date(),
+            serverDate: now,
             activeTrackID: activeTrackID,
-            volume: systemVolumeReader()
+            volume: systemVolumeReader(),
+            drift: Self.cinemaDrift(
+                currentRU: controller.currentTime,
+                anchor: cinemaAnchor.map { (enTime: $0.enTime, at: $0.at) },
+                now: now,
+                mapping: dtwMapping
+            )
         )
     }
 
@@ -581,10 +624,10 @@ final class PlaybackCoordinator {
         listenSeconds: Double? = nil
     ) {
         guard let controller else { return }
-        let playerBefore = controller.currentTime
+        let playerBefore = controller.livePosition
         controller.seek(to: offset)
         if let enTime {
-            cinemaAnchor = (enTime, Date())
+            cinemaAnchor = (enTime, Date(), appliedLatency: latencyComp ?? 0)
         }
         diagnostics.log(.sync(
             source: .phone,
@@ -647,17 +690,29 @@ final class PlaybackCoordinator {
         guard let controller else { return }
         controller.seek(to: time)
         if let dtwMapping {
-            cinemaAnchor = (dtwMapping.enTime(forRuTime: time), Date())
+            cinemaAnchor = (dtwMapping.enTime(forRuTime: time), Date(), appliedLatency: 0)
         }
         diagnostics.log(.seek(time: time, source: source))
     }
 
-    // Mic-free resync: project the cinema's current EN position from the
+    // Mic-free resync: project the dub playhead's current EN position from the
     // anchor plus elapsed wall time, DTW-map to RU, seek. The DTW map encodes
     // the full drift (slope + zigzag), so this corrects exactly what has
-    // accumulated since the anchor. The same latency compensation as the mic
-    // path applies - the dominant terms (command hop, seek-to-audible delay)
-    // are shared.
+    // accumulated since the anchor.
+    //
+    // The anchor's enTime already carries the latency that was applied when it
+    // was set (0 for a cue tap, the Sync delay for a sync or a prior dead-reckon).
+    // Strip that old offset and re-add the current Sync delay, so the seek lands
+    // the playhead exactly one current-latency ahead of the projected cinema
+    // position - never an accumulating stack of past latencies, and never pinned
+    // to a stale value after the user changes the setting. When the delay is
+    // unchanged this is a no-op on a compensated anchor (strip L, add L); a
+    // cue-tap anchor (applied 0) gets the full current latency added.
+    //
+    // Re-anchor at the seeked-to EN, carrying the latency just applied, exactly
+    // as the sync paths re-anchor at the enOffset they seeked to. This keeps the
+    // invariant that the anchor stores the dub's playhead EN, so the passive
+    // drift readout reads ~0 right after a resync.
     @discardableResult
     func applyDeadReckonSeek(
         sessionID: UUID,
@@ -667,10 +722,13 @@ final class PlaybackCoordinator {
         guard let controller, sessionUUID == sessionID, let anchor = cinemaAnchor else { return false }
         let elapsed = now.timeIntervalSince(anchor.at)
         guard elapsed >= 0 else { return false }
-        let enNow = anchor.enTime + elapsed + CinemaSyncService.storedLatencyCompensation(defaults)
+        let projectedEN = anchor.enTime + elapsed
+        let currentLatency = CinemaSyncService.storedLatencyCompensation(defaults)
+        let enNow = projectedEN - anchor.appliedLatency + currentLatency
         let ruTarget = dtwMapping?.ruTime(forEnTime: enNow) ?? enNow
-        let playerBefore = controller.currentTime
+        let playerBefore = controller.livePosition
         controller.seek(to: ruTarget)
+        cinemaAnchor = (enNow, now, appliedLatency: currentLatency)
         diagnostics.log(.deadReckon(
             enTime: enNow,
             ruTime: ruTarget,
@@ -695,9 +753,9 @@ final class PlaybackCoordinator {
         let latencyComp = CinemaSyncService.storedLatencyCompensation(defaults)
         let enOffset = enTime + latencyComp
         let ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
-        let playerBefore = controller.currentTime
+        let playerBefore = controller.livePosition
         controller.seek(to: ruOffset)
-        cinemaAnchor = (enOffset, Date())
+        cinemaAnchor = (enOffset, Date(), appliedLatency: latencyComp)
         diagnostics.log(.sync(
             source: .watch,
             result: .matched,
