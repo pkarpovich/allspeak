@@ -16,23 +16,15 @@ struct WireProtocolTests {
         WatchCommand.setVolume(0.0),
         WatchCommand.setVolume(0.5),
         WatchCommand.setVolume(1.0),
-        WatchCommand.requestCueBundle(
+        WatchCommand.requestCueChunk(
             sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000001")!,
-            revision: 42
+            revision: 42,
+            index: 0
         ),
-        WatchCommand.requestCatalog(
+        WatchCommand.requestCueChunk(
             sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000004")!,
-            stamp: "film.shazamcatalog:1234:5678"
-        ),
-        WatchCommand.cinemaMatch(
-            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000002")!,
-            stamp: nil,
-            enTime: 0
-        ),
-        WatchCommand.cinemaMatch(
-            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000003")!,
-            stamp: "film.shazamcatalog:1234:5678",
-            enTime: 5432.125
+            revision: 7,
+            index: 3
         ),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
@@ -58,9 +50,9 @@ struct WireProtocolTests {
         }
     }
 
-    @Test("cinemaMatch payload without enTime fails to decode")
-    func cinemaMatchMissingEnTime() throws {
-        let payload = #"{"kind": "cinemaMatch", "sessionID": "AA00BB00-CC00-DD00-EE00-FF0000000001"}"#
+    @Test("requestCueChunk payload without index fails to decode")
+    func requestCueChunkMissingIndex() throws {
+        let payload = #"{"kind": "requestCueChunk", "sessionID": "AA00BB00-CC00-DD00-EE00-FF0000000001", "revision": 1}"#
             .data(using: .utf8)!
         let plist: [String: Any] = [
             WirePayloadKey.kind: WirePayloadKind.command.rawValue,
@@ -69,34 +61,6 @@ struct WireProtocolTests {
         #expect(throws: DecodingError.self) {
             _ = try WatchCommand(propertyList: plist)
         }
-    }
-
-    @Test("cinemaMatch payload without sessionID fails to decode")
-    func cinemaMatchMissingSessionID() throws {
-        let payload = #"{"kind": "cinemaMatch", "enTime": 12.5}"#.data(using: .utf8)!
-        let plist: [String: Any] = [
-            WirePayloadKey.kind: WirePayloadKind.command.rawValue,
-            WirePayloadKey.payload: payload,
-        ]
-        #expect(throws: DecodingError.self) {
-            _ = try WatchCommand(propertyList: plist)
-        }
-    }
-
-    @Test("cinemaMatch payload without a stamp decodes with a nil stamp")
-    func cinemaMatchMissingStampDecodesNil() throws {
-        let payload = #"{"kind": "cinemaMatch", "sessionID": "AA00BB00-CC00-DD00-EE00-FF0000000001", "enTime": 12.5}"#
-            .data(using: .utf8)!
-        let plist: [String: Any] = [
-            WirePayloadKey.kind: WirePayloadKind.command.rawValue,
-            WirePayloadKey.payload: payload,
-        ]
-        let decoded = try WatchCommand(propertyList: plist)
-        #expect(decoded == .cinemaMatch(
-            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000001")!,
-            stamp: nil,
-            enTime: 12.5
-        ))
     }
 
     @Test("WatchCommand rejects missing payload")
@@ -230,24 +194,6 @@ struct WireProtocolTests {
         #expect(decoded.activeTrackID == trackB.id)
     }
 
-    @Test("SessionMetadata round-trips catalogStamp")
-    func sessionMetadataRoundTripWithCatalogStamp() throws {
-        let meta = SessionMetadata(
-            sessionID: UUID(),
-            revision: 2,
-            title: "Dune",
-            duration: 9000.0,
-            cueCount: 900,
-            isPlaying: false,
-            currentTime: 12.5,
-            catalogStamp: "film.shazamcatalog:1024:1700000000000"
-        )
-        let plist = try meta.toPropertyList()
-        let decoded = try SessionMetadata(propertyList: plist)
-        #expect(decoded == meta)
-        #expect(decoded.catalogStamp == "film.shazamcatalog:1024:1700000000000")
-    }
-
     @Test("SessionMetadata decodes legacy payload without tracks fields")
     func sessionMetadataLegacyDecode() throws {
         let legacyJSON = """
@@ -268,7 +214,6 @@ struct WireProtocolTests {
         let decoded = try SessionMetadata(propertyList: plist)
         #expect(decoded.tracks.isEmpty)
         #expect(decoded.activeTrackID == nil)
-        #expect(decoded.catalogStamp == nil)
     }
 
     @Test("CueBundle round-trips via compression")
@@ -301,6 +246,57 @@ struct WireProtocolTests {
         let raw = try JSONEncoder().encode(bundle)
         let compressed = try bundle.compressed()
         #expect(compressed.count < raw.count)
+    }
+
+    @Test("CueChunkReply round-trips via property list with raw Data")
+    func cueChunkReplyRoundTrip() throws {
+        let reply = CueChunkReply(
+            sessionID: UUID(uuidString: "AA00BB00-CC00-DD00-EE00-FF0000000010")!,
+            revision: 9,
+            index: 2,
+            totalChunks: 5,
+            data: Data((0..<1000).map { UInt8($0 % 256) })
+        )
+        let decoded = try CueChunkReply(propertyList: reply.toPropertyList())
+        #expect(decoded == reply)
+    }
+
+    @Test("CueChunkReply payload carries Data without base64 inflation")
+    func cueChunkReplyDataIsRaw() throws {
+        let raw = Data((0..<4096).map { UInt8($0 % 256) })
+        let reply = CueChunkReply(sessionID: UUID(), revision: 1, index: 0, totalChunks: 1, data: raw)
+        let stored = try #require(reply.toPropertyList()[CueChunkKey.data] as? Data)
+        #expect(stored.count == raw.count)
+    }
+
+    @Test("CueChunkReply rejects wrong kind discriminator")
+    func cueChunkReplyKindMismatch() throws {
+        let snapshot = PlaybackSnapshot(
+            sessionID: UUID(),
+            revision: 1,
+            currentTime: 0,
+            duration: 1,
+            currentIndex: 0,
+            isPlaying: false,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        #expect(throws: WireCodingError.self) {
+            _ = try CueChunkReply(propertyList: try snapshot.toPropertyList())
+        }
+    }
+
+    @Test("CueChunkReply rejects a payload missing the data field")
+    func cueChunkReplyMissingData() throws {
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.cueChunk.rawValue,
+            CueChunkKey.sessionID: UUID().uuidString,
+            CueChunkKey.revision: 1,
+            CueChunkKey.index: 0,
+            CueChunkKey.totalChunks: 1,
+        ]
+        #expect(throws: WireCodingError.self) {
+            _ = try CueChunkReply(propertyList: plist)
+        }
     }
 
     @Test("PlaybackSnapshot payload is property-list safe")

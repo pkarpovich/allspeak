@@ -399,35 +399,6 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.coordinator.catalogURL == nil)
     }
 
-    @Test("catalogStamp distinguishes same-size same-mtime files by content and is stable for identical bytes")
-    func catalogStampHashesContent() async throws {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("allspeak-stamp-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let url = dir.appendingPathComponent("film.shazamcatalog")
-        let mtime = Date(timeIntervalSince1970: 1_700_000_000)
-        try Data([0x01, 0x02, 0x03]).write(to: url)
-        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
-        let first = try #require(await PlaybackCoordinator.catalogStamp(forCatalogAt: url))
-        #expect(first.hasPrefix("film.shazamcatalog:"))
-
-        try Data([0x03, 0x02, 0x01]).write(to: url)
-        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
-        let second = await PlaybackCoordinator.catalogStamp(forCatalogAt: url)
-        #expect(second != first)
-
-        try Data([0x01, 0x02, 0x03]).write(to: url)
-        let third = await PlaybackCoordinator.catalogStamp(forCatalogAt: url)
-        #expect(third == first)
-
-        let missing = await PlaybackCoordinator.catalogStamp(
-            forCatalogAt: dir.appendingPathComponent("absent.shazamcatalog")
-        )
-        #expect(missing == nil)
-    }
-
     private struct DTWMapFixture {
         let coordinator: PlaybackCoordinator
         let storage: DocumentsStorage
@@ -465,8 +436,8 @@ struct PlaybackCoordinatorTests {
             dtwMapName = url.lastPathComponent
         }
 
-        // applyCinemaMatch requires a matching non-nil catalog stamp, so the
-        // fixture always carries a catalog regardless of the DTW map.
+        // The fixture always carries a catalog so catalogURL resolution is
+        // covered regardless of the DTW map.
         let catalogSrc = srcDir.appendingPathComponent("film.shazamcatalog")
         try Data([0x01, 0x02, 0x03]).write(to: catalogSrc)
 
@@ -542,25 +513,20 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.coordinator.dtwMapping == nil)
     }
 
-    private static func withLatencyCompensation(_ value: Double, _ body: () -> Void) {
-        let defaults = UserDefaults.standard
-        let key = CinemaSyncService.latencyCompensationDefaultsKey
-        let previous = defaults.object(forKey: key)
-        defaults.set(value, forKey: key)
-        defer {
-            if let previous {
-                defaults.set(previous, forKey: key)
-            } else {
-                defaults.removeObject(forKey: key)
-            }
-        }
-        body()
-    }
-
     private static func makeLatencyDefaults(_ value: Double) throws -> UserDefaults {
         let defaults = try #require(UserDefaults(suiteName: "PlaybackCoordinatorTests.\(UUID().uuidString)"))
         defaults.set(value, forKey: CinemaSyncService.latencyCompensationDefaultsKey)
         return defaults
+    }
+
+    // Sets a cinema anchor through the phone sync path (the only sync that
+    // remains) exactly as a ShazamKit match would: latency-compensate the raw
+    // EN, DTW-map to RU, seek there, and anchor at the compensated EN.
+    @MainActor
+    private static func anchorViaSync(_ coordinator: PlaybackCoordinator, enTime: Double, latency: Double) {
+        let enOffset = enTime + latency
+        let ruOffset = coordinator.dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
+        coordinator.applySyncOffset(ruOffset, enTime: enOffset, latencyComp: latency)
     }
 
     @Test("dead-reckon seeks to the projected DTW position from a sync anchor")
@@ -572,12 +538,7 @@ struct PlaybackCoordinatorTests {
         }
         let controller = try #require(fixture.coordinator.controller)
 
-        fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 1.0,
-            defaults: try Self.makeLatencyDefaults(0.0)
-        )
+        Self.anchorViaSync(fixture.coordinator, enTime: 1.0, latency: 0.0)
 
         let applied = fixture.coordinator.applyDeadReckonSeek(
             sessionID: fixture.sessionUUID,
@@ -647,177 +608,6 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.coordinator.applyDeadReckonSeek(sessionID: UUID()) == false)
     }
 
-    @Test("applyCinemaMatch seeks to the DTW-mapped RU time")
-    func applyCinemaMatchMapsThroughDTW() async throws {
-        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-
-        fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 4.0,
-            defaults: try Self.makeLatencyDefaults(0.0)
-        )
-
-        #expect(abs(controller.currentTime - 2.0) < 0.05)
-    }
-
-    @Test("applyCinemaMatch adds the stored latency compensation before DTW mapping")
-    func applyCinemaMatchAppliesLatencyCompensation() async throws {
-        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-
-        fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 2.0,
-            defaults: try Self.makeLatencyDefaults(2.0)
-        )
-
-        #expect(abs(controller.currentTime - 2.0) < 0.05)
-    }
-
-    @Test("applyCinemaMatch without a DTW mapping falls back to the EN offset")
-    func applyCinemaMatchIdentityFallback() async throws {
-        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: false)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-
-        fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 1.0,
-            defaults: try Self.makeLatencyDefaults(1.5)
-        )
-
-        #expect(abs(controller.currentTime - 2.5) < 0.05)
-    }
-
-    @Test("applyCinemaMatch for a different session does not seek")
-    func applyCinemaMatchIgnoresOtherSession() async throws {
-        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: false)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-
-        fixture.coordinator.applyCinemaMatch(
-            sessionID: UUID(),
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 3.0,
-            defaults: try Self.makeLatencyDefaults(0.0)
-        )
-
-        #expect(abs(controller.currentTime - 0.0) < 0.05)
-    }
-
-    @Test("applyCinemaMatch with no active session is a no-op")
-    func applyCinemaMatchIdleIsNoOp() throws {
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
-
-        coordinator.applyCinemaMatch(
-            sessionID: UUID(),
-            stamp: nil,
-            enTime: 123.0,
-            defaults: try Self.makeLatencyDefaults(0.0)
-        )
-
-        #expect(coordinator.controller == nil)
-    }
-
-    @Test("cinemaMatch command routes to applyCinemaMatch")
-    func cinemaMatchCommandSeeksController() async throws {
-        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-        let stamp = try #require(fixture.coordinator.catalogStamp)
-
-        Self.withLatencyCompensation(0.5) {
-            fixture.coordinator.apply(.cinemaMatch(sessionID: fixture.sessionUUID, stamp: stamp, enTime: 2.0))
-        }
-
-        #expect(abs(controller.currentTime - 2.5) < 0.05)
-    }
-
-    @Test("applyCinemaMatch with a stale catalog stamp does not seek")
-    func applyCinemaMatchRejectsStaleStamp() async throws {
-        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-        #expect(fixture.coordinator.catalogStamp != nil)
-
-        let applied = fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: "film.shazamcatalog:replaced",
-            enTime: 2.0,
-            defaults: try Self.makeLatencyDefaults(0.0)
-        )
-
-        #expect(applied == false)
-        #expect(abs(controller.currentTime - 0.0) < 0.05)
-    }
-
-    @Test("applyCinemaMatch rejects an unstamped match even when the session has no catalog")
-    func applyCinemaMatchRejectsNilStamps() async throws {
-        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: false)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-        #expect(fixture.coordinator.catalogStamp == nil)
-
-        let applied = fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: nil,
-            enTime: 2.0,
-            defaults: try Self.makeLatencyDefaults(0.0)
-        )
-
-        #expect(applied == false)
-        #expect(abs(controller.currentTime - 0.0) < 0.05)
-    }
-
-    @Test("applyCinemaMatch with the matching catalog stamp seeks")
-    func applyCinemaMatchAcceptsMatchingStamp() async throws {
-        let fixture = try await Self.makeCatalogSessionFixture(withCatalog: true)
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let controller = try #require(fixture.coordinator.controller)
-        let stamp = try #require(fixture.coordinator.catalogStamp)
-
-        let applied = fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: stamp,
-            enTime: 2.0,
-            defaults: try Self.makeLatencyDefaults(0.0)
-        )
-
-        #expect(applied == true)
-        #expect(abs(controller.currentTime - 2.0) < 0.05)
-    }
-
     @Test("a superseded startSession resuming from its loads cannot clobber the newer session")
     func rapidStartSessionNewerCallWins() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -868,10 +658,7 @@ struct PlaybackCoordinatorTests {
 
         #expect(coordinator.sessionUUID == bUUID)
         #expect(coordinator.sessionTitle == "B")
-        let expectedStamp = await PlaybackCoordinator.catalogStamp(
-            forCatalogAt: storage.catalogURL(sessionID: bUUID, filename: "B.shazamcatalog")
-        )
-        #expect(coordinator.catalogStamp == (try #require(expectedStamp)))
+        #expect(coordinator.catalogURL == storage.catalogURL(sessionID: bUUID, filename: "B.shazamcatalog"))
     }
 
     @Test("applySyncOffset seeks to the DTW-mapped ruOffset, not the raw enOffset")
@@ -969,12 +756,7 @@ struct PlaybackCoordinatorTests {
 
         #expect(fixture.coordinator.currentSnapshot().drift == nil)
 
-        let matched = fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 2.0
-        )
-        #expect(matched)
+        Self.anchorViaSync(fixture.coordinator, enTime: 2.0, latency: 0.9)
 
         // The match latency-compensates EN 2 -> 2.9 (0.9 latency) and seeks the
         // dub to the DTW-mapped RU (2.9 -> 1.45); currentSnapshot() re-projects
@@ -1032,12 +814,7 @@ struct PlaybackCoordinatorTests {
         // playhead there, already 0.9s ahead of the true cinema. Because that
         // anchor carries the latency, each dead-reckon's projection IS the
         // latency-compensated target - resyncs must NOT re-add 0.9 every tap.
-        fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 0.2,
-            defaults: try Self.makeLatencyDefaults(0.9)
-        )
+        Self.anchorViaSync(fixture.coordinator, enTime: 0.2, latency: 0.9)
 
         // Two resyncs spanning 1.0s of wall time. Correct playhead after both:
         // ruTime(EN 1.1 + 1.0) = ruTime(2.1) = 1.05 on the 0.5-slope map. The
@@ -1074,12 +851,7 @@ struct PlaybackCoordinatorTests {
         // because the dub kept landing ahead (the Settings footer tells them to).
         // The next dead-reckon must honor the new 0.2s: strip the baked-in 0.9
         // and re-add 0.2, not keep projecting the stale 0.9.
-        fixture.coordinator.applyCinemaMatch(
-            sessionID: fixture.sessionUUID,
-            stamp: try #require(fixture.coordinator.catalogStamp),
-            enTime: 0.2,
-            defaults: try Self.makeLatencyDefaults(0.9)
-        )
+        Self.anchorViaSync(fixture.coordinator, enTime: 0.2, latency: 0.9)
 
         // 1.0s later: true cinema EN = (1.1 - 0.9) + 1.0 = 1.2; + the new 0.2
         // delay = EN 1.4 -> RU 0.7 on the 0.5-slope map. The stale-latency bug
@@ -1428,90 +1200,6 @@ struct PlaybackCoordinatorTests {
 
         try coordinator.startSession(sessionUUID: UUID(), title: "Quick", audio: audio, subtitles: Self.cues)
         coordinator.applySyncOffset(2.5, enTime: 3.4, latencyComp: 0.9, absStart: 100, listenSeconds: 2.0)
-
-        let url = try #require(log.currentFileURL)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
-    }
-
-    @Test("applyCinemaMatch logs a matched watch sync record with the player position and delta")
-    func applyCinemaMatchLogsWatchSyncRecord() async throws {
-        let imported = try await Self.importSession(withCatalog: true)
-        defer { try? FileManager.default.removeItem(at: imported.root) }
-        let (log, diagRoot) = Self.makeTempDiagnostics()
-        defer { try? FileManager.default.removeItem(at: diagRoot) }
-
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
-        coordinator.diagnostics = log
-        defer {
-            coordinator.endSession()
-            coordinator.diagnostics = .shared
-        }
-
-        try await coordinator.startSession(
-            sessionID: imported.sessionID,
-            repository: imported.repo,
-            persistence: imported.persistence,
-            storage: imported.storage
-        )
-        let controller = try #require(coordinator.controller)
-        controller.seek(to: 1.0)
-        let uuid = try #require(coordinator.sessionUUID)
-        let stamp = try #require(coordinator.catalogStamp)
-
-        let applied = coordinator.applyCinemaMatch(
-            sessionID: uuid,
-            stamp: stamp,
-            enTime: 3.0,
-            defaults: try Self.makeLatencyDefaults(0.5)
-        )
-        #expect(applied)
-
-        let url = try #require(log.currentFileURL)
-        let record = try #require(Self.readJSONLines(url).last)
-        #expect(record["event"] as? String == "sync")
-        #expect(record["source"] as? String == "watch")
-        #expect(record["result"] as? String == "matched")
-        // no DTW map -> identity mapping; enOffset = 3.0 + latencyComp 0.5
-        #expect(record["enTime"] as? Double == 3.5)
-        #expect(record["ruTime"] as? Double == 3.5)
-        #expect(record["playerBefore"] as? Double == 1.0)
-        #expect(record["delta"] as? Double == 2.5)
-        #expect(record["latencyComp"] as? Double == 0.5)
-        #expect(record["absStart"] == nil)
-        #expect(record["listenSeconds"] == nil)
-    }
-
-    @Test("a rejected watch match writes no sync record")
-    func applyCinemaMatchRejectedLogsNothing() async throws {
-        let imported = try await Self.importSession(withCatalog: true)
-        defer { try? FileManager.default.removeItem(at: imported.root) }
-        let (log, diagRoot) = Self.makeTempDiagnostics()
-        defer { try? FileManager.default.removeItem(at: diagRoot) }
-
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
-        coordinator.diagnostics = log
-        defer {
-            coordinator.endSession()
-            coordinator.diagnostics = .shared
-        }
-
-        try await coordinator.startSession(
-            sessionID: imported.sessionID,
-            repository: imported.repo,
-            persistence: imported.persistence,
-            storage: imported.storage
-        )
-        let uuid = try #require(coordinator.sessionUUID)
-
-        let applied = coordinator.applyCinemaMatch(
-            sessionID: uuid,
-            stamp: "film.shazamcatalog:replaced",
-            enTime: 3.0,
-            defaults: try Self.makeLatencyDefaults(0.5)
-        )
-        #expect(applied == false)
 
         let url = try #require(log.currentFileURL)
         #expect(!FileManager.default.fileExists(atPath: url.path))

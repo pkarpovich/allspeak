@@ -21,19 +21,14 @@ import Foundation
 //   .setVolume(Float)                 watch Digital Crown -> AVAudioPlayer
 //                                     volume (0...1, clamped); throttled
 //                                     trailing-edge on the watch side
-//   .requestCueBundle(sessionID:,     watch-initiated resync after a cache
-//                     revision:)      miss (watch app reset / Application
-//                                     Support cleanup); host clears its
-//                                     dedup key and rebroadcasts the bundle
-//   .requestCatalog(sessionID:,       watch-initiated catalog resend when a
-//                   stamp:)           context announces a stamp the watch has
-//                                     neither active nor staged (watch-side
-//                                     persistence failed or the file was
-//                                     lost; WCSession reports success once
-//                                     delivered, so the phone would never
-//                                     resend on its own); host clears its
-//                                     dedup key unless that transfer is
-//                                     still in flight, then rebroadcasts
+//   .requestCueChunk(sessionID:,      watch-initiated pull of one slice of the
+//                    revision:,       gzipped cue bundle (see the CueBundle
+//                    index:)          transport note below). The watch loops
+//                                     index 0..<totalChunks; the host replies
+//                                     with a CueChunkReply instead of a
+//                                     PlaybackSnapshot. A cache miss on the
+//                                     watch (app reset / Application Support
+//                                     cleanup) or a revision bump re-pulls.
 //   .deadReckonSeek(sessionID:)       mic-free resync from the stored anchor:
 //                                     the phone projects the cinema's current
 //                                     EN position from the last alignment
@@ -43,18 +38,6 @@ import Foundation
 //                                     snapshot when it cannot seek (no anchor
 //                                     yet, no session, or another session) so
 //                                     the wrist feels failure.
-//   .cinemaMatch(sessionID:stamp:     watch-local ShazamKit match result:
-//                enTime:)             absolute English timecode in seconds
-//                                     (abs_start + predicted offset); host
-//                                     adds latency compensation, DTW-maps
-//                                     EN -> RU, then seeks. sessionID guards
-//                                     against a stale match seeking a
-//                                     different session; stamp is the catalog
-//                                     stamp the watch matched against, so a
-//                                     match made just before the phone
-//                                     replaced or cleared the catalog is
-//                                     rejected instead of seeking on offsets
-//                                     from the old catalog
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -70,10 +53,14 @@ import Foundation
 //       Rebroadcast on every switchTrack so the watch checkmark stays in
 //       sync with the iPhone-side selection.
 //
-//   iPhone --transferFile---------------> Watch   CueBundle (gzipped JSON)
-//       large payload (20-80KB compressed); queued by the OS, survives
-//       reachability flaps; receiver decompresses + caches under
-//       Application Support so a watch restart does not re-trigger transfer.
+//   Watch  <--sendMessage (reply)------- iPhone  CueBundle (gzipped, chunked)
+//       the watch PULLS the bundle: it sends requestCueChunk(index:) and the
+//       phone replies with a CueChunkReply slice (~30KB raw Data, under the
+//       64KB sendMessage cap). The watch concatenates 0..<totalChunks, runs
+//       CueBundle(compressed:), and caches the result under Application
+//       Support so a watch restart does not re-pull. sendMessage is the only
+//       channel that works in BOTH the Simulator and on device; transferFile
+//       is unreliable in the Simulator and stalls in the device FIFO queue.
 //       Tracks are NOT in the bundle — switching tracks does not invalidate
 //       the cue cache (subtitle timeline is shared across all tracks).
 //
@@ -82,9 +69,9 @@ import Foundation
 //       when watch is asleep or out of range
 //
 //   Watch  --sendMessage (with reply)---> iPhone  WatchCommand
-//       reply payload is a PlaybackSnapshot so the watch's lastSnapshot
-//       stays fresh after every user action; this is the only path that
-//       wakes the iOS app from background
+//       reply payload is a PlaybackSnapshot (or a CueChunkReply for
+//       requestCueChunk) so the watch stays fresh after every user action;
+//       this is the only path that wakes the iOS app from background
 //
 // Wrapper dictionary shape (see WirePayloadKey / WirePayloadKind):
 //
@@ -93,8 +80,8 @@ import Foundation
 // The JSON-inside-Data wrapper exists because WCSession dictionaries are
 // property-list-only (no nested Codable), and a single discriminator key
 // lets the receiver route to the correct decoder without sniffing fields.
-// CueBundle does not use this wrapper — it travels as a file URL produced
-// by `compressed()` (zlib) and is reconstructed with `init(compressed:)`.
+// CueChunkReply does not use this wrapper — it is a flat property-list dict
+// carrying the raw gzipped slice as `Data` (no base64 inflation).
 //
 // Adding a new command:
 //   1. Add a case to `WatchCommand` + its `Kind` discriminator.
@@ -114,9 +101,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case seek(time: Double)
     case switchTrack(id: UUID)
     case setVolume(Float)
-    case requestCueBundle(sessionID: UUID, revision: Int)
-    case requestCatalog(sessionID: UUID, stamp: String)
-    case cinemaMatch(sessionID: UUID, stamp: String?, enTime: Double)
+    case requestCueChunk(sessionID: UUID, revision: Int, index: Int)
     case deadReckonSeek(sessionID: UUID)
 
     private enum CodingKeys: String, CodingKey {
@@ -127,8 +112,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case volume
         case sessionID
         case revision
-        case stamp
-        case enTime
+        case index
     }
 
     private enum Kind: String, Codable {
@@ -139,9 +123,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case seek
         case switchTrack
         case setVolume
-        case requestCueBundle
-        case requestCatalog
-        case cinemaMatch
+        case requestCueChunk
         case deadReckonSeek
     }
 
@@ -166,19 +148,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .setVolume(let volume):
             try container.encode(Kind.setVolume, forKey: .kind)
             try container.encode(volume, forKey: .volume)
-        case .requestCueBundle(let sessionID, let revision):
-            try container.encode(Kind.requestCueBundle, forKey: .kind)
+        case .requestCueChunk(let sessionID, let revision, let index):
+            try container.encode(Kind.requestCueChunk, forKey: .kind)
             try container.encode(sessionID, forKey: .sessionID)
             try container.encode(revision, forKey: .revision)
-        case .requestCatalog(let sessionID, let stamp):
-            try container.encode(Kind.requestCatalog, forKey: .kind)
-            try container.encode(sessionID, forKey: .sessionID)
-            try container.encode(stamp, forKey: .stamp)
-        case .cinemaMatch(let sessionID, let stamp, let enTime):
-            try container.encode(Kind.cinemaMatch, forKey: .kind)
-            try container.encode(sessionID, forKey: .sessionID)
-            try container.encodeIfPresent(stamp, forKey: .stamp)
-            try container.encode(enTime, forKey: .enTime)
+            try container.encode(index, forKey: .index)
         case .deadReckonSeek(let sessionID):
             try container.encode(Kind.deadReckonSeek, forKey: .kind)
             try container.encode(sessionID, forKey: .sessionID)
@@ -203,21 +177,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .switchTrack(id: try container.decode(UUID.self, forKey: .trackID))
         case .setVolume:
             self = .setVolume(try container.decode(Float.self, forKey: .volume))
-        case .requestCueBundle:
-            self = .requestCueBundle(
+        case .requestCueChunk:
+            self = .requestCueChunk(
                 sessionID: try container.decode(UUID.self, forKey: .sessionID),
-                revision: try container.decode(Int.self, forKey: .revision)
-            )
-        case .requestCatalog:
-            self = .requestCatalog(
-                sessionID: try container.decode(UUID.self, forKey: .sessionID),
-                stamp: try container.decode(String.self, forKey: .stamp)
-            )
-        case .cinemaMatch:
-            self = .cinemaMatch(
-                sessionID: try container.decode(UUID.self, forKey: .sessionID),
-                stamp: try container.decodeIfPresent(String.self, forKey: .stamp),
-                enTime: try container.decode(Double.self, forKey: .enTime)
+                revision: try container.decode(Int.self, forKey: .revision),
+                index: try container.decode(Int.self, forKey: .index)
             )
         case .deadReckonSeek:
             self = .deadReckonSeek(
@@ -242,10 +206,6 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let currentTime: Double
     let tracks: [TrackInfo]
     let activeTrackID: UUID?
-    // Identifies the catalog content (filename + size + mtime). nil = session
-    // has no catalog; the watch deletes its stored copy when the stamp stops
-    // matching, so cleared or same-filename-replaced catalogs cannot go stale.
-    let catalogStamp: String?
 
     init(
         sessionID: UUID,
@@ -256,8 +216,7 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         isPlaying: Bool,
         currentTime: Double,
         tracks: [TrackInfo] = [],
-        activeTrackID: UUID? = nil,
-        catalogStamp: String? = nil
+        activeTrackID: UUID? = nil
     ) {
         self.sessionID = sessionID
         self.revision = revision
@@ -268,12 +227,10 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.currentTime = currentTime
         self.tracks = tracks
         self.activeTrackID = activeTrackID
-        self.catalogStamp = catalogStamp
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID
-        case catalogStamp
     }
 
     init(from decoder: any Decoder) throws {
@@ -287,7 +244,6 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.currentTime = try container.decode(Double.self, forKey: .currentTime)
         self.tracks = try container.decodeIfPresent([TrackInfo].self, forKey: .tracks) ?? []
         self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
-        self.catalogStamp = try container.decodeIfPresent(String.self, forKey: .catalogStamp)
     }
 }
 
@@ -295,6 +251,21 @@ struct CueBundle: Codable, Equatable, Sendable {
     let sessionID: UUID
     let revision: Int
     let cues: [Subtitle]
+}
+
+// One slice of a gzipped CueBundle, sent as the reply to requestCueChunk. The
+// watch pulls index 0..<totalChunks over sendMessage (each a request/reply, so
+// a lost chunk is naturally retried), concatenates the raw slices in order, and
+// reconstructs the bundle with CueBundle(compressed:). transferFile is not used
+// for cues - it is unreliable in the Simulator and stalls in the FIFO queue on
+// device. `data` rides the property list as raw Data (no base64 inflation); the
+// 30KB chunk size keeps each reply well under the 64KB sendMessage cap.
+struct CueChunkReply: Equatable, Sendable {
+    let sessionID: UUID
+    let revision: Int
+    let index: Int
+    let totalChunks: Int
+    let data: Data
 }
 
 enum WirePayloadKey {
@@ -307,6 +278,15 @@ enum WirePayloadKind: String {
     case snapshot
     case metadata
     case sessionEnded
+    case cueChunk
+}
+
+enum CueChunkKey {
+    static let sessionID = "sessionID"
+    static let revision = "revision"
+    static let index = "index"
+    static let totalChunks = "totalChunks"
+    static let data = "data"
 }
 
 enum SessionEndedSignal {
@@ -413,6 +393,35 @@ extension SessionMetadata {
             throw WireCodingError.missingPayload
         }
         self = try wireJSONDecoder.decode(SessionMetadata.self, from: data)
+    }
+}
+
+extension CueChunkReply {
+    func toPropertyList() -> [String: Any] {
+        [
+            WirePayloadKey.kind: WirePayloadKind.cueChunk.rawValue,
+            CueChunkKey.sessionID: sessionID.uuidString,
+            CueChunkKey.revision: revision,
+            CueChunkKey.index: index,
+            CueChunkKey.totalChunks: totalChunks,
+            CueChunkKey.data: data,
+        ]
+    }
+
+    init(propertyList: [String: Any]) throws {
+        guard (propertyList[WirePayloadKey.kind] as? String) == WirePayloadKind.cueChunk.rawValue else {
+            throw WireCodingError.kindMismatch
+        }
+        guard let sessionIDString = propertyList[CueChunkKey.sessionID] as? String,
+              let sessionID = UUID(uuidString: sessionIDString),
+              let revision = propertyList[CueChunkKey.revision] as? Int,
+              let index = propertyList[CueChunkKey.index] as? Int,
+              let totalChunks = propertyList[CueChunkKey.totalChunks] as? Int,
+              let data = propertyList[CueChunkKey.data] as? Data
+        else {
+            throw WireCodingError.missingPayload
+        }
+        self.init(sessionID: sessionID, revision: revision, index: index, totalChunks: totalChunks, data: data)
     }
 }
 

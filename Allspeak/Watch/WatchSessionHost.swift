@@ -6,12 +6,16 @@ import Foundation
 final class WatchSessionHost: NSObject {
     static let shared = WatchSessionHost()
 
+    // One cue chunk is ~30KB of raw gzipped data; with the small dictionary
+    // overhead it stays well under the 64KB sendMessage payload cap.
+    static let cueChunkSize = 30_000
+
     private let coordinator: PlaybackCoordinator
     private let broadcastGate: SnapshotBroadcastGate
-    var diagnostics: DiagnosticsLog = .shared
     private var session: WCSession?
-    private var lastSentBundleKey: (sessionID: UUID, revision: Int)?
-    private var lastSentCatalogKey: (sessionID: UUID, stamp: String)?
+    // The compressed cue bundle for the session/revision the watch is currently
+    // pulling, cached so repeated chunk requests don't re-gzip the bundle.
+    private var cueChunkCache: (sessionID: UUID, revision: Int, data: Data)?
 
     init(
         coordinator: PlaybackCoordinator = .shared,
@@ -43,97 +47,15 @@ final class WatchSessionHost: NSObject {
             sendContext: { [weak self] payload in
                 guard let session = self?.session, session.activationState == .activated else { return }
                 try? session.updateApplicationContext(payload)
-            },
-            sendFile: { [weak self] bundle in
-                self?.sendCueBundle(bundle) ?? false
             }
         )
     }
 
-    func broadcastCurrentSession(
-        sendContext: ([String: Any]) -> Void,
-        sendFile: ((CueBundle) -> Bool)? = nil
-    ) {
+    func broadcastCurrentSession(sendContext: ([String: Any]) -> Void) {
         if let metadata = coordinator.currentMetadata(),
            let payload = try? metadata.toPropertyList() {
             sendContext(payload)
         }
-        if let bundle = coordinator.currentCueBundle(), let sendFile {
-            let key = (bundle.sessionID, bundle.revision)
-            if lastSentBundleKey?.sessionID != key.0 || lastSentBundleKey?.revision != key.1 {
-                if sendFile(bundle) {
-                    lastSentBundleKey = key
-                }
-            }
-        }
-        sendCatalogIfNeeded()
-    }
-
-    func sendCatalogIfNeeded() {
-        guard let session, session.activationState == .activated else { return }
-        let outstanding = session.outstandingFileTransfers.compactMap(\.file.metadata)
-        sendCatalogIfNeeded(outstandingMetadata: outstanding) { url, metadata in
-            session.transferFile(url, metadata: metadata)
-        }
-    }
-
-    func sendCatalogIfNeeded(
-        outstandingMetadata: [[String: Any]],
-        transfer: (URL, [String: Any]) -> Void
-    ) {
-        guard let sessionUUID = coordinator.sessionUUID,
-              let catalogURL = coordinator.catalogURL,
-              let stamp = coordinator.catalogStamp else {
-            // No catalog means the watch deletes its copy on the cleared
-            // metadata - forget the last send so re-attaching identical
-            // content (same stamp) transfers again.
-            lastSentCatalogKey = nil
-            return
-        }
-        if lastSentCatalogKey?.sessionID == sessionUUID, lastSentCatalogKey?.stamp == stamp {
-            return
-        }
-        if Self.hasOutstandingCatalogTransfer(
-            in: outstandingMetadata,
-            sessionID: sessionUUID,
-            stamp: stamp
-        ) {
-            return
-        }
-        transfer(catalogURL, Self.catalogTransferMetadata(sessionID: sessionUUID, stamp: stamp))
-        lastSentCatalogKey = (sessionUUID, stamp)
-    }
-
-    nonisolated static func catalogTransferMetadata(sessionID: UUID, stamp: String) -> [String: Any] {
-        [
-            "kind": "catalog",
-            "sessionID": sessionID.uuidString,
-            "stamp": stamp,
-        ]
-    }
-
-    nonisolated static func cueBundleTransferMetadata(sessionID: UUID, revision: Int) -> [String: Any] {
-        [
-            "kind": "cuebundle",
-            "sessionID": sessionID.uuidString,
-            "revision": revision,
-        ]
-    }
-
-    nonisolated static func hasOutstandingCatalogTransfer(
-        in outstanding: [[String: Any]],
-        sessionID: UUID,
-        stamp: String
-    ) -> Bool {
-        outstanding.contains { metadata in
-            metadata["kind"] as? String == "catalog"
-                && metadata["sessionID"] as? String == sessionID.uuidString
-                && metadata["stamp"] as? String == stamp
-        }
-    }
-
-    nonisolated static func isCatalogTransfer(metadata: [String: Any]?) -> Bool {
-        metadata?["kind"] as? String == "catalog"
     }
 
     func broadcast(metadata: SessionMetadata) {
@@ -143,133 +65,53 @@ final class WatchSessionHost: NSObject {
     }
 
     func broadcastSessionEnded() {
-        lastSentBundleKey = nil
-        lastSentCatalogKey = nil
+        cueChunkCache = nil
         guard let session, session.activationState == .activated else { return }
         try? session.updateApplicationContext(SessionEndedSignal.propertyList())
     }
 
-    @discardableResult
-    func sendCueBundle(_ bundle: CueBundle) -> Bool {
-        guard let session, session.activationState == .activated else { return false }
-        guard let data = try? bundle.compressed() else { return false }
-        let unique = UUID().uuidString.prefix(8)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "cuebundle-\(bundle.sessionID.uuidString)-\(bundle.revision)-\(unique).gz"
-        )
-        do {
-            try data.write(to: url, options: .atomic)
-        } catch {
-            return false
+    // Returns the requested slice of the current session's gzipped cue bundle,
+    // or nil when the request does not match the active session/revision (the
+    // watch treats an empty reply as a failure and retries).
+    func cueChunk(sessionID: UUID, revision: Int, index: Int) -> CueChunkReply? {
+        let compressed: Data
+        if let cached = cueChunkCache, cached.sessionID == sessionID, cached.revision == revision {
+            compressed = cached.data
+        } else {
+            guard let bundle = coordinator.currentCueBundle(),
+                  bundle.sessionID == sessionID,
+                  bundle.revision == revision,
+                  let data = try? bundle.compressed() else { return nil }
+            compressed = data
+            cueChunkCache = (sessionID, revision, data)
         }
-        session.transferFile(
-            url,
-            metadata: Self.cueBundleTransferMetadata(sessionID: bundle.sessionID, revision: bundle.revision)
-        )
-        return true
-    }
-
-    func handleFileTransferFailure(metadata fileMetadata: [String: Any]?) {
-        guard let fileMetadata else { return }
-        if Self.isCatalogTransfer(metadata: fileMetadata) {
-            guard
-                let sessionIDString = fileMetadata["sessionID"] as? String,
-                let sessionID = UUID(uuidString: sessionIDString),
-                let stamp = fileMetadata["stamp"] as? String,
-                let cached = lastSentCatalogKey,
-                cached.sessionID == sessionID,
-                cached.stamp == stamp
-            else { return }
-            lastSentCatalogKey = nil
-            return
-        }
-        guard
-            let sessionIDString = fileMetadata["sessionID"] as? String,
-            let sessionID = UUID(uuidString: sessionIDString),
-            let revision = fileMetadata["revision"] as? Int,
-            let cached = lastSentBundleKey,
-            cached.sessionID == sessionID,
-            cached.revision == revision
-        else { return }
-        lastSentBundleKey = nil
+        let size = Self.cueChunkSize
+        let total = max(1, (compressed.count + size - 1) / size)
+        guard index >= 0, index < total else { return nil }
+        let start = index * size
+        let end = Swift.min(start + size, compressed.count)
+        let slice = compressed.subdata(in: start..<end)
+        return CueChunkReply(sessionID: sessionID, revision: revision, index: index, totalChunks: total, data: slice)
     }
 
     func dispatch(_ command: WatchCommand) async -> PlaybackSnapshot {
         switch command {
         case .switchTrack(let id):
             try? await coordinator.switchTrack(to: id)
-        case .requestCueBundle(let sessionID, let revision):
-            handleCueBundleRequest(sessionID: sessionID, revision: revision)
-        case .requestCatalog(let sessionID, let stamp):
-            handleCatalogRequest(sessionID: sessionID, stamp: stamp)
-        case .cinemaMatch(let sessionID, let stamp, let enTime):
-            // A rejected match (session or catalog stamp moved on mid-listen)
-            // must reply with the empty snapshot: a current-session snapshot
-            // would read as success on the wrist even though nothing seeked.
-            guard coordinator.applyCinemaMatch(sessionID: sessionID, stamp: stamp, enTime: enTime) else {
-                return .empty
-            }
         case .deadReckonSeek(let sessionID):
-            // Same empty-snapshot contract: no anchor yet (or another session)
-            // means nothing seeked, and the wrist must feel failure.
+            // Empty-snapshot contract: no anchor yet (or another session) means
+            // nothing seeked, and the wrist must feel failure.
             guard coordinator.applyDeadReckonSeek(sessionID: sessionID) else {
                 return .empty
             }
+        case .requestCueChunk:
+            // Served directly in didReceiveMessage with a CueChunkReply; never
+            // routed here.
+            break
         default:
             coordinator.apply(command)
         }
         return coordinator.currentSnapshot()
-    }
-
-    // Watch attempt reports arrive over transferUserInfo. A successful match
-    // also produces a phone-side `sync` event (from applyCinemaMatch); the two
-    // are joined by timestamp during analysis. Malformed payloads are ignored.
-    func handleReceivedUserInfo(_ userInfo: [String: Any]) {
-        guard userInfo["kind"] as? String == "syncAttempt" else { return }
-        guard let resultRaw = userInfo["result"] as? String,
-              let result = DiagnosticsEvent.MatchResult(rawValue: resultRaw),
-              let listenSeconds = userInfo["listenSeconds"] as? Double else { return }
-        // Queued delivery can land a report after the phone has moved on to a
-        // different screening. Drop it rather than writing one film's attempt
-        // into another film's log. Reports without a sessionID (older watch
-        // builds) stay backward-compatible and are logged against the active log.
-        if let reportedID = userInfo["sessionID"] as? String,
-           let current = coordinator.sessionUUID,
-           reportedID != current.uuidString {
-            return
-        }
-        diagnostics.log(.watchAttempt(result: result, listenSeconds: listenSeconds))
-    }
-
-    func handleCueBundleRequest(sessionID: UUID, revision: Int) {
-        if let cached = lastSentBundleKey,
-           cached.sessionID == sessionID,
-           cached.revision == revision {
-            lastSentBundleKey = nil
-        }
-        broadcastCurrentSession()
-    }
-
-    // The watch has no usable copy of the announced catalog (persisting it
-    // failed after WCSession already reported the transfer delivered). Clear
-    // the dedup key so the rebroadcast resends - unless that transfer is
-    // still in flight, in which case the OS will deliver it anyway.
-    func handleCatalogRequest(sessionID: UUID, stamp: String) {
-        let outstanding = session?.outstandingFileTransfers.compactMap(\.file.metadata) ?? []
-        handleCatalogRequest(sessionID: sessionID, stamp: stamp, outstandingMetadata: outstanding)
-        broadcastCurrentSession()
-    }
-
-    func handleCatalogRequest(sessionID: UUID, stamp: String, outstandingMetadata: [[String: Any]]) {
-        guard !Self.hasOutstandingCatalogTransfer(
-            in: outstandingMetadata,
-            sessionID: sessionID,
-            stamp: stamp
-        ) else { return }
-        guard let cached = lastSentCatalogKey,
-              cached.sessionID == sessionID,
-              cached.stamp == stamp else { return }
-        lastSentCatalogKey = nil
     }
 
     func broadcastSnapshot() {
@@ -316,18 +158,6 @@ final class WatchSessionHost: NSObject {
 }
 
 extension WatchSessionHost: WCSessionDelegate {
-    nonisolated func session(_: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
-        if !Self.isCatalogTransfer(metadata: fileTransfer.file.metadata) {
-            try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
-        }
-        guard error != nil else { return }
-        let meta = SendablePayload(value: fileTransfer.file.metadata)
-        Task { @MainActor in
-            self.handleFileTransferFailure(metadata: meta.value)
-            self.broadcastCurrentSession()
-        }
-    }
-
     nonisolated func session(
         _: WCSession,
         activationDidCompleteWith state: WCSessionActivationState,
@@ -341,19 +171,10 @@ extension WatchSessionHost: WCSessionDelegate {
 
     nonisolated func sessionDidBecomeInactive(_: WCSession) {}
 
-    // A deactivate means the user switched to another paired watch — the new
-    // watch has none of our transfers, so the per-activation dedup keys must
-    // reset before the post-reactivation broadcast or it never gets the files.
     nonisolated func sessionDidDeactivate(_: WCSession) {
         Task { @MainActor in
-            self.resetTransferDedupKeys()
             WCSession.default.activate()
         }
-    }
-
-    func resetTransferDedupKeys() {
-        lastSentBundleKey = nil
-        lastSentCatalogKey = nil
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
@@ -365,13 +186,6 @@ extension WatchSessionHost: WCSessionDelegate {
             } else {
                 self.broadcastSessionEnded()
             }
-        }
-    }
-
-    nonisolated func session(_: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
-        let payload = SendablePayload(value: userInfo)
-        Task { @MainActor in
-            self.handleReceivedUserInfo(payload.value ?? [:])
         }
     }
 
@@ -389,6 +203,11 @@ extension WatchSessionHost: WCSessionDelegate {
         }
         let sendableReply = SendablePayloadCallback(invoke: replyHandler)
         Task { @MainActor in
+            if case .requestCueChunk(let sessionID, let revision, let index) = command {
+                let payload = self.cueChunk(sessionID: sessionID, revision: revision, index: index)?.toPropertyList() ?? [:]
+                sendableReply.invoke(payload)
+                return
+            }
             let snapshot = await self.dispatch(command)
             let payload = (try? snapshot.toPropertyList()) ?? [:]
             sendableReply.invoke(payload)
@@ -398,9 +217,5 @@ extension WatchSessionHost: WCSessionDelegate {
 
 private struct SendablePayloadCallback: @unchecked Sendable {
     let invoke: ([String: Any]) -> Void
-}
-
-private struct SendablePayload: @unchecked Sendable {
-    let value: [String: Any]?
 }
 #endif
