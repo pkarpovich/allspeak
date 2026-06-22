@@ -56,8 +56,6 @@ struct TransportView: View {
     @State private var volume: Double = 0.5
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
-    @State private var cinemaSync = WatchCinemaSync(haptics: WatchDeviceHaptics())
-    @State private var syncResetTask: Task<Void, Never>?
     @State private var deadReckon = WatchDeadReckon(haptics: WatchDeviceHaptics())
     @State private var deadReckonResetTask: Task<Void, Never>?
 
@@ -87,25 +85,6 @@ struct TransportView: View {
         .onChange(of: client.lastSnapshot?.volume) { _, reported in
             guard let reported, !isAdjustingVolume else { return }
             volume = Double(reported)
-        }
-        // Manual-only rule: the mic must stop the moment the listen's context
-        // goes away — session switch, catalog removal or replacement (a promoted
-        // staged catalog changes the stamp while availability stays true, and a
-        // match against the old catalog must not reach the phone), or leaving
-        // this screen.
-        .onChange(of: client.metadata?.sessionID) {
-            cinemaSync.cancelListening()
-        }
-        .onChange(of: client.metadata?.catalogStamp) {
-            cinemaSync.cancelListening()
-        }
-        .onChange(of: client.hasCatalogForCurrentSession) { _, hasCatalog in
-            if !hasCatalog {
-                cinemaSync.cancelListening()
-            }
-        }
-        .onDisappear {
-            cinemaSync.cancelListening()
         }
     }
 
@@ -176,31 +155,6 @@ struct TransportView: View {
         .accessibilityLabel(deadReckon.state.buttonAccessibilityLabel)
         .onChange(of: deadReckon.state) { _, newState in
             scheduleDeadReckonReset(for: newState)
-        }
-    }
-
-    // Cinema sync: listens through the watch mic and matches against the
-    // session catalog. Manual only - one listen per tap, tap again to cancel.
-    // Shows a spinner while listening and flashes checkmark/x before settling
-    // back to the idle glyph (see scheduleSyncReset).
-    private var syncButton: some View {
-        Button(action: handleSync) {
-            ZStack {
-                if let glyph = cinemaSync.state.buttonGlyph {
-                    Image(systemName: glyph)
-                        .font(.system(size: 16, weight: .medium))
-                } else {
-                    ProgressView()
-                }
-            }
-            .foregroundStyle(Tokens.text)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .frame(width: 44, height: 44)
-        .accessibilityLabel(cinemaSync.state.buttonAccessibilityLabel)
-        .onChange(of: cinemaSync.state) { _, newState in
-            scheduleSyncReset(for: newState)
         }
     }
 
@@ -382,25 +336,6 @@ struct TransportView: View {
             try? await Task.sleep(for: .seconds(1.5))
             guard !Task.isCancelled else { return }
             deadReckon.reset()
-        }
-    }
-
-    private func handleSync() {
-        guard let metadata = client.metadata,
-              let catalogURL = client.catalogURLForCurrentSession() else {
-            cinemaSync.cancelListening()
-            return
-        }
-        cinemaSync.tap(catalogURL: catalogURL, sessionID: metadata.sessionID, stamp: metadata.catalogStamp)
-    }
-
-    private func scheduleSyncReset(for state: WatchCinemaSyncState) {
-        syncResetTask?.cancel()
-        guard state == .sent || state == .failed else { return }
-        syncResetTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            cinemaSync.reset()
         }
     }
 

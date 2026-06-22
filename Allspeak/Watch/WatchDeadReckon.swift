@@ -4,8 +4,7 @@ import Observation
 // Mic-free resync trigger: asks the phone to project the cinema's current EN
 // position from the last alignment anchor (subtitle tap / ShazamKit sync) and
 // seek the dub there. No listening, instant, works in scenes ShazamKit cannot
-// match. Shared with the iOS target only so AllspeakTests can cover it (same
-// precedent as WatchCinemaSync).
+// match. Shared with the iOS target only so AllspeakTests can cover it.
 
 enum WatchDeadReckonState: Equatable {
     case idle

@@ -1,6 +1,5 @@
 import AVFAudio
 import CoreData
-import CryptoKit
 import Foundation
 
 // Owns the iPhone-side audio session lifecycle and broadcasts state to the
@@ -34,7 +33,6 @@ final class PlaybackCoordinator {
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
     private(set) var catalogURL: URL?
-    private(set) var catalogStamp: String?
     private(set) var dtwMapURL: URL?
     private(set) var dtwMapping: DTWMapping?
     private var isSwitching: Bool = false
@@ -177,7 +175,6 @@ final class PlaybackCoordinator {
         // otherwise rapid session switches let the older start resume and
         // clobber the newer session's stamp, mapping, and broadcast.
         let catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: snap.uuid, filename: $0) }
-        let catalogStamp = await Self.catalogStamp(forCatalogAt: catalogURL)
         let dtwMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: snap.uuid, filename: $0) }
         let dtwMapping = await Self.loadDTWMapping(url: dtwMapURL)
         guard generation == loadGeneration else { return }
@@ -201,7 +198,6 @@ final class PlaybackCoordinator {
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
         self.catalogURL = catalogURL
-        self.catalogStamp = catalogStamp
         self.dtwMapURL = dtwMapURL
         self.dtwMapping = dtwMapping
         self.repository = repository
@@ -225,15 +221,6 @@ final class PlaybackCoordinator {
             return candidate
         }
         return storage.audioURL(sessionID: sessionUUID, filename: filename)
-    }
-
-    nonisolated static func catalogStamp(forCatalogAt url: URL?) async -> String? {
-        guard let url else { return nil }
-        return await Task.detached(priority: .userInitiated) {
-            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
-            let digest = SHA256.hash(data: data)
-            return "\(url.lastPathComponent):\(digest.map { String(format: "%02x", $0) }.joined())"
-        }.value
     }
 
     private static func loadDTWMapping(url: URL?) async -> DTWMapping? {
@@ -268,7 +255,6 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.catalogURL = nil
-        self.catalogStamp = nil
         self.dtwMapURL = nil
         self.dtwMapping = nil
         self.revision += 1
@@ -342,7 +328,6 @@ final class PlaybackCoordinator {
         }
 
         let newCatalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: sessionUUID, filename: $0) }
-        let newCatalogStamp = await Self.catalogStamp(forCatalogAt: newCatalogURL)
         guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
             return
         }
@@ -361,7 +346,6 @@ final class PlaybackCoordinator {
         let previousTracks = self.tracks
         sessionTitle = snap.name
         catalogURL = newCatalogURL
-        catalogStamp = newCatalogStamp
         diagnostics.setHasCatalog(snap.catalogFilename != nil)
         dtwMapURL = newDTWMapURL
         dtwMapping = newDTWMapping
@@ -534,7 +518,6 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.catalogURL = nil
-        self.catalogStamp = nil
         self.dtwMapURL = nil
         self.dtwMapping = nil
         self.repository = nil
@@ -606,8 +589,7 @@ final class PlaybackCoordinator {
             isPlaying: controller.isPlaying,
             currentTime: controller.currentTime,
             tracks: tracks,
-            activeTrackID: activeTrackID,
-            catalogStamp: catalogStamp
+            activeTrackID: activeTrackID
         )
     }
 
@@ -738,39 +720,6 @@ final class PlaybackCoordinator {
         return true
     }
 
-    // The stamp identifies the catalog the watch matched against; both sides
-    // must hold the same non-nil stamp. A mismatch means the phone replaced or
-    // cleared the catalog after the watch started listening, so the matched
-    // offsets belong to content the session no longer plays. An unstamped
-    // match is never trusted - even when this session has no catalog either
-    // (nil == nil), because it can only come from a watch holding a catalog
-    // this session no longer announces. Returns false so the host can reply
-    // with an empty snapshot and the wrist feels failure instead of a false
-    // success.
-    @discardableResult
-    func applyCinemaMatch(sessionID: UUID, stamp: String?, enTime: Double, defaults: UserDefaults = .standard) -> Bool {
-        guard let controller, sessionUUID == sessionID, let stamp, stamp == catalogStamp else { return false }
-        let latencyComp = CinemaSyncService.storedLatencyCompensation(defaults)
-        let enOffset = enTime + latencyComp
-        let ruOffset = dtwMapping?.ruTime(forEnTime: enOffset) ?? enOffset
-        let playerBefore = controller.livePosition
-        controller.seek(to: ruOffset)
-        cinemaAnchor = (enOffset, Date(), appliedLatency: latencyComp)
-        diagnostics.log(.sync(
-            source: .watch,
-            result: .matched,
-            enTime: enOffset,
-            ruTime: ruOffset,
-            playerBefore: playerBefore,
-            delta: ruOffset - playerBefore,
-            latencyComp: latencyComp,
-            absStart: nil,
-            listenSeconds: nil,
-            error: nil
-        ))
-        return true
-    }
-
     func apply(_ command: WatchCommand) {
         guard let controller else { return }
         switch command {
@@ -790,10 +739,8 @@ final class PlaybackCoordinator {
             }
         case .setVolume(let value):
             controller.setVolume(value)
-        case .requestCueBundle, .requestCatalog, .deadReckonSeek:
+        case .requestCueChunk, .deadReckonSeek:
             break
-        case .cinemaMatch(let sessionID, let stamp, let enTime):
-            applyCinemaMatch(sessionID: sessionID, stamp: stamp, enTime: enTime)
         }
     }
 

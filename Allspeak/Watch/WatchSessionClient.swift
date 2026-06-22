@@ -15,23 +15,30 @@ final class WatchSessionClient: NSObject {
     var lastSnapshot: PlaybackSnapshot?
     var isConnected: Bool = false
     var interpolationTick: UInt64 = 0
-    var hasCatalogForCurrentSession: Bool = false
 
     var tracks: [TrackInfo] { metadata?.tracks ?? [] }
     var activeTrackID: UUID? { metadata?.activeTrackID }
 
+    // An in-flight chunked cue-bundle pull. The watch requests slices 0..<total
+    // over sendMessage (each a request/reply, so a dropped chunk is retried),
+    // accumulates them, and reassembles the gzipped bundle once complete.
+    private struct CueDownload {
+        let sessionID: UUID
+        let revision: Int
+        var totalChunks: Int?
+        var chunks: [Int: Data]
+    }
+
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
-    @ObservationIgnored private let catalogStore: CatalogStore?
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var interpolationTimer: Timer?
-    @ObservationIgnored private var lastRequestedBundleKey: (sessionID: UUID, revision: Int)?
-    @ObservationIgnored private var lastRequestedCatalogKey: (sessionID: UUID, stamp: String)?
+    @ObservationIgnored private var cueDownload: CueDownload?
     #if os(watchOS)
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
 
-    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil, catalogStore: CatalogStore? = nil) {
+    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil) {
         self.sender = sender ?? DefaultWatchMessageSender.shared
         if let cache {
             self.cache = cache
@@ -39,13 +46,6 @@ final class WatchSessionClient: NSObject {
             self.cache = try? CueCache(baseURL: baseURL)
         } else {
             self.cache = nil
-        }
-        if let catalogStore {
-            self.catalogStore = catalogStore
-        } else if let baseURL = try? CatalogStore.defaultBaseURL() {
-            self.catalogStore = try? CatalogStore(baseURL: baseURL)
-        } else {
-            self.catalogStore = nil
         }
         super.init()
     }
@@ -165,19 +165,17 @@ final class WatchSessionClient: NSObject {
             self.metadata = nil
             self.cues = []
             self.lastSnapshot = nil
-            self.lastRequestedBundleKey = nil
-            self.lastRequestedCatalogKey = nil
-            refreshHasCatalogForCurrentSession()
+            self.cueDownload = nil
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
         let previous = self.metadata
         self.metadata = meta
-        reconcileStoredCatalog(with: meta)
         let sessionChanged = previous?.sessionID != meta.sessionID
         let revisionChanged = previous?.sessionID == meta.sessionID && previous?.revision != meta.revision
         if sessionChanged || revisionChanged {
             self.lastSnapshot = nil
+            self.cueDownload = nil
         }
         if let cache, let bundle = cache.load(sessionID: meta.sessionID, revision: meta.revision) {
             self.cues = bundle.cues
@@ -185,228 +183,105 @@ final class WatchSessionClient: NSObject {
             self.cues = []
         }
         if cues.isEmpty && meta.cueCount > 0 {
-            requestCueBundleIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
+            startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
         }
-        refreshHasCatalogForCurrentSession()
-        requestCatalogIfMissing()
     }
 
-    // A stored catalog is usable only while its stamp matches the current
-    // metadata - a late transfer staged before its announcing context arrives
-    // (or after a clear) must not enable the sync button. The stamp must be
-    // non-nil: metadata without a catalogStamp means the phone has no catalog,
-    // so an unstamped stored file must never match it.
-    func catalogURLForCurrentSession() -> URL? {
-        guard let metadata, let catalogStore,
-              let expected = metadata.catalogStamp,
-              catalogStore.stamp(for: metadata.sessionID) == expected
-        else { return nil }
-        return catalogStore.catalogURL(for: metadata.sessionID)
-    }
+    // MARK: - Chunked cue-bundle pull
 
-    private func refreshHasCatalogForCurrentSession() {
-        hasCatalogForCurrentSession = catalogURLForCurrentSession() != nil
-    }
-
-    // The phone identifies catalog content via catalogStamp. A pending
-    // transfer whose stamp the context now announces becomes the active
-    // catalog; an active catalog whose stamp no longer matches is obsolete
-    // (cleared on the phone, or replaced - possibly under the same filename)
-    // and must not be matched against.
-    private func reconcileStoredCatalog(with meta: SessionMetadata) {
-        guard let catalogStore else { return }
-        catalogStore.prunePendings(sessionID: meta.sessionID, keepingStamp: meta.catalogStamp)
-        if let expected = meta.catalogStamp,
-           catalogStore.hasPending(sessionID: meta.sessionID, stamp: expected) {
-            catalogStore.promotePending(sessionID: meta.sessionID, stamp: expected)
+    private func startCueDownloadIfNeeded(sessionID: UUID, revision: Int) {
+        guard cues.isEmpty else { return }
+        if let download = cueDownload, download.sessionID == sessionID, download.revision == revision {
             return
         }
-        guard catalogStore.catalogURL(for: meta.sessionID) != nil else { return }
-        if meta.catalogStamp == nil || catalogStore.stamp(for: meta.sessionID) != meta.catalogStamp {
-            catalogStore.remove(sessionID: meta.sessionID)
-        }
+        cueDownload = CueDownload(sessionID: sessionID, revision: revision, totalChunks: nil, chunks: [:])
+        requestCueChunk(sessionID: sessionID, revision: revision, index: 0)
     }
 
-    private func requestCueBundleIfNeeded(sessionID: UUID, revision: Int) {
-        if let last = lastRequestedBundleKey,
-           last.sessionID == sessionID,
-           last.revision == revision {
-            return
-        }
-        lastRequestedBundleKey = (sessionID, revision)
-        sendCommand(.requestCueBundle(sessionID: sessionID, revision: revision)) { [weak self] _ in
+    private func requestCueChunk(sessionID: UUID, revision: Int, index: Int) {
+        guard let payload = try? WatchCommand.requestCueChunk(
+            sessionID: sessionID, revision: revision, index: index
+        ).toPropertyList() else { return }
+        let replyHandler: @Sendable ([String: Any]) -> Void = { [weak self] reply in
+            let bridge = SendableDictionary(value: reply)
             Task { @MainActor in
-                guard let self else { return }
-                if let last = self.lastRequestedBundleKey,
-                   last.sessionID == sessionID,
-                   last.revision == revision {
-                    self.lastRequestedBundleKey = nil
-                }
+                self?.handleCueChunkReply(bridge.value)
             }
         }
-    }
-
-    // The phone dedups catalog transfers and WCSession reports success once
-    // the file is handed over - if persisting it here failed, nothing on the
-    // phone side would ever resend. When a context announces a stamp we hold
-    // neither active nor staged, ask the phone to transfer it again. The
-    // host ignores the request while that transfer is still in flight, so
-    // requesting ahead of a pending delivery cannot duplicate it.
-    private func requestCatalogIfMissing() {
-        guard let metadata,
-              let stamp = metadata.catalogStamp,
-              let catalogStore,
-              !hasCatalogForCurrentSession,
-              !catalogStore.hasPending(sessionID: metadata.sessionID, stamp: stamp)
-        else { return }
-        requestCatalogIfNeeded(sessionID: metadata.sessionID, stamp: stamp)
-    }
-
-    private func requestCatalogIfNeeded(sessionID: UUID, stamp: String) {
-        if let last = lastRequestedCatalogKey,
-           last.sessionID == sessionID,
-           last.stamp == stamp {
-            return
-        }
-        lastRequestedCatalogKey = (sessionID, stamp)
-        sendCommand(.requestCatalog(sessionID: sessionID, stamp: stamp)) { [weak self] _ in
+        let errorHandler: @Sendable (Error) -> Void = { [weak self] _ in
             Task { @MainActor in
-                guard let self else { return }
-                if let last = self.lastRequestedCatalogKey,
-                   last.sessionID == sessionID,
-                   last.stamp == stamp {
-                    self.lastRequestedCatalogKey = nil
-                }
+                self?.failCueDownload(sessionID: sessionID, revision: revision)
             }
         }
+        sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
     }
 
-    // Activation/reachability recovery. Reconcile first: a failed pending
-    // promotion leaves the file staged with no other retry trigger until
-    // another context happens to arrive, which mid-film can be never.
-    func recoverCatalogIfNeeded() {
-        guard let metadata, let stamp = metadata.catalogStamp else { return }
-        reconcileStoredCatalog(with: metadata)
-        refreshHasCatalogForCurrentSession()
-        if let last = lastRequestedCatalogKey,
-           last.sessionID == metadata.sessionID,
-           last.stamp == stamp {
-            lastRequestedCatalogKey = nil
-        }
-        requestCatalogIfMissing()
-    }
-
-    // Persisting a delivered transfer failed, but WCSession already reported
-    // it handed over - the phone will never resend unprompted, and the dedup
-    // key set when it was requested would block asking again. Drop the key so
-    // the next context (or recovery trigger) can re-request.
-    private func rearmCatalogRequest(sessionID: UUID, stamp: String?) {
-        guard let stamp,
-              let last = lastRequestedCatalogKey,
-              last.sessionID == sessionID,
-              last.stamp == stamp
-        else { return }
-        lastRequestedCatalogKey = nil
-    }
-
-    private func retryPendingCueBundleRequestIfNeeded() {
-        guard cues.isEmpty,
-              let meta = metadata,
-              meta.cueCount > 0
-        else { return }
-        if let last = lastRequestedBundleKey,
-           last.sessionID == meta.sessionID,
-           last.revision == meta.revision {
-            lastRequestedBundleKey = nil
-        }
-        requestCueBundleIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
-    }
-
-    func handleReceivedFile(at url: URL, metadata fileMetadata: [String: Any]) {
-        let data = try? Data(contentsOf: url)
-        handleReceivedFile(data: data, metadata: fileMetadata)
-    }
-
-    func handleReceivedFile(data: Data?, metadata fileMetadata: [String: Any]) {
-        if fileMetadata["kind"] as? String == "catalog" {
-            handleReceivedCatalog(data: data, metadata: fileMetadata)
-            completePendingBackgroundTasks()
+    private func handleCueChunkReply(_ payload: [String: Any]) {
+        guard var download = cueDownload else { return }
+        guard let reply = try? CueChunkReply(propertyList: payload),
+              reply.sessionID == download.sessionID,
+              reply.revision == download.revision else {
+            failCueDownload(sessionID: download.sessionID, revision: download.revision)
             return
         }
-        guard let data, let bundle = try? CueBundle(compressed: data) else {
-            completePendingBackgroundTasks()
+        // The session may have moved on while a chunk was in flight.
+        guard let meta = metadata,
+              meta.sessionID == download.sessionID,
+              meta.revision == download.revision else {
+            cueDownload = nil
             return
         }
-        if let current = metadata {
-            if current.sessionID != bundle.sessionID {
-                completePendingBackgroundTasks()
+        download.totalChunks = reply.totalChunks
+        download.chunks[reply.index] = reply.data
+        cueDownload = download
+
+        if download.chunks.count >= reply.totalChunks {
+            assembleCueDownload(download)
+            return
+        }
+        guard let next = (0..<reply.totalChunks).first(where: { download.chunks[$0] == nil }) else {
+            assembleCueDownload(download)
+            return
+        }
+        requestCueChunk(sessionID: download.sessionID, revision: download.revision, index: next)
+    }
+
+    private func assembleCueDownload(_ download: CueDownload) {
+        guard let total = download.totalChunks else { return }
+        var data = Data()
+        for index in 0..<total {
+            guard let chunk = download.chunks[index] else {
+                // A gap means the reassembly is incomplete; re-request the gap.
+                requestCueChunk(sessionID: download.sessionID, revision: download.revision, index: index)
                 return
             }
-            if bundle.revision < current.revision {
-                completePendingBackgroundTasks()
-                return
-            }
+            data.append(chunk)
         }
+        cueDownload = nil
+        guard let bundle = try? CueBundle(compressed: data),
+              bundle.sessionID == download.sessionID else { return }
         try? cache?.save(bundle)
-        if let current = metadata, current.sessionID == bundle.sessionID {
+        if let meta = metadata, meta.sessionID == bundle.sessionID {
             self.cues = bundle.cues
-            if current.revision < bundle.revision {
-                self.metadata = SessionMetadata(
-                    sessionID: current.sessionID,
-                    revision: bundle.revision,
-                    title: current.title,
-                    duration: current.duration,
-                    cueCount: bundle.cues.count,
-                    isPlaying: current.isPlaying,
-                    currentTime: current.currentTime,
-                    tracks: current.tracks,
-                    activeTrackID: current.activeTrackID,
-                    catalogStamp: current.catalogStamp
-                )
-                self.lastSnapshot = nil
-            }
         }
-        completePendingBackgroundTasks()
     }
 
-    private func handleReceivedCatalog(data: Data?, metadata fileMetadata: [String: Any]) {
-        guard let sessionIDString = fileMetadata["sessionID"] as? String,
-              let sessionID = UUID(uuidString: sessionIDString),
-              let catalogStore
-        else { return }
-        let stamp = fileMetadata["stamp"] as? String
-        guard let data else {
-            rearmCatalogRequest(sessionID: sessionID, stamp: stamp)
-            return
-        }
-        // A transfer whose stamp does not match the current metadata is either
-        // stale or a replacement racing ahead of its announcing context - the
-        // phone will not resend it unprompted, so it is staged (not discarded)
-        // and must not clobber the active catalog. Reconcile promotes it when
-        // the matching context arrives.
-        if let current = metadata, current.sessionID == sessionID, current.catalogStamp != stamp {
-            // An unstamped mismatched transfer can never be promoted (promote
-            // requires a context announcing its stamp), so only stamped ones
-            // are worth staging.
-            if let stamp {
-                catalogStore.stagePending(data: data, sessionID: sessionID, stamp: stamp)
-                if !catalogStore.hasPending(sessionID: sessionID, stamp: stamp) {
-                    rearmCatalogRequest(sessionID: sessionID, stamp: stamp)
-                }
-            }
-        } else {
-            do {
-                try catalogStore.save(data: data, sessionID: sessionID, stamp: stamp)
-            } catch {
-                rearmCatalogRequest(sessionID: sessionID, stamp: stamp)
-            }
-        }
-        var keep: Set<UUID> = [sessionID]
-        if let current = metadata?.sessionID {
-            keep.insert(current)
-        }
-        catalogStore.pruneStale(keeping: keep)
-        refreshHasCatalogForCurrentSession()
+    private func failCueDownload(sessionID: UUID, revision: Int) {
+        guard let download = cueDownload,
+              download.sessionID == sessionID,
+              download.revision == revision else { return }
+        // Drop the download so a reachability/activation/metadata trigger can
+        // restart it - the request's sendMessage error is the only failure
+        // signal, and without re-arming the watch would sit on "Loading".
+        cueDownload = nil
+    }
+
+    // Activation / reachability recovery: a download whose in-flight request was
+    // lost leaves cues empty with no other retry trigger until this fires.
+    private func retryCueDownloadIfNeeded() {
+        guard cues.isEmpty, let meta = metadata, meta.cueCount > 0 else { return }
+        cueDownload = nil
+        startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
     }
 
     #if os(watchOS)
@@ -446,8 +321,7 @@ final class WatchSessionClient: NSObject {
             isPlaying: snapshot.isPlaying,
             currentTime: snapshot.currentTime,
             tracks: current.tracks,
-            activeTrackID: snapshot.activeTrackID ?? current.activeTrackID,
-            catalogStamp: current.catalogStamp
+            activeTrackID: snapshot.activeTrackID ?? current.activeTrackID
         )
     }
 }
@@ -462,8 +336,7 @@ extension WatchSessionClient: WCSessionDelegate {
         Task { @MainActor in
             self.isConnected = reachable
             if reachable {
-                self.retryPendingCueBundleRequestIfNeeded()
-                self.recoverCatalogIfNeeded()
+                self.retryCueDownloadIfNeeded()
             }
         }
     }
@@ -473,8 +346,7 @@ extension WatchSessionClient: WCSessionDelegate {
         Task { @MainActor in
             self.isConnected = reachable
             if reachable {
-                self.retryPendingCueBundleRequestIfNeeded()
-                self.recoverCatalogIfNeeded()
+                self.retryCueDownloadIfNeeded()
             }
         }
     }
@@ -494,15 +366,6 @@ extension WatchSessionClient: WCSessionDelegate {
         }
     }
 
-    nonisolated func session(_: WCSession, didReceive file: WCSessionFile) {
-        let data = try? Data(contentsOf: file.fileURL)
-        let bridge = SendableData(value: data)
-        let meta = SendableDictionary(value: file.metadata ?? [:])
-        Task { @MainActor in
-            self.handleReceivedFile(data: bridge.value, metadata: meta.value)
-        }
-    }
-
     #if os(iOS)
     nonisolated func sessionDidBecomeInactive(_: WCSession) {}
 
@@ -516,8 +379,4 @@ extension WatchSessionClient: WCSessionDelegate {
 
 private struct SendableDictionary: @unchecked Sendable {
     let value: [String: Any]
-}
-
-private struct SendableData: @unchecked Sendable {
-    let value: Data?
 }
