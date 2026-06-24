@@ -595,6 +595,75 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.coordinator.applyDeadReckonSeek(sessionID: fixture.sessionUUID) == false)
     }
 
+    @Test("a manual skip re-anchors BEFORE the synchronous broadcast (drift stays ~0)")
+    func skipReanchorsBeforeBroadcast() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        // Anchor with the dub aligned at 1.0 (identity mapping), then nudge +3s by
+        // ear. controller.skip broadcasts a snapshot synchronously via
+        // onStateChange - capture the drift it WOULD carry at that instant. The
+        // pre-fix order (seek-then-anchor) shipped ~+3.0s AHEAD; the fix re-anchors
+        // first so the very first snapshot already reads ~0.
+        Self.anchorViaSync(fixture.coordinator, enTime: 1.0, latency: 0.0)
+
+        var driftAtBroadcast: Double?
+        var broadcast = false
+        controller.onStateChange = {
+            broadcast = true
+            driftAtBroadcast = fixture.coordinator.currentSnapshot().drift
+        }
+        fixture.coordinator.skip(by: 3.0)
+
+        #expect(broadcast)
+        let drift = try #require(driftAtBroadcast)
+        #expect(abs(drift) < 0.2)
+    }
+
+    @Test("a manual skip without an anchor does not fabricate one")
+    func skipWithoutAnchorStaysNoSync() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        #expect(fixture.coordinator.currentSnapshot().drift == nil)
+
+        fixture.coordinator.skip(by: 2.0)
+
+        #expect(fixture.coordinator.currentSnapshot().drift == nil)
+        #expect(fixture.coordinator.applyDeadReckonSeek(sessionID: fixture.sessionUUID) == false)
+    }
+
+    @Test("scrubbing drops the anchor BEFORE the synchronous broadcast (NO SYNC, not -5972s)")
+    func seekDropsAnchorBeforeBroadcast() async throws {
+        let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: false)
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        Self.anchorViaSync(fixture.coordinator, enTime: 1.0, latency: 0.0)
+        #expect(fixture.coordinator.currentSnapshot().drift != nil)
+
+        var driftAtBroadcast: Double?
+        var broadcast = false
+        controller.onStateChange = {
+            broadcast = true
+            driftAtBroadcast = fixture.coordinator.currentSnapshot().drift
+        }
+        fixture.coordinator.seek(to: 0)
+
+        // The anchor must be gone by the time controller.seek broadcasts, so the
+        // snapshot ships NO SYNC instead of a stale absurd drift.
+        #expect(broadcast)
+        #expect(driftAtBroadcast == nil)
+        #expect(fixture.coordinator.applyDeadReckonSeek(sessionID: fixture.sessionUUID) == false)
+    }
+
     @Test("dead-reckon fails for a different session")
     func deadReckonRejectsForeignSession() async throws {
         let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
