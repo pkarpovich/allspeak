@@ -607,10 +607,11 @@ final class PlaybackCoordinator {
     ) {
         guard let controller else { return }
         let playerBefore = controller.livePosition
-        controller.seek(to: offset)
+        // Anchor BEFORE the seek (controller.seek broadcasts synchronously).
         if let enTime {
             cinemaAnchor = (enTime, Date(), appliedLatency: latencyComp ?? 0)
         }
+        controller.seek(to: offset)
         diagnostics.log(.sync(
             source: .phone,
             result: .matched,
@@ -654,12 +655,30 @@ final class PlaybackCoordinator {
 
     func skip(by seconds: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
+        // Re-anchor BEFORE the seek: controller.skip() broadcasts a snapshot
+        // synchronously (via onStateChange), so the anchor must already reflect
+        // the new playhead or the watch ships a bogus drift. A manual ±Ns nudge
+        // is a by-ear alignment (like a cue tap), not navigation - re-anchor so
+        // the readout tracks divergence since this correction, not the nudge
+        // itself. Only when an anchor exists: a relative nudge cannot establish an
+        // absolute cinema position on its own.
+        if cinemaAnchor != nil {
+            let targetRU = min(max(controller.currentTime + seconds, 0), controller.duration)
+            cinemaAnchor = (dtwMapping?.enTime(forRuTime: targetRU) ?? targetRU, Date(), appliedLatency: 0)
+        }
         controller.skip(by: seconds)
         diagnostics.log(.skip(seconds: seconds, source: source))
     }
 
     func seek(to time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
+        // Drop the anchor BEFORE the seek (controller.seek broadcasts a snapshot
+        // synchronously). Scrubbing is navigation, not alignment - it breaks
+        // tracking with the hall, so the readout reads NO SYNC until the next sync
+        // / cue tap / dead-reckon re-establishes the reference. Clearing after the
+        // seek would let a stale-anchor snapshot ship first (e.g. -5972s after
+        // scrubbing to the start).
+        cinemaAnchor = nil
         controller.seek(to: time)
         diagnostics.log(.seek(time: time, source: source))
     }
@@ -670,10 +689,12 @@ final class PlaybackCoordinator {
     // Plain scrubbing must NOT anchor - it is navigation, not alignment.
     func seekToCue(_ time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
-        controller.seek(to: time)
+        // Anchor BEFORE the seek (controller.seek broadcasts synchronously, so a
+        // seek-then-anchor order ships a stale-drift snapshot first).
         if let dtwMapping {
             cinemaAnchor = (dtwMapping.enTime(forRuTime: time), Date(), appliedLatency: 0)
         }
+        controller.seek(to: time)
         diagnostics.log(.seek(time: time, source: source))
     }
 
@@ -709,8 +730,9 @@ final class PlaybackCoordinator {
         let enNow = projectedEN - anchor.appliedLatency + currentLatency
         let ruTarget = dtwMapping?.ruTime(forEnTime: enNow) ?? enNow
         let playerBefore = controller.livePosition
-        controller.seek(to: ruTarget)
+        // Re-anchor BEFORE the seek (controller.seek broadcasts synchronously).
         cinemaAnchor = (enNow, now, appliedLatency: currentLatency)
+        controller.seek(to: ruTarget)
         diagnostics.log(.deadReckon(
             enTime: enNow,
             ruTime: ruTarget,
