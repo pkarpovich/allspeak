@@ -153,9 +153,9 @@ Per-task gate: the `AllspeakWatch` scheme and the `Allspeak` scheme both build w
 - [x] on-device: confirm the readout stays live for the remainder of a long run (skipped - not automatable; requires physical Apple Watch Ultra hardware, see Post-Completion)
 
 ### Task 6: Update documentation
-- [ ] update the "Apple Watch remote" progress-bar description in `README.md` if the Always-On behavior wording needs it
-- [ ] update `CLAUDE.md` only if a new convention emerged (likely none)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update the "Apple Watch remote" progress-bar description in `README.md` if the Always-On behavior wording needs it (progress-bar wording now notes 1 Hz wrist-raised vs once-per-minute Always-On stepping; the interpolation paragraph documents re-anchoring from the freshest `serverDate` source; metadata field listing adds the optional `serverDate` anchor)
+- [x] update `CLAUDE.md` only if a new convention emerged (no change - no project-level `CLAUDE.md` exists and no new convention emerged; the Always-On redraw, `serverDate` anchor, and `decodeIfPresent` wire pattern are all pre-existing conventions)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes, informational only*
