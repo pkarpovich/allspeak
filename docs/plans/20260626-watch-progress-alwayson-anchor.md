@@ -101,11 +101,11 @@ Per-task gate: the `AllspeakWatch` scheme and the `Allspeak` scheme both build w
 **Files:**
 - Modify: `AllspeakWatch/Views/TransportView.swift`
 
-- [ ] add `@Environment(\.isLuminanceReduced) private var isLuminanceReduced` to `TransportView`
-- [ ] extract the progress content (the `ProgressView` + elapsed/remaining `HStack`) into a private `progressBody(at date: Date) -> some View`, reading position from the existing `progressElapsed(at:)`
-- [ ] replace the single `TimelineView(.periodic(from: .now, by: 1))` in `progressBar` with a `@ViewBuilder` branch: `isLuminanceReduced` -> `TimelineView(.everyMinute)`, else -> `TimelineView(.periodic(from: .now, by: 1))`, each calling `progressBody(at: context.date)` (two branches because the schedule types differ and cannot be a single ternary)
-- [ ] confirm no new resync/timer is introduced — only the schedule changes; `progressElapsed(at:)` still sources from the serverDate anchor
-- [ ] no new pure logic to unit-test (schedule choice is a view concern; formatting already covered by `WatchTransportFormatTests`); deliverable: `AllspeakWatch` builds clean and the full suite stays green — real acceptance is the on-device check in Task 5
+- [x] add `@Environment(\.isLuminanceReduced) private var isLuminanceReduced` to `TransportView`
+- [x] extract the progress content (the `ProgressView` + elapsed/remaining `HStack`) into a private `progressBody(at date: Date) -> some View`, reading position from the existing `progressElapsed(at:)`
+- [x] replace the single `TimelineView(.periodic(from: .now, by: 1))` in `progressBar` with a `@ViewBuilder` branch: `isLuminanceReduced` -> `TimelineView(.everyMinute)`, else -> `TimelineView(.periodic(from: .now, by: 1))`, each calling `progressBody(at: context.date)` (two branches because the schedule types differ and cannot be a single ternary)
+- [x] confirm no new resync/timer is introduced — only the schedule changes; `progressElapsed(at:)` still sources from the serverDate anchor
+- [x] no new pure logic to unit-test (schedule choice is a view concern; formatting already covered by `WatchTransportFormatTests`); deliverable: `AllspeakWatch` builds clean and the full suite stays green — real acceptance is the on-device check in Task 5
 
 ### Task 2: Add `serverDate` to the `SessionMetadata` wire model
 

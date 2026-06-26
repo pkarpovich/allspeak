@@ -11,6 +11,7 @@ import SwiftUI
 // clean during a rapid spin.
 struct TransportView: View {
     @Environment(WatchSessionClient.self) private var client
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
     @State private var skipper = TransportSkipper(
         coalescer: SkipCoalescer { delta in
             WatchSessionClient.shared.send(.skip(seconds: delta))
@@ -260,28 +261,50 @@ struct TransportView: View {
 
     // Non-interactive film position. Self-advances while playing via a native
     // TimelineView redraw (no manual Timer, no resync) - it just re-reads the
-    // dead-reckoned snapshot time once a second. Gold linear fill with elapsed
-    // (left) and remaining (right) labels.
+    // serverDate-anchored snapshot time on each redraw. Gold linear fill with
+    // elapsed (left) and remaining (right) labels.
+    //
+    // The redraw schedule is luminance-aware. A remote, sessionless app gets no
+    // 1 Hz service in Always-On (wrist down) - watchOS only honors an
+    // Always-On-eligible schedule there, at most once per minute. So we run
+    // `.everyMinute` while the luminance is reduced and `.periodic(by: 1)` while
+    // active. Either way `progressElapsed(at:)` recomputes the true position
+    // from the wall-clock anchor, so each redraw is correct; only the cadence
+    // changes. Two branches because the schedule types differ and cannot be a
+    // single ternary.
+    @ViewBuilder
     private var progressBar: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let elapsed = progressElapsed(at: context.date)
-            let duration = progressDuration
-            VStack(spacing: 3) {
-                ProgressView(value: WatchTransportFormat.progressFraction(elapsed: elapsed, duration: duration))
-                    .progressViewStyle(.linear)
-                    .tint(Tokens.accent)
-                HStack {
-                    Text(WatchTransportFormat.elapsedLabel(elapsed))
-                    Spacer(minLength: 4)
-                    Text(WatchTransportFormat.remainingLabel(elapsed: elapsed, duration: duration))
-                }
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Tokens.text2)
-                .monospacedDigit()
+        if isLuminanceReduced {
+            TimelineView(.everyMinute) { context in
+                progressBody(at: context.date)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Film position")
+        } else {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                progressBody(at: context.date)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Film position")
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Film position")
+    }
+
+    private func progressBody(at date: Date) -> some View {
+        let elapsed = progressElapsed(at: date)
+        let duration = progressDuration
+        return VStack(spacing: 3) {
+            ProgressView(value: WatchTransportFormat.progressFraction(elapsed: elapsed, duration: duration))
+                .progressViewStyle(.linear)
+                .tint(Tokens.accent)
+            HStack {
+                Text(WatchTransportFormat.elapsedLabel(elapsed))
+                Spacer(minLength: 4)
+                Text(WatchTransportFormat.remainingLabel(elapsed: elapsed, duration: duration))
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Tokens.text2)
+            .monospacedDigit()
+        }
     }
 
     private func progressElapsed(at date: Date) -> Double {
