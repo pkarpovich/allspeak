@@ -85,6 +85,41 @@ final class WatchSessionClient: NSObject {
         return min(max(raw, 0), upper)
     }
 
+    // The extrapolation anchor for the film-progress readout. Two sources can
+    // carry one: the live snapshot (sendMessage, only while reachable) and the
+    // SessionMetadata application context (latest-wins, delivered on wake). Pick
+    // whichever is newer so a wrist-raise after a long unreachable stretch
+    // re-anchors from the freshest position. Metadata qualifies only once it
+    // carries a serverDate; nil when neither source has an anchor.
+    typealias ProgressAnchor = (currentTime: Double, serverDate: Date, isPlaying: Bool, duration: Double)
+
+    static func progressAnchor(snapshot: PlaybackSnapshot?, metadata: SessionMetadata?) -> ProgressAnchor? {
+        let snapshotAnchor: ProgressAnchor? = snapshot.map {
+            ($0.currentTime, $0.serverDate, $0.isPlaying, $0.duration)
+        }
+        let metadataAnchor: ProgressAnchor? = metadata.flatMap { meta in
+            meta.serverDate.map { (meta.currentTime, $0, meta.isPlaying, meta.duration) }
+        }
+        switch (snapshotAnchor, metadataAnchor) {
+        case let (.some(snap), .some(meta)):
+            return meta.serverDate > snap.serverDate ? meta : snap
+        case let (.some(snap), .none):
+            return snap
+        case let (.none, .some(meta)):
+            return meta
+        case (.none, .none):
+            return nil
+        }
+    }
+
+    static func interpolatedTime(anchor: ProgressAnchor, now: Date) -> TimeInterval {
+        let raw: TimeInterval = anchor.isPlaying
+            ? anchor.currentTime + now.timeIntervalSince(anchor.serverDate)
+            : anchor.currentTime
+        let upper = anchor.duration > 0 ? anchor.duration : raw
+        return min(max(raw, 0), upper)
+    }
+
     static func interpolatedIndex(time: TimeInterval, in cues: [Subtitle]) -> Int {
         guard !cues.isEmpty else { return 0 }
         if time < cues[0].start { return 0 }
@@ -312,6 +347,11 @@ final class WatchSessionClient: NSObject {
 
     private func applySnapshotToMetadata(_ snapshot: PlaybackSnapshot) {
         guard let current = metadata, current.sessionID == snapshot.sessionID else { return }
+        // The snapshot (sendMessage) and the metadata context (updateApplicationContext)
+        // ride separate transports, so a newer metadata anchor can land before an older
+        // snapshot. Don't let that late snapshot erase a fresher anchor - progressAnchor
+        // extrapolates from metadata.serverDate when it is the newer source.
+        if let anchorDate = current.serverDate, snapshot.serverDate < anchorDate { return }
         self.metadata = SessionMetadata(
             sessionID: current.sessionID,
             revision: snapshot.revision,
@@ -321,7 +361,8 @@ final class WatchSessionClient: NSObject {
             isPlaying: snapshot.isPlaying,
             currentTime: snapshot.currentTime,
             tracks: current.tracks,
-            activeTrackID: snapshot.activeTrackID ?? current.activeTrackID
+            activeTrackID: snapshot.activeTrackID ?? current.activeTrackID,
+            serverDate: snapshot.serverDate
         )
     }
 }

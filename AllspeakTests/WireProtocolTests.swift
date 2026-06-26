@@ -216,6 +216,39 @@ struct WireProtocolTests {
         #expect(decoded.activeTrackID == nil)
     }
 
+    @Test("SessionMetadata round-trips the serverDate anchor")
+    func sessionMetadataServerDateRoundTrip() throws {
+        let anchor = Date(timeIntervalSince1970: 1_700_000_000)
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 6,
+            title: "Dune: Part Two",
+            duration: 9960.0,
+            cueCount: 2100,
+            isPlaying: true,
+            currentTime: 982.5,
+            serverDate: anchor
+        )
+        let decoded = try SessionMetadata(propertyList: try meta.toPropertyList())
+        #expect(decoded == meta)
+        #expect(decoded.serverDate == anchor)
+    }
+
+    @Test("SessionMetadata decodes a payload without serverDate (older phone build)")
+    func sessionMetadataMissingServerDate() throws {
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "Legacy",
+            duration: 100,
+            cueCount: 5,
+            isPlaying: false,
+            currentTime: 0
+        )
+        let decoded = try SessionMetadata(propertyList: try meta.toPropertyList())
+        #expect(decoded.serverDate == nil)
+    }
+
     @Test("CueBundle round-trips via compression")
     func cueBundleCompressionRoundTrip() throws {
         let cues = (0..<500).map { i in

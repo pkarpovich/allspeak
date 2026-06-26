@@ -496,6 +496,10 @@ final class PlaybackCoordinator {
         guard controller != nil else { return }
         #if os(iOS)
         WatchSessionHost.shared.forceBroadcastSnapshot()
+        // Refresh the latest-wins application context so a watch waking after a
+        // stretch of being unreachable re-anchors from a fresh serverDate. State
+        // changes only (play/pause/seek/skip/track/sync) - not per tick.
+        WatchSessionHost.shared.broadcastCurrentSession()
         #endif
     }
 
@@ -587,9 +591,10 @@ final class PlaybackCoordinator {
             duration: controller.duration,
             cueCount: controller.subtitles.count,
             isPlaying: controller.isPlaying,
-            currentTime: controller.currentTime,
+            currentTime: controller.livePosition,
             tracks: tracks,
-            activeTrackID: activeTrackID
+            activeTrackID: activeTrackID,
+            serverDate: Date()
         )
     }
 

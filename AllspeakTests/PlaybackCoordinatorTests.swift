@@ -136,6 +136,36 @@ struct PlaybackCoordinatorTests {
         #expect(coordinator.currentSnapshot() == PlaybackSnapshot.empty)
     }
 
+    @Test("currentMetadata stamps a fresh serverDate and the live player position")
+    func currentMetadataCarriesLiveAnchor() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        defer { coordinator.endSession() }
+
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Anchor", audio: audio, subtitles: Self.cues)
+        let controller = try #require(coordinator.controller)
+        controller.seek(to: 1.5)
+
+        let before = Date()
+        let metadata = try #require(coordinator.currentMetadata())
+        let after = Date()
+
+        let serverDate = try #require(metadata.serverDate)
+        #expect(serverDate >= before)
+        #expect(serverDate <= after)
+        #expect(abs(metadata.currentTime - 1.5) < 0.05)
+    }
+
+    @Test("currentMetadata returns nil when there is no active session")
+    func currentMetadataWithoutSessionIsNil() {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        #expect(coordinator.currentMetadata() == nil)
+    }
+
     private struct MultiTrackFixture {
         let coordinator: PlaybackCoordinator
         let persistence: PersistenceController

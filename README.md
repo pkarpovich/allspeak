@@ -156,7 +156,9 @@ remains the audio host.
   pair of ±3s coarse skips on top (with a mic-free dead-reckon resync button
   between them), a full-width Play/Pause, a non-interactive film progress bar
   (gold fill with the elapsed time on the left and a remaining countdown on the
-  right, self-advancing while playing), and a centered pair of ±1s fine skips
+  right, self-advancing while playing - 1 Hz with the wrist raised, stepping
+  once per minute in the Always-On Display so it never freezes mid-film with the
+  wrist down), and a centered pair of ±1s fine skips
   beneath. Between the ±1s skips sits the **sync drift readout**: big signed
   seconds plus a direction caption showing how far the dub has drifted from the
   cinema since the last sync anchor — gold `+0.8s AHEAD` / `-1.4s BEHIND`, gray
@@ -182,15 +184,23 @@ remains the audio host.
   round-trips; mixed fine + coarse taps sum in the same window.
 - Between authoritative snapshots from the iPhone, the watch interpolates
   the displayed position locally (`currentTime + (now - serverDate)` while
-  playing) so the UI never feels frozen.
+  playing) so the UI never feels frozen. The progress readout re-anchors from
+  whichever source has the newer `serverDate` - the live `sendMessage` snapshot
+  or the latest-wins `SessionMetadata` application context (which now carries
+  its own `serverDate` anchor, refreshed on every playback state change). That
+  context is delivered in the background, so even after the watch has been
+  unreachable for a stretch (phone in pocket, screen off), the next wrist-down
+  Always-On redraw re-anchors to the freshest position rather than freezing.
 
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
 `setVolume(_:)`, `requestCueBundle(sessionID:revision:)`,
 `requestCatalog(sessionID:stamp:)`, `cinemaMatch(sessionID:stamp:enTime:)`, and
 `deadReckonSeek(sessionID:)`. Session
-metadata delivered to the watch carries a `tracks: [TrackInfo]` array
-plus the current `activeTrackID`. The wire contract lives in
+metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
+the current `activeTrackID`, and an optional `serverDate` playback anchor
+(decoded with `decodeIfPresent`, so an older phone build still decodes). The
+wire contract lives in
 `Allspeak/Watch/WireProtocol.swift` — see the header comment there for
 the protocol summary.
 
