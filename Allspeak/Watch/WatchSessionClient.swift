@@ -347,6 +347,11 @@ final class WatchSessionClient: NSObject {
 
     private func applySnapshotToMetadata(_ snapshot: PlaybackSnapshot) {
         guard let current = metadata, current.sessionID == snapshot.sessionID else { return }
+        // The snapshot (sendMessage) and the metadata context (updateApplicationContext)
+        // ride separate transports, so a newer metadata anchor can land before an older
+        // snapshot. Don't let that late snapshot erase a fresher anchor - progressAnchor
+        // extrapolates from metadata.serverDate when it is the newer source.
+        if let anchorDate = current.serverDate, snapshot.serverDate < anchorDate { return }
         self.metadata = SessionMetadata(
             sessionID: current.sessionID,
             revision: snapshot.revision,

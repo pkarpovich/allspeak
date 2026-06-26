@@ -690,6 +690,53 @@ struct WatchSessionClientTests {
         #expect(client.lastSnapshot == second)
     }
 
+    @Test("snapshot older than the metadata anchor does not erase the fresher anchor")
+    func snapshotOlderThanMetadataAnchorPreservesAnchor() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let sessionID = UUID()
+        let anchorDate = Date(timeIntervalSince1970: 1_700_000_060)
+        // A metadata context (updateApplicationContext) lands carrying a fresh
+        // anchor while playing.
+        let meta = SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Active",
+            duration: 600,
+            cueCount: 0,
+            isPlaying: true,
+            currentTime: 90,
+            serverDate: anchorDate
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        // An older snapshot (sendMessage) arrives afterward over its separate
+        // transport - it must not overwrite the newer metadata anchor.
+        let older = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 30,
+            duration: 600,
+            currentIndex: 0,
+            isPlaying: false,
+            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        client.handleReceivedSnapshot(try older.toPropertyList())
+
+        #expect(client.metadata?.serverDate == anchorDate)
+        #expect(client.metadata?.currentTime == 90)
+        #expect(client.metadata?.isPlaying == true)
+        // progressAnchor still resolves to the fresher metadata source, so the
+        // Always-On readout cannot regress to the stale snapshot.
+        let anchor = WatchSessionClient.progressAnchor(
+            snapshot: client.lastSnapshot,
+            metadata: client.metadata
+        )
+        #expect(anchor?.serverDate == anchorDate)
+        #expect(anchor?.currentTime == 90)
+    }
+
     @Test("handleReceivedSnapshot ignores invalid payloads")
     func receiveSnapshotIgnoresInvalid() async throws {
         let (client, _, dir) = try makeClient()
