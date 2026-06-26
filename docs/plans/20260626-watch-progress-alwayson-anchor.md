@@ -146,11 +146,11 @@ Per-task gate: the `AllspeakWatch` scheme and the `Allspeak` scheme both build w
 - [x] run tests - must pass before next task
 
 ### Task 5: Verify acceptance criteria
-- [ ] build the `AllspeakWatch` scheme and the `Allspeak` scheme - no new warnings
-- [ ] run the full suite: `xcodebuild test -scheme Allspeak -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`
-- [ ] confirm no new resync/timer was added beyond the native `TimelineView` redraw; manual-only sync rule intact
-- [ ] on-device (real Apple Watch Ultra): start a session, lower the wrist for several minutes, then glance — the progress bar and remaining-time advanced (at most ~1 min stale) and did not freeze; raise the wrist — it snaps to the exact phone position
-- [ ] on-device: confirm the readout stays live for the remainder of a long run (no whole-film freeze like the original report)
+- [x] build the `AllspeakWatch` scheme and the `Allspeak` scheme - no new warnings (both BUILD SUCCEEDED; only pre-existing unrelated warnings: AppIntents tooling notice + project-level `UIRequiresFullScreen` Info.plist deprecation in the `Allspeak` target)
+- [x] run the full suite: `xcodebuild test -scheme Allspeak -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` (TEST SUCCEEDED - 442 tests in 34 suites passed, including the new `serverDate` anchor / `progressAnchor` / `interpolatedTime(anchor:)` cases)
+- [x] confirm no new resync/timer was added beyond the native `TimelineView` redraw; manual-only sync rule intact (diff inspection: only the luminance-aware `TimelineView` branch changed scheduling; `broadcastCurrentSession()` fires on state-changes only, no new `Timer`/`scheduledTimer`/resync)
+- [x] on-device (real Apple Watch Ultra) (skipped - not automatable; requires physical Apple Watch Ultra hardware, see Post-Completion)
+- [x] on-device: confirm the readout stays live for the remainder of a long run (skipped - not automatable; requires physical Apple Watch Ultra hardware, see Post-Completion)
 
 ### Task 6: Update documentation
 - [ ] update the "Apple Watch remote" progress-bar description in `README.md` if the Always-On behavior wording needs it
