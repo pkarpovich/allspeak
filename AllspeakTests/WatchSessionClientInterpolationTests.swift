@@ -26,6 +26,24 @@ struct WatchSessionClientInterpolationTests {
         )
     }
 
+    private static func metadata(
+        currentTime: Double,
+        duration: Double = 600,
+        isPlaying: Bool,
+        serverDate: Date?
+    ) -> SessionMetadata {
+        SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "t",
+            duration: duration,
+            cueCount: 0,
+            isPlaying: isPlaying,
+            currentTime: currentTime,
+            serverDate: serverDate
+        )
+    }
+
     @Test("nil snapshot returns 0")
     func nilSnapshotReturnsZero() {
         let t = WatchSessionClient.interpolatedTime(snapshot: nil, now: Self.baseDate)
@@ -190,6 +208,77 @@ struct WatchSessionClientInterpolationTests {
         )
         client.lastSnapshot = Self.snapshot(currentTime: 99, isPlaying: false)
         #expect(client.interpolatedTime == 99)
+    }
+
+    @Test("progressAnchor picks the source with the newer serverDate")
+    func progressAnchorPicksNewer() {
+        let older = Self.baseDate
+        let newer = Self.baseDate.addingTimeInterval(60)
+
+        let metaWins = WatchSessionClient.progressAnchor(
+            snapshot: Self.snapshot(currentTime: 10, isPlaying: true, serverDate: older),
+            metadata: Self.metadata(currentTime: 99, isPlaying: false, serverDate: newer)
+        )
+        #expect(metaWins?.currentTime == 99)
+        #expect(metaWins?.serverDate == newer)
+        #expect(metaWins?.isPlaying == false)
+
+        let snapWins = WatchSessionClient.progressAnchor(
+            snapshot: Self.snapshot(currentTime: 10, isPlaying: true, serverDate: newer),
+            metadata: Self.metadata(currentTime: 99, isPlaying: false, serverDate: older)
+        )
+        #expect(snapWins?.currentTime == 10)
+        #expect(snapWins?.serverDate == newer)
+        #expect(snapWins?.isPlaying == true)
+    }
+
+    @Test("progressAnchor falls back to the snapshot when metadata has no serverDate")
+    func progressAnchorFallsBackToSnapshot() {
+        let anchor = WatchSessionClient.progressAnchor(
+            snapshot: Self.snapshot(currentTime: 30, isPlaying: true, serverDate: Self.baseDate),
+            metadata: Self.metadata(currentTime: 99, isPlaying: false, serverDate: nil)
+        )
+        #expect(anchor?.currentTime == 30)
+        #expect(anchor?.serverDate == Self.baseDate)
+    }
+
+    @Test("progressAnchor uses the metadata anchor when there is no snapshot")
+    func progressAnchorUsesMetadataWithoutSnapshot() {
+        let anchor = WatchSessionClient.progressAnchor(
+            snapshot: nil,
+            metadata: Self.metadata(currentTime: 42, isPlaying: true, serverDate: Self.baseDate)
+        )
+        #expect(anchor?.currentTime == 42)
+        #expect(anchor?.serverDate == Self.baseDate)
+        #expect(anchor?.isPlaying == true)
+    }
+
+    @Test("progressAnchor returns nil when neither source has an anchor")
+    func progressAnchorNilWhenNoAnchor() {
+        #expect(WatchSessionClient.progressAnchor(snapshot: nil, metadata: nil) == nil)
+        let metaNoDate = Self.metadata(currentTime: 5, isPlaying: false, serverDate: nil)
+        #expect(WatchSessionClient.progressAnchor(snapshot: nil, metadata: metaNoDate) == nil)
+    }
+
+    @Test("interpolatedTime(anchor:) advances while playing")
+    func anchorInterpolationAdvancesWhilePlaying() {
+        let anchor: WatchSessionClient.ProgressAnchor = (currentTime: 30, serverDate: Self.baseDate, isPlaying: true, duration: 600)
+        let now = Self.baseDate.addingTimeInterval(60)
+        #expect(abs(WatchSessionClient.interpolatedTime(anchor: anchor, now: now) - 90) < 0.001)
+    }
+
+    @Test("interpolatedTime(anchor:) stays frozen while paused")
+    func anchorInterpolationFrozenWhilePaused() {
+        let anchor: WatchSessionClient.ProgressAnchor = (currentTime: 42, serverDate: Self.baseDate, isPlaying: false, duration: 600)
+        let now = Self.baseDate.addingTimeInterval(120)
+        #expect(WatchSessionClient.interpolatedTime(anchor: anchor, now: now) == 42)
+    }
+
+    @Test("interpolatedTime(anchor:) clamps to duration upper bound")
+    func anchorInterpolationClampsToDuration() {
+        let anchor: WatchSessionClient.ProgressAnchor = (currentTime: 590, serverDate: Self.baseDate, isPlaying: true, duration: 600)
+        let now = Self.baseDate.addingTimeInterval(60)
+        #expect(WatchSessionClient.interpolatedTime(anchor: anchor, now: now) == 600)
     }
 
     final class NoopSender: WatchMessageSender, @unchecked Sendable {

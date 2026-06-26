@@ -308,8 +308,11 @@ struct TransportView: View {
     }
 
     private func progressElapsed(at date: Date) -> Double {
-        if let snapshot = client.lastSnapshot {
-            return WatchSessionClient.interpolatedTime(snapshot: snapshot, now: date)
+        if let anchor = WatchSessionClient.progressAnchor(
+            snapshot: client.lastSnapshot,
+            metadata: client.metadata
+        ) {
+            return WatchSessionClient.interpolatedTime(anchor: anchor, now: date)
         }
         return client.metadata?.currentTime ?? 0
     }

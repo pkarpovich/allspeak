@@ -137,13 +137,13 @@ Per-task gate: the `AllspeakWatch` scheme and the `Allspeak` scheme both build w
 - Modify: `AllspeakWatch/Views/TransportView.swift`
 - Modify: `AllspeakTests/WatchSessionClientInterpolationTests.swift`
 
-- [ ] in `applySnapshotToMetadata(_:)`, set `serverDate: snapshot.serverDate` on the rebuilt `metadata` so the metadata anchor stays coherent with the snapshot it came from
-- [ ] add a pure static helper `progressAnchor(snapshot: PlaybackSnapshot?, metadata: SessionMetadata?) -> (currentTime: Double, serverDate: Date, isPlaying: Bool, duration: Double)?` that returns whichever source has the newer `serverDate` (metadata qualifies only when its `serverDate` is non-nil; `nil` when neither has an anchor)
-- [ ] add a pure static `interpolatedTime(anchor:now:)` applying the existing extrapolation contract to the anchor tuple (advances while playing, frozen while paused, clamped to `[0, duration]`)
-- [ ] point `TransportView.progressElapsed(at:)` at `progressAnchor` + `interpolatedTime(anchor:now:)`, falling back to `metadata.currentTime` when no anchor exists; leave drift/cue readouts on `lastSnapshot`
-- [ ] write tests: `progressAnchor` picks the newer `serverDate`; nil-metadata-serverDate falls back to the snapshot; nil-snapshot falls back to the metadata anchor; both-nil -> nil
-- [ ] write tests: `interpolatedTime(anchor:)` advances while playing, stays frozen while paused, and clamps at duration
-- [ ] run tests - must pass before next task
+- [x] in `applySnapshotToMetadata(_:)`, set `serverDate: snapshot.serverDate` on the rebuilt `metadata` so the metadata anchor stays coherent with the snapshot it came from
+- [x] add a pure static helper `progressAnchor(snapshot: PlaybackSnapshot?, metadata: SessionMetadata?) -> (currentTime: Double, serverDate: Date, isPlaying: Bool, duration: Double)?` that returns whichever source has the newer `serverDate` (metadata qualifies only when its `serverDate` is non-nil; `nil` when neither has an anchor)
+- [x] add a pure static `interpolatedTime(anchor:now:)` applying the existing extrapolation contract to the anchor tuple (advances while playing, frozen while paused, clamped to `[0, duration]`)
+- [x] point `TransportView.progressElapsed(at:)` at `progressAnchor` + `interpolatedTime(anchor:now:)`, falling back to `metadata.currentTime` when no anchor exists; leave drift/cue readouts on `lastSnapshot`
+- [x] write tests: `progressAnchor` picks the newer `serverDate`; nil-metadata-serverDate falls back to the snapshot; nil-snapshot falls back to the metadata anchor; both-nil -> nil
+- [x] write tests: `interpolatedTime(anchor:)` advances while playing, stays frozen while paused, and clamps at duration
+- [x] run tests - must pass before next task
 
 ### Task 5: Verify acceptance criteria
 - [ ] build the `AllspeakWatch` scheme and the `Allspeak` scheme - no new warnings
