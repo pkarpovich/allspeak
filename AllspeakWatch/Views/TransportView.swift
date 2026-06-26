@@ -272,21 +272,20 @@ struct TransportView: View {
     // from the wall-clock anchor, so each redraw is correct; only the cadence
     // changes. Two branches because the schedule types differ and cannot be a
     // single ternary.
-    @ViewBuilder
     private var progressBar: some View {
-        if isLuminanceReduced {
-            TimelineView(.everyMinute) { context in
-                progressBody(at: context.date)
+        Group {
+            if isLuminanceReduced {
+                TimelineView(.everyMinute) { context in
+                    progressBody(at: context.date)
+                }
+            } else {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    progressBody(at: context.date)
+                }
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Film position")
-        } else {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                progressBody(at: context.date)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Film position")
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Film position")
     }
 
     private func progressBody(at date: Date) -> some View {

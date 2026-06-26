@@ -448,6 +448,7 @@ struct WatchSessionClientTests {
         #expect(client.lastSnapshot == snapshot)
         #expect(client.metadata?.isPlaying == true)
         #expect(abs((client.metadata?.currentTime ?? 0) - 12.5) < 0.01)
+        #expect(client.metadata?.serverDate == snapshot.serverDate)
     }
 
     @Test("handleReceivedSnapshot stores snapshot when metadata is absent")

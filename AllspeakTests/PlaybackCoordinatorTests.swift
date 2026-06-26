@@ -156,7 +156,7 @@ struct PlaybackCoordinatorTests {
         let serverDate = try #require(metadata.serverDate)
         #expect(serverDate >= before)
         #expect(serverDate <= after)
-        #expect(metadata.currentTime == controller.livePosition)
+        #expect(abs(metadata.currentTime - 1.5) < 0.05)
     }
 
     @Test("currentMetadata returns nil when there is no active session")

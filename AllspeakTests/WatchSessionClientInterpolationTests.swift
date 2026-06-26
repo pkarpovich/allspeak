@@ -232,6 +232,16 @@ struct WatchSessionClientInterpolationTests {
         #expect(snapWins?.isPlaying == true)
     }
 
+    @Test("progressAnchor keeps the snapshot when both serverDates are equal")
+    func progressAnchorPrefersSnapshotOnTie() {
+        let anchor = WatchSessionClient.progressAnchor(
+            snapshot: Self.snapshot(currentTime: 10, isPlaying: true, serverDate: Self.baseDate),
+            metadata: Self.metadata(currentTime: 99, isPlaying: false, serverDate: Self.baseDate)
+        )
+        #expect(anchor?.currentTime == 10)
+        #expect(anchor?.isPlaying == true)
+    }
+
     @Test("progressAnchor falls back to the snapshot when metadata has no serverDate")
     func progressAnchorFallsBackToSnapshot() {
         let anchor = WatchSessionClient.progressAnchor(

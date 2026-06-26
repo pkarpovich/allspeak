@@ -45,13 +45,18 @@ import Foundation
 //   SessionMetadata.tracks: [TrackInfo]   (id + label, ordered by sortOrder)
 //   SessionMetadata.activeTrackID: UUID?  (nil only for legacy single-track
 //                                          sessions still on the v1 store)
+//   SessionMetadata.serverDate: Date?     (wall-clock anchor for the watch's
+//                                          progress extrapolation; decodeIfPresent,
+//                                          nil from older builds without an anchor)
 //
 // Transports (one-way arrows reflect actual reachability semantics):
 //
 //   iPhone --updateApplicationContext--> Watch   SessionMetadata
 //       small, latest-state-wins; replaces any previously delivered context.
 //       Rebroadcast on every switchTrack so the watch checkmark stays in
-//       sync with the iPhone-side selection.
+//       sync with the iPhone-side selection, and on playback state changes
+//       (play/pause/seek/skip/sync) so the latest-wins serverDate anchor is
+//       fresh on the watch's next wake.
 //
 //   Watch  <--sendMessage (reply)------- iPhone  CueBundle (gzipped, chunked)
 //       the watch PULLS the bundle: it sends requestCueChunk(index:) and the
