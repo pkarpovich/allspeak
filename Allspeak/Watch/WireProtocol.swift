@@ -206,6 +206,7 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let currentTime: Double
     let tracks: [TrackInfo]
     let activeTrackID: UUID?
+    let serverDate: Date?
 
     init(
         sessionID: UUID,
@@ -216,7 +217,8 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         isPlaying: Bool,
         currentTime: Double,
         tracks: [TrackInfo] = [],
-        activeTrackID: UUID? = nil
+        activeTrackID: UUID? = nil,
+        serverDate: Date? = nil
     ) {
         self.sessionID = sessionID
         self.revision = revision
@@ -227,10 +229,11 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.currentTime = currentTime
         self.tracks = tracks
         self.activeTrackID = activeTrackID
+        self.serverDate = serverDate
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID
+        case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID, serverDate
     }
 
     init(from decoder: any Decoder) throws {
@@ -244,6 +247,7 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.currentTime = try container.decode(Double.self, forKey: .currentTime)
         self.tracks = try container.decodeIfPresent([TrackInfo].self, forKey: .tracks) ?? []
         self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
+        self.serverDate = try container.decodeIfPresent(Date.self, forKey: .serverDate)
     }
 }
 

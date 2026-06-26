@@ -113,10 +113,10 @@ Per-task gate: the `AllspeakWatch` scheme and the `Allspeak` scheme both build w
 - Modify: `Allspeak/Watch/WireProtocol.swift`
 - Modify: `AllspeakTests/WireProtocolTests.swift`
 
-- [ ] add `let serverDate: Date?` to `SessionMetadata` (default `nil` in the memberwise `init`), add it to `CodingKeys`, and decode it with `decodeIfPresent` in `init(from:)` (mirror the `tracks`/`activeTrackID` optional pattern; encoding stays synthesized and rides `wireJSONEncoder`)
-- [ ] write test: a `SessionMetadata` with a `serverDate` round-trips through its property-list encode/decode
-- [ ] write test: a metadata payload omitting `serverDate` decodes to `serverDate == nil` (older phone build)
-- [ ] run tests - must pass before next task
+- [x] add `let serverDate: Date?` to `SessionMetadata` (default `nil` in the memberwise `init`), add it to `CodingKeys`, and decode it with `decodeIfPresent` in `init(from:)` (mirror the `tracks`/`activeTrackID` optional pattern; encoding stays synthesized and rides `wireJSONEncoder`)
+- [x] write test: a `SessionMetadata` with a `serverDate` round-trips through its property-list encode/decode
+- [x] write test: a metadata payload omitting `serverDate` decodes to `serverDate == nil` (older phone build)
+- [x] run tests - must pass before next task
 
 ### Task 3: Stamp the live anchor into metadata and refresh the context on state changes (phone)
 
