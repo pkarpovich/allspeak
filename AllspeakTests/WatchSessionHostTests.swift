@@ -200,7 +200,25 @@ struct WatchSessionHostTests {
         }
         let plist = try metadata.toPropertyList()
         let decoded = try SessionMetadata(propertyList: plist)
-        #expect(decoded == metadata)
+
+        // The live serverDate rides the wire ISO8601 encoder at millisecond
+        // precision, so compare it within tolerance and reconstruct the rest for
+        // an exact check that every other field survived the round-trip.
+        let originalDate = try #require(metadata.serverDate)
+        let decodedDate = try #require(decoded.serverDate)
+        #expect(abs(decodedDate.timeIntervalSince(originalDate)) < 0.01)
+        #expect(decoded == SessionMetadata(
+            sessionID: metadata.sessionID,
+            revision: metadata.revision,
+            title: metadata.title,
+            duration: metadata.duration,
+            cueCount: metadata.cueCount,
+            isPlaying: metadata.isPlaying,
+            currentTime: metadata.currentTime,
+            tracks: metadata.tracks,
+            activeTrackID: metadata.activeTrackID,
+            serverDate: decodedDate
+        ))
     }
 
     @Test("currentCueBundle reflects loaded subtitles")

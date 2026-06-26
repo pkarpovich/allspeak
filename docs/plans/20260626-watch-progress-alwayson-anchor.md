@@ -124,11 +124,11 @@ Per-task gate: the `AllspeakWatch` scheme and the `Allspeak` scheme both build w
 - Modify: `Allspeak/Audio/PlaybackCoordinator.swift`
 - Modify: `AllspeakTests/PlaybackCoordinatorTests.swift`
 
-- [ ] in `currentMetadata()`, set `serverDate: Date()` and source `currentTime` from `controller.livePosition` (true player position; `controller.currentTime` is `CADisplayLink`-sampled and stale in the pocket per `AudioController.swift:17-23`)
-- [ ] in `handleControllerStateChange()`, after `forceBroadcastSnapshot()`, also call `WatchSessionHost.shared.broadcastCurrentSession()` so the latest-wins application context carries a fresh anchor delivered on the watch's next wake (state changes only; not per tick)
-- [ ] write test: `currentMetadata()` returns a non-nil `serverDate` within ~1s of now and `currentTime == controller.livePosition` for a known controller position
-- [ ] write test (edge): `currentMetadata()` returns `nil` when there is no active controller/session (unchanged contract)
-- [ ] run tests - must pass before next task (note: the WCSession publish side of `handleControllerStateChange` is covered by the on-device check in Task 5, not unit-tested)
+- [x] in `currentMetadata()`, set `serverDate: Date()` and source `currentTime` from `controller.livePosition` (true player position; `controller.currentTime` is `CADisplayLink`-sampled and stale in the pocket per `AudioController.swift:17-23`)
+- [x] in `handleControllerStateChange()`, after `forceBroadcastSnapshot()`, also call `WatchSessionHost.shared.broadcastCurrentSession()` so the latest-wins application context carries a fresh anchor delivered on the watch's next wake (state changes only; not per tick)
+- [x] write test: `currentMetadata()` returns a non-nil `serverDate` within ~1s of now and `currentTime == controller.livePosition` for a known controller position
+- [x] write test (edge): `currentMetadata()` returns `nil` when there is no active controller/session (unchanged contract)
+- [x] run tests - must pass before next task (note: the WCSession publish side of `handleControllerStateChange` is covered by the on-device check in Task 5, not unit-tested)
 
 ### Task 4: Watch re-anchors from the freshest source for the progress readout
 
