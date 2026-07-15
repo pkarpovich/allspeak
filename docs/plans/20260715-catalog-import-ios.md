@@ -191,11 +191,11 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/CatalogModels.swift`, `Allspeak/Catalog/CatalogClient.swift`, `AllspeakTests/CatalogClientTests.swift`
 
-- [ ] `Codable` models exactly matching the server contract (summary list, session detail, track/file entries); ISO8601-with-fractional-seconds dates
-- [ ] `CatalogClient` with `fetchCatalog() async throws -> [CatalogSessionSummary]` and `fetchSession(id:) async throws -> CatalogSessionDetail`; Bearer header; transport behind a consumer-side protocol seam so tests inject responses
-- [ ] typed error enum (unauthorized / notFound / network / decoding) - `Equatable` for tests
-- [ ] write tests: decoding fixtures for both endpoints (real-shaped JSON), auth header present, 401→unauthorized, malformed JSON→decoding
-- [ ] run Validation Commands - green before task 3
+- [x] `Codable` models exactly matching the server contract (summary list, session detail, track/file entries); ISO8601-with-fractional-seconds dates
+- [x] `CatalogClient` with `fetchCatalog() async throws -> [CatalogSessionSummary]` and `fetchSession(id:) async throws -> CatalogSessionDetail`; Bearer header; transport behind a consumer-side protocol seam so tests inject responses
+- [x] typed error enum (unauthorized / notFound / network / decoding) - `Equatable` for tests
+- [x] write tests: decoding fixtures for both endpoints (real-shaped JSON), auth header present, 401→unauthorized, malformed JSON→decoding
+- [x] run Validation Commands - green before task 3
 
 ### Task 3: Sidecar store
 
