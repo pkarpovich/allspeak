@@ -20,7 +20,7 @@
 
 ### Rejected alternatives
 
-- **Third tab for Catalog** - rejected: the approved mockups put Catalog behind a Mine/Catalog segment in the Sessions header; no new tab bar.
+- **Third tab for Catalog** - rejected by product decision: Catalog lives behind a Mine/Catalog segment in the Sessions header; no new tab bar. The UI specs written into Tasks 9-11 are the complete, authoritative screen descriptions.
 - **Classic background `URLSession`** (survives app termination, relaunch delegate) - rejected: much more machinery than value; `BGContinuedProcessingTask` + per-file resumable staging covers backgrounding/lock, and a killed-mid-download app simply resumes missing files on the next Import tap.
 - **Core Data v5 migration for server linkage** - rejected: a sidecar `server.json` in the session directory carries `{serverID, revision, file hashes}` with zero schema risk and dies with the session folder on delete.
 - **Settings-entered URL/token** - rejected by product decision: backend is always configured; config is baked at build time via the xcconfig pattern already used for signing.
@@ -48,6 +48,7 @@ Load each skill below with the Skill tool and follow its conventions before impl
 - `.github/workflows/verify.yml` writes stub `Signing.xcconfig` files before building (PR CI); `.github/workflows/deploy-testflight.yml` writes real signing config from secrets on push to main.
 - Tests: Swift Testing only, suites tagged via `AllspeakTests/Tags.swift` (`.parser/.coreData/.storage/.audio/.cinemaSync`), hand-written `Mock*` doubles behind consumer-side protocols, view logic tested via extracted pure helpers/computed properties (`PlayerTopBarTests` pattern), Core Data against `PersistenceController.makeInMemory()`.
 - App deployment target is iOS 26.0 - `BGContinuedProcessingTask` needs no availability gating.
+- Execution environment: this plan runs on the author's Mac (no container). The operator may pre-place the gitignored `Allspeak/CatalogConfig.xcconfig` with real values before the run; no task may REQUIRE secret values to complete - build and tests must pass with a placeholder/empty token.
 
 ## Development Approach
 
@@ -67,7 +68,7 @@ The project skills carry no formal Hard-rules block; this gate materializes the 
 - **Early return**: failure/edge cases first; main logic flows flat.
 - **Testability**: new services get consumer-side protocol seams + hand-written `Mock*` doubles; SwiftUI views are not rendered in tests - extract pure helpers/computed properties and test those.
 - **Tests**: Swift Testing (`@Test`, `@Suite`, `#expect`, `#require`), suite tagged (add a `.catalog` tag in `Tags.swift`), test names are full sentences.
-- **Per-task gate**: `xcodegen generate` (when project.yml/Info.plist changed) + full suite green via the Validation command; no new build warnings.
+- **Per-task gate**: `xcodegen generate` (when project.yml/Info.plist changed) + full suite green via the Validation command; zero warnings referencing files under `Allspeak/Catalog/`, `Allspeak/Views/Catalog/`, or `AllspeakTests/Catalog*` (grep the build log for `warning:` filtered by those paths).
 
 ## Validation Commands
 
@@ -112,6 +113,8 @@ Base URL `https://allspeak.pkarpovich.dev`, all endpoints under `/api/v1`, auth 
 - `GET /api/v1/catalog` → `{"sessions": [{"id": "<uuid>", "title": "...", "revision": 1, "updatedAt": "<ISO8601>", "totalSize": 233533616, "trackLabels": ["original","ft.vocals","ft.sidon"]}]}` ordered newest-first.
 - `GET /api/v1/sessions/{id}` → `{"id", "title", "revision", "createdAt", "updatedAt", "tracks": [...], "subtitle": {...}, "urlsExpireAt": "<ISO8601>"}` where each track is `{"filename", "size", "sha256", "label", "sortOrder", "isDefault", "url"}` and subtitle is `{"filename", "size", "sha256", "url"}`. `url` is a presigned R2 GET link valid ~1 hour (`urlsExpireAt`); download directly from it with plain GET, no auth header.
 - Content addressing invariant: a file's `sha256` identifies its content across revisions - unchanged files keep their sha256 when a new revision is published. Exactly one track has `isDefault: true`; `sortOrder` defines display/import order.
+- `subtitle` is always present and non-null - every session has exactly one subtitle file.
+- `sha256` values are 64-char lowercase hex; all local hashing/comparison uses lowercase.
 - Expired presigned URL → R2 returns 403; the fix is always to re-fetch `GET /sessions/{id}` and continue with fresh URLs.
 
 ### Build-time config (the iOS ".env")
@@ -136,21 +139,29 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 
 ### Download (BGContinuedProcessingTask + async URLSession)
 
+- **Downloader input contract** (one shape for import AND sync): `SessionDownloader.start(serverID: UUID, files: [CatalogFileRequest])` where `CatalogFileRequest = {filename, size, sha256, url}`. Import passes the full manifest; sync passes ONLY the plan's changed files. `Progress.totalUnitCount` = sum of `size` over the passed files (plus the import tail slice below). On 403 (expired presigned URL): re-fetch session detail via `CatalogClient` once, remap fresh URLs onto the remaining files **by sha256** (fail if a sha is no longer in the manifest), continue; a second 403 → `.failed`.
 - `Info.plist`: `BGTaskSchedulerPermittedIdentifiers` = `["dev.karpovich.allspeak.import.*"]` (wildcard - CPT identifiers are dynamic).
-- On Import tap: `BGTaskScheduler.shared.register(forTaskWithIdentifier: "dev.karpovich.allspeak.import.<serverID>")` then submit `BGContinuedProcessingTaskRequest(identifier:title:subtitle:)` (title = session title, shown in system UI). Registration happens at tap time, NOT at launch - this is the documented CPT pattern.
-- Progress reporting is MANDATORY (silent tasks are expired by the system): `task.progress.totalUnitCount` = total bytes from the manifest, advanced per received file; the same `Progress` drives the in-app bar (detail screen / sync sheet).
-- Files download sequentially into `CatalogStaging` (`Application Support/catalog-staging/<serverID>/<sha256>-<filename>`); each completed file is sha256-verified; a verified file is skipped on any later attempt - cancel/expiration/crash resume for free. On 403 (expired URL) re-fetch session detail once and continue.
-- `task.expirationHandler` cancels the in-flight transfer (staging keeps completed files) and marks downloader state `.failed(resumable)`; `setTaskCompleted(success:)` accordingly.
-- Downloader is keyed by `serverID`; one active download at a time is enough (reject a second Import while one runs).
+- **CPT identifier is attempt-scoped**: `dev.karpovich.allspeak.import.<serverID>.<attemptUUID>` - a repeat Import/sync of the same session in one process launch registers a fresh identifier (re-registering the same id in one launch fails). On tap: `BGTaskScheduler.shared.register(forTaskWithIdentifier:)` then submit `BGContinuedProcessingTaskRequest(identifier:title:subtitle:)` (title = session title, shown in system UI). Registration happens at tap time, NOT at launch - the documented CPT pattern.
+- **The CPT launch handler owns the whole pipeline**: download all files → run `CatalogImporter` (or the sync applier) → THEN `setTaskCompleted(success: true)`. The import/apply phase must never run outside the CPT - a phone locked right after the last byte would otherwise suspend the app before the session is created. Progress reporting is MANDATORY (silent tasks are expired): reserve a fixed tail slice for the import/hash phase (`totalUnitCount` = file bytes + fixed import unit) so progress keeps advancing after the last byte. The same `Progress` instance drives the in-app bar (detail screen / sync sheet).
+- Files download sequentially into `CatalogStaging` (`Application Support/catalog-staging/<serverID>/<sha256>-<filename>`); each completed file is sha256-verified; a verified file is skipped on any later attempt - cancel/expiration/crash resume for free.
+- **Isolation**: `CatalogStaging` is a stateless non-isolated `Sendable` utility; `isStaged`/verification are `async` and hash off the main actor. The `@MainActor @Observable` downloader only holds observable state and awaits these off-main operations - never hash ~75MB files on the main actor.
+- `task.expirationHandler` cancels the in-flight work (staging keeps completed files), downloader state → `.failed(resumable: true)`, `setTaskCompleted(success: false)`.
+- Downloader is keyed by `serverID`; one active download at a time (a second Import while one runs is rejected).
+- **Service ownership**: a single `CatalogStore` (@MainActor @Observable: `CatalogClient` + `SessionDownloader` + `ImportTaskRunner` + last fetched `[CatalogSessionSummary]` + `activeDownloadID`) is created once at `SessionsView` level and passed to `CatalogListView` / `CatalogDetailView` / `CatalogSyncSheet`. Download state survives segment switches and child-view dismissal; Mine derives badges/banner from the store's last fetch (no background polling).
 
 ### Import and sync semantics
 
-- **Import**: order manifest tracks by `sortOrder`; build `PendingTrackImport` per track with its `label` (staged file URL as source); first element must be the `isDefault` track only if `sortOrder` already puts it first - otherwise import in sortOrder order and call `setActiveTrack` for the `isDefault` track after; session name = server `title`; `catalogSrc`/`dtwMapSrc` = nil. Write sidecar, clear staging dir.
-- **Sync** (server-wins reconciliation, applied via existing repository methods only):
-  1. `title` differs → `rename(id:to:)`
-  2. subtitle sha256 differs → download → `replaceSubtitle(id:srcURL:)`
-  3. manifest tracks matched to sidecar tracks **by sha256**: new sha → download → `addTrackImporting`; sha missing from manifest → `removeTrack`; label change on an unchanged sha counts as remove+add (rare, accepted)
-  4. default track differs → `setActiveTrack`; write updated sidecar
+- **Default-track invariant**: local `AudioTrack.isDefault` is an import-order artifact (`importMultiTrackSession` hard-codes it onto index 0) and is intentionally ignored by this feature. The effective default is `Session.activeTrackID`, which playback resolves first (`PlaybackCoordinator`), and which `removeTrack` may nil. Therefore BOTH import and sync **always** finish with `setActiveTrack(sessionID:trackID:)` for the manifest's `isDefault` track - unconditional and idempotent.
+- **Track identity mapping**: manifest tracks and `tracks(for:)` results are both ordered by `sortOrder` - map positionally at import to record `trackID` in the sidecar. During sync, resolve a just-added track's UUID by diffing `tracks(for:)` before/after the `addTrackImporting` call. Local `AudioTrack.filename` carries the staging `<sha256>-` prefix by construction; the sidecar `filename` field stores the server manifest name - never join by filename or label.
+- **Import**: order manifest tracks by `sortOrder`; build `PendingTrackImport` per track with its `label` (staged file URL as source); `importMultiTrackSession(name: server title, audioSources:, srtSrc:, catalogSrc: nil, dtwMapSrc: nil)` → unconditional `setActiveTrack` for the manifest default → write sidecar → clear staging dir.
+- **Sync** (server-wins reconciliation, existing repository methods only) - **apply order is load-bearing** (`removeTrack` throws `lastTrackCannotBeRemoved` at ≤1 tracks, so a revision replacing every track fails if removals run first):
+  1. download all changed files (downloader gets ONLY the changed `CatalogFileRequest`s)
+  2. `addTrackImporting` for every new sha256
+  3. `removeTrack` for every sha256 absent from the manifest (label change on an unchanged sha = remove+add; rare, accepted)
+  4. subtitle sha256 differs → `replaceSubtitle(id:srcURL:)`
+  5. `title` differs → `rename(id:to:)`
+  6. unconditional `setActiveTrack` for the manifest default
+  7. write updated sidecar
   - `lastPositionSeconds` is never written by any of these - position survives; assert it in tests.
 - Sync sheet content derives from the same diff: per file `changed`/`same` + summed download size.
 
@@ -167,7 +178,7 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 - Create: `Allspeak/CatalogConfig.xcconfig.example`, `Allspeak/Catalog/CatalogConfig.swift`, `AllspeakTests/CatalogConfigTests.swift`
 - Modify: `Allspeak/Signing.xcconfig.example`, `.gitignore`, `Allspeak/Info.plist`, `.github/workflows/deploy-testflight.yml`, `AllspeakTests/Tags.swift`
 
-- [ ] xcconfig example + optional include + gitignore entry per Technical Details; create the real gitignored `CatalogConfig.xcconfig` locally with prod values
+- [ ] xcconfig example + optional include + gitignore entry per Technical Details; if the operator has not pre-placed a real `CatalogConfig.xcconfig`, copy the example to the gitignored path with `ALLSPEAK_CATALOG_URL = https://allspeak.pkarpovich.dev` and an empty token (build and tests must pass without the secret; installing the real token is Post-Completion)
 - [ ] Info.plist keys `AllspeakCatalogURL`/`AllspeakCatalogReadToken` with `$(VAR)` substitution
 - [ ] `CatalogConfig` struct: `baseURL: URL`, `readToken: String`, init from injectable info dictionary (default `Bundle.main`)
 - [ ] `deploy-testflight.yml`: write `CatalogConfig.xcconfig` from `ALLSPEAK_CATALOG_URL`/`ALLSPEAK_CATALOG_READ_TOKEN` secrets
@@ -201,8 +212,8 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/CatalogStaging.swift`, `AllspeakTests/CatalogStagingTests.swift`
 
-- [ ] staging dir per serverID under Application Support; `stagedURL(for file)`, `isStaged(file)` (exists + streaming sha256 matches), `commit`/`clear`
-- [ ] streaming SHA-256 via CryptoKit over file handles (files are ~75MB - never load whole file into memory)
+- [ ] `CatalogStaging` is a stateless non-isolated `Sendable` struct (NOT @MainActor - see Isolation in Technical Details); staging dir per serverID under Application Support; `stagedURL(for file)`, `isStaged(file) async` (exists + streaming sha256 matches), `commit`/`clear`
+- [ ] streaming SHA-256 via CryptoKit over file handles, executed off the main actor (files are ~75MB - never load whole file into memory, never hash on the main actor)
 - [ ] write tests: verify/skip logic with temp files, corrupted file re-flagged, clear removes dir
 - [ ] run Validation Commands - green before task 5
 
@@ -211,11 +222,12 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/SessionDownloader.swift`, `AllspeakTests/SessionDownloaderTests.swift`
 
-- [ ] `@MainActor @Observable` state machine keyed by serverID: `idle / downloading(Progress) / failed(resumable: Bool) / finished`; single active download, second Import rejected
-- [ ] sequential download loop over manifest files: skip `isStaged`, download to temp, verify sha256, move into staging, advance `Progress` by file size; transport behind a protocol seam (`download(url:) async throws -> URL`)
-- [ ] 403-expiry handling: one re-fetch of session detail via `CatalogClient`, then continue; second failure → `.failed`
+- [ ] `@MainActor @Observable` state machine keyed by serverID: `idle / downloading(Progress) / failed(resumable: Bool) / finished`; single active download, second Import rejected; the class only holds observable state - hashing and file IO are awaited off-main via `CatalogStaging`
+- [ ] input contract per Technical Details: `start(serverID: UUID, files: [CatalogFileRequest])` where `CatalogFileRequest = {filename, size, sha256, url}` - the SAME entry point serves full-manifest import and changed-files-only sync; `Progress.totalUnitCount` = sum of passed sizes
+- [ ] sequential download loop over the passed files: skip `isStaged`, download to temp, verify sha256, move into staging, advance `Progress` by file size; transport behind a protocol seam (`download(url:) async throws -> URL`)
+- [ ] 403-expiry handling: one re-fetch of session detail via `CatalogClient`, remap fresh URLs onto remaining files by sha256 (missing sha → `.failed`), continue; second 403 → `.failed`
 - [ ] cancellation support (task cancellation propagates; staging retains completed files)
-- [ ] write tests with mock transport: happy path progress accounting, skip-staged resume, 403→refresh→continue, refresh fails→failed, corrupted download→error, cancel keeps staging
+- [ ] write tests with mock transport: happy path progress accounting, subset-of-manifest call (sync shape) downloads only the passed files, skip-staged resume, 403→refresh→remap-by-sha→continue, refresh fails→failed, sha vanished from manifest→failed, corrupted download→error, cancel keeps staging
 - [ ] run Validation Commands - green before task 6
 
 ### Task 6: BGContinuedProcessingTask wrapper
@@ -225,9 +237,10 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 - Modify: `Allspeak/Info.plist`
 
 - [ ] `BGTaskSchedulerPermittedIdentifiers` = `dev.karpovich.allspeak.import.*` in Info.plist
-- [ ] runner: register + submit CPT per Technical Details (dynamic id `...import.<serverID>`, title from session, `.enqueue` strategy), bridge downloader `Progress` into `task.progress`, expiration handler cancels downloader, `setTaskCompleted` on finish/fail; scheduler behind a protocol seam so logic is testable without BGTaskScheduler
-- [ ] fallback: if `submit` throws (e.g. Simulator restrictions), run the same work as a plain foreground task - Import must still work
-- [ ] write tests via scheduler seam: submit called with wildcard-matching id, progress bridged, expiration cancels, completion reported on success and failure
+- [ ] runner: register + submit CPT per Technical Details - attempt-scoped id `...import.<serverID>.<attemptUUID>` (fresh registration per submission; re-registering one id in a launch fails), title from session, `.enqueue` strategy; scheduler behind a protocol seam so logic is testable without BGTaskScheduler
+- [ ] the CPT launch handler owns the WHOLE pipeline: download → completion closure (import or sync apply, injected as `finish: () async throws -> Void`) → `setTaskCompleted(success: true)`; expiration handler cancels the downloader and `setTaskCompleted(success: false)` with staging retained; `task.progress` = downloader `Progress` including the fixed import tail slice so the task keeps reporting during the import phase
+- [ ] fallback: if `submit` throws (e.g. Simulator restrictions), run the identical pipeline as a plain in-process task (no CPT, no progress bridging)
+- [ ] write tests via scheduler seam: submit called with wildcard-matching attempt-scoped id, two submissions for the same serverID register two distinct ids, progress bridged incl. tail slice, expiration cancels + completes(false), completion reported on success and failure, submit-throws → downloader still receives all download calls and `finish` runs (fallback verified)
 - [ ] run Validation Commands - green before task 7
 
 ### Task 7: CatalogImporter
@@ -235,7 +248,7 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/CatalogImporter.swift`, `AllspeakTests/CatalogImporterTests.swift`
 
-- [ ] staged manifest → `PendingTrackImport` list ordered by `sortOrder` → `importMultiTrackSession(name:audioSources:srtSrc:catalogSrc:nil,dtwMapSrc:nil)` → `setActiveTrack` for the `isDefault` track → write sidecar (with local trackIDs from `tracks(for:)`) → `CatalogStaging.clear`
+- [ ] staged manifest → `PendingTrackImport` list ordered by `sortOrder` → `importMultiTrackSession(name:audioSources:srtSrc:catalogSrc:nil,dtwMapSrc:nil)` → **unconditional** `setActiveTrack` for the manifest's `isDefault` track (see Default-track invariant) → write sidecar mapping trackIDs **positionally** from `tracks(for:)` (both sortOrder-sorted; never join by label/filename) → `CatalogStaging.clear`
 - [ ] failure mid-import leaves staging intact (retry-able), no half-session (repository already rolls back its own dir)
 - [ ] write tests on in-memory Core Data + temp staged files: session created with right tracks/labels/default/subtitle, sidecar written with trackIDs, staging cleared on success and kept on failure
 - [ ] run Validation Commands - green before task 8
@@ -245,31 +258,32 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/CatalogSync.swift`, `AllspeakTests/CatalogSyncTests.swift`
 
-- [ ] pure `SyncPlan` builder: `(sidecar, manifest) -> plan` with items (renameTitle?, replaceSubtitle?, addTracks[], removeTrackIDs[], newDefault?) + `downloadBytes` and per-file changed/same rows for the sheet UI
-- [ ] applier: download changed files via `SessionDownloader` (reusing CPT wrapper) → apply plan via `rename`/`replaceSubtitle`/`addTrackImporting`/`removeTrack`/`setActiveTrack` → update sidecar
-- [ ] write tests: planner table-driven (subtitle-only, add track, remove track, label change = remove+add, title change, no-op); applier on in-memory Core Data asserting final track set AND `lastPositionSeconds` unchanged
+- [ ] pure `SyncPlan` builder: `(sidecar, manifest) -> plan` with items (renameTitle?, replaceSubtitle?, addTracks[], removeTrackIDs[]) + `downloadBytes` + the changed `CatalogFileRequest` list for the downloader + per-file changed/same rows for the sheet UI (no default-diffing - the applier always re-asserts the default, see invariant)
+- [ ] applier follows the pinned apply order from Technical Details exactly: downloader gets ONLY the plan's changed files → addTrackImporting (new track UUID resolved by diffing `tracks(for:)` before/after) → removeTrack → replaceSubtitle → rename → unconditional setActiveTrack for the manifest default → write sidecar; runs inside the CPT wrapper via the runner's `finish` closure
+- [ ] write tests: planner table-driven (subtitle-only, add track, remove track, label change = remove+add, title change, no-op); applier on in-memory Core Data asserting final track set, `lastPositionSeconds` unchanged, **and the all-tracks-replaced revision succeeds without `lastTrackCannotBeRemoved`** (add-before-remove order)
 - [ ] run Validation Commands - green before task 9
 
 ### Task 9: Sessions segment and catalog list UI
 
 **Files:**
-- Create: `Allspeak/Views/Catalog/CatalogListView.swift`
+- Create: `Allspeak/Views/Catalog/CatalogListView.swift`, `Allspeak/Catalog/CatalogStore.swift`, `Allspeak/Views/Catalog/CatalogDetailView.swift` (stub)
 - Modify: `Allspeak/Views/Sessions/SessionsView.swift`, `Allspeak/Design/Tokens.swift`, `Allspeak/Design/Icons.swift`
 - Create: `AllspeakTests/CatalogListStateTests.swift`
 
-- [ ] Mine/Catalog segmented control in the Sessions header per mockups (tokens for styling; new glyphs into `Icons`)
-- [ ] `CatalogListView`: fetch on appear via `CatalogClient`, rows show title, total size, track labels, trailing state control (Import / ✓ Added / Update / progress); plain inline error + Retry on fetch failure
-- [ ] row tap → `CatalogDetailView` (stub until task 10); Import from row starts download+import via runner
+- [ ] `CatalogStore` per Service ownership in Technical Details: @MainActor @Observable holding client, downloader, runner, last fetched summaries, `activeDownloadID`; created once in `SessionsView` (`@State`) and passed down - download state survives segment switches and child dismissal
+- [ ] Mine/Catalog segmented control with two segments (Mine default) at the top of the Sessions content, below the existing large title and toolbar `+` - this sentence is the spec; styling via `Tokens`, new glyphs into `Icons`
+- [ ] `CatalogListView`: fetch on appear via the store, rows show title, formatted total size, track labels, trailing state control with exactly four states (Import / ✓ Added / Update / progress); plain inline error + Retry on fetch failure
+- [ ] row tap → `CatalogDetailView` stub created here with pinned shape `struct CatalogDetailView: View { let session: CatalogSessionSummary; let store: CatalogStore; var body ... }` (placeholder body; Task 10 replaces it); Import from row starts download+import via the runner
 - [ ] write tests: row-state mapping and size/label formatting helpers (pure functions extracted from the view)
 - [ ] run Validation Commands - green before task 10
 
 ### Task 10: Catalog detail with import progress
 
 **Files:**
-- Create: `Allspeak/Views/Catalog/CatalogDetailView.swift`
+- Modify (replace stub): `Allspeak/Views/Catalog/CatalogDetailView.swift`
 - Create: `AllspeakTests/CatalogDetailStateTests.swift`
 
-- [ ] detail screen per mockups 02-04: title, size chips, "What's inside" (each track with label+size, subtitle row), bottom CTA cycling Import → progress bar with % → ✓ Imported ("Added to Mine")
+- [ ] detail screen - this list IS the spec: title header, size chip row, "What's inside" section listing each track (label + formatted size) and a subtitle row, bottom full-width CTA cycling Import → progress bar with percent → ✓ Imported ("Added to Mine" caption)
 - [ ] progress binds to the downloader's `Progress`; leaving the screen does not affect the download (CPT owns it)
 - [ ] write tests: CTA state derivation helper (idle/downloading/imported/update), byte-count formatting
 - [ ] run Validation Commands - green before task 11
@@ -281,17 +295,17 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 - Modify: `Allspeak/Views/Sessions/SessionsView.swift`, `Allspeak/Views/Sessions/SessionCardView.swift`
 - Create: `AllspeakTests/CatalogSyncSheetStateTests.swift`
 
-- [ ] Mine rows for sidecar-linked sessions show `Catalog · v<revision>` badge; when catalog reports a higher revision - Update button + "N updates available" banner per mockup 05 (revision check reuses the last catalog fetch; no background polling)
-- [ ] sync sheet per mockups 06-08: `v<local> → v<server>`, "What changed" rows (changed/same + sizes), note "Your playback position is kept", CTA Sync → progress → done
+- [ ] Mine rows for sidecar-linked sessions show a `Catalog · v<revision>` badge; when the store's last catalog fetch reports a higher revision - an Update button on the row and an "N updates available" banner above the list; no background polling. This sentence is the spec
+- [ ] sync sheet - this list IS the spec: header `v<local> → v<server>`, "What changed" rows (per file: name, changed/same, size), note "Your playback position is kept", CTA cycling Sync → progress → done
 - [ ] write tests: sheet content derivation from a `SyncPlan` (changed/same rows, delta size string), badge/banner derivation
 - [ ] run Validation Commands - green before task 12
 
 ### Task 12: Verify acceptance criteria
 
-- [ ] walk Overview + mockup flows against the built UI in the Simulator (catalog list, detail import with progress, Mine badge, sync sheet) using the live backend
-- [ ] confirm every Non-goal is still out (no settings UI, no empty-state branches, no watch changes)
-- [ ] full suite green via Validation Commands; no new warnings; `.catalog` tag filters the new suites
-- [ ] confirm imported session plays and appears on the watch like any local session (no wire changes)
+- [ ] walk the Overview anchor flow in the Simulator against a stubbed `CatalogClient` transport returning the Task 2 JSON fixtures (list with both sessions → detail → Import drives progress to Imported → Mine shows the `Catalog · v1` badge → a revision-bumped fixture produces the Update button and a sync sheet with changed/same rows)
+- [ ] code-reading checklist, each verifiable from committed source: `SessionsView` contains the Mine/Catalog segment and owns one `CatalogStore`; `CatalogListView` renders all four row states from the row-state helper; `CatalogSyncSheet` renders from a `SyncPlan`; `CatalogImporter` creates sessions exclusively via `importMultiTrackSession`
+- [ ] confirm every Non-goal is still out (no settings UI, no empty-state branches); `git diff main` touches nothing under `AllspeakWatch/` and no wire-protocol types - imported sessions are indistinguishable from local ones by construction
+- [ ] full suite green via Validation Commands; zero warnings on the new paths (per the per-task gate); every new `@Suite` carries `.tags(.catalog)` (grep across the new test files)
 
 ### Task 13: Update documentation
 
@@ -302,7 +316,8 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 
 *Manual / external items - no checkboxes*
 
+- Install the real read token into the local gitignored `Allspeak/CatalogConfig.xcconfig` (operator-only; the token lives in the operator's records and in GitHub secrets).
 - Add GitHub secrets `ALLSPEAK_CATALOG_URL` and `ALLSPEAK_CATALOG_READ_TOKEN` to the allspeak repo; next push to main ships a TestFlight build with the config baked in.
-- On-device anchor scenario (see Overview): import "The Invite · RU dub" (233MB) over LTE, lock mid-download, verify completion + playback; then publish a revision bump on the backend (re-run the catalog publish flow with a tweaked srt) and verify the Update → sync sheet → position-kept path.
-- The prod catalog already contains both test sessions; presigned URLs and dedup were verified end-to-end from this machine on 2026-07-15.
+- On-device anchor scenario (see Overview), requires the real token: import "The Invite · RU dub" (233MB) over LTE, lock mid-download, verify completion + playback (audio audible, subtitles scroll) and that the session appears on the paired watch; then publish a new revision on the backend (operator-only: the backend repo is github.com/pkarpovich/allspeak-catalog - negotiate uploads for a tweaked srt via `POST /api/v1/uploads`, PUT it, bump via `PUT /api/v1/sessions/{id}`) and verify the Update → sync sheet → position-kept path.
+- As of 2026-07-15 the prod catalog serves both test sessions and `GET /sessions/{id}` returns working presigned URLs (verified manually; re-verify during the on-device scenario).
 - Future (separate plans): landing page + deeplink import; removal of ShazamKit/DTW machinery from the app.
