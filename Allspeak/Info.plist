@@ -39,6 +39,10 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>dev.karpovich.allspeak.import.*</string>
+	</array>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UISupportedInterfaceOrientations</key>

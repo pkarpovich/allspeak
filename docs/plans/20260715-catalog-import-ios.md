@@ -236,12 +236,12 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 - Create: `Allspeak/Catalog/ImportTaskRunner.swift`, `AllspeakTests/ImportTaskRunnerTests.swift`
 - Modify: `Allspeak/Info.plist`
 
-- [ ] `BGTaskSchedulerPermittedIdentifiers` = `dev.karpovich.allspeak.import.*` in Info.plist
-- [ ] runner: register + submit CPT per Technical Details - attempt-scoped id `...import.<serverID>.<attemptUUID>` (fresh registration per submission; re-registering one id in a launch fails), title from session, `.enqueue` strategy; scheduler behind a protocol seam so logic is testable without BGTaskScheduler
-- [ ] the CPT launch handler owns the WHOLE pipeline: download → completion closure (import or sync apply, injected as `finish: () async throws -> Void`) → `setTaskCompleted(success: true)`; expiration handler cancels the downloader and `setTaskCompleted(success: false)` with staging retained; `task.progress` = downloader `Progress` including the fixed import tail slice so the task keeps reporting during the import phase
-- [ ] fallback: if `submit` throws (e.g. Simulator restrictions), run the identical pipeline as a plain in-process task (no CPT, no progress bridging)
-- [ ] write tests via scheduler seam: submit called with wildcard-matching attempt-scoped id, two submissions for the same serverID register two distinct ids, progress bridged incl. tail slice, expiration cancels + completes(false), completion reported on success and failure, submit-throws → downloader still receives all download calls and `finish` runs (fallback verified)
-- [ ] run Validation Commands - green before task 7
+- [x] `BGTaskSchedulerPermittedIdentifiers` = `dev.karpovich.allspeak.import.*` in Info.plist
+- [x] runner: register + submit CPT per Technical Details - attempt-scoped id `...import.<serverID>.<attemptUUID>` (fresh registration per submission; re-registering one id in a launch fails), title from session, `.queue` strategy (Swift name for the ObjC `...SubmissionStrategyQueue`; the default); scheduler behind a protocol seam (`ImportTaskScheduling`) so logic is testable without BGTaskScheduler
+- [x] the CPT launch handler owns the WHOLE pipeline: download → completion closure (import or sync apply, injected as `finish: () async throws -> Void`) → `setTaskCompleted(success: true)`; expiration handler cancels the downloader and `setTaskCompleted(success: false)` with staging retained; `task.progress` = downloader `Progress` including the fixed import tail slice so the task keeps reporting during the import phase
+- [x] fallback: if `submit` throws (e.g. Simulator restrictions), run the identical pipeline as a plain in-process task (no CPT, no progress bridging)
+- [x] write tests via scheduler seam: submit called with wildcard-matching attempt-scoped id, two submissions for the same serverID register two distinct ids, progress bridged incl. tail slice, expiration cancels + completes(false), completion reported on success and failure, submit-throws → downloader still receives all download calls and `finish` runs (fallback verified)
+- [x] run Validation Commands - green before task 7
 
 ### Task 7: CatalogImporter
 
