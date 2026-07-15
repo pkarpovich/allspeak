@@ -20,6 +20,10 @@
 	<string>1</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>AllspeakCatalogURL</key>
+	<string>$(ALLSPEAK_CATALOG_URL)</string>
+	<key>AllspeakCatalogReadToken</key>
+	<string>$(ALLSPEAK_CATALOG_READ_TOKEN)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>

@@ -1,0 +1,13 @@
+// Catalog backend configuration (the iOS ".env").
+// Copy to CatalogConfig.xcconfig (git-ignored) and fill in the read token.
+// Signing.xcconfig pulls this in via `#include? "CatalogConfig.xcconfig"`,
+// so an absent file does not break the build (settings substitute as empty).
+//
+// The `/$()/ ` between scheme and host defeats xcconfig's `//` comment
+// stripping; it expands to `https://` at build time.
+//
+// CI builds leave the token empty; the real values are written from GitHub
+// secrets by .github/workflows/deploy-testflight.yml.
+
+ALLSPEAK_CATALOG_URL = https:/$()/allspeak.pkarpovich.dev
+ALLSPEAK_CATALOG_READ_TOKEN =

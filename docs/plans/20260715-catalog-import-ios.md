@@ -178,13 +178,13 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 - Create: `Allspeak/CatalogConfig.xcconfig.example`, `Allspeak/Catalog/CatalogConfig.swift`, `AllspeakTests/CatalogConfigTests.swift`
 - Modify: `Allspeak/Signing.xcconfig.example`, `.gitignore`, `Allspeak/Info.plist`, `.github/workflows/deploy-testflight.yml`, `AllspeakTests/Tags.swift`
 
-- [ ] xcconfig example + optional include + gitignore entry per Technical Details; if the operator has not pre-placed a real `CatalogConfig.xcconfig`, copy the example to the gitignored path with `ALLSPEAK_CATALOG_URL = https://allspeak.pkarpovich.dev` and an empty token (build and tests must pass without the secret; installing the real token is Post-Completion)
-- [ ] Info.plist keys `AllspeakCatalogURL`/`AllspeakCatalogReadToken` with `$(VAR)` substitution
-- [ ] `CatalogConfig` struct: `baseURL: URL`, `readToken: String`, init from injectable info dictionary (default `Bundle.main`)
-- [ ] `deploy-testflight.yml`: write `CatalogConfig.xcconfig` from `ALLSPEAK_CATALOG_URL`/`ALLSPEAK_CATALOG_READ_TOKEN` secrets
-- [ ] add `.catalog` tag to `Tags.swift`
-- [ ] write tests: config parses from dictionary; missing/empty keys produce a clear failure
-- [ ] run Validation Commands - green before task 2
+- [x] xcconfig example + optional include + gitignore entry per Technical Details; if the operator has not pre-placed a real `CatalogConfig.xcconfig`, copy the example to the gitignored path with `ALLSPEAK_CATALOG_URL = https://allspeak.pkarpovich.dev` and an empty token (build and tests must pass without the secret; installing the real token is Post-Completion)
+- [x] Info.plist keys `AllspeakCatalogURL`/`AllspeakCatalogReadToken` with `$(VAR)` substitution
+- [x] `CatalogConfig` struct: `baseURL: URL`, `readToken: String`, init from injectable info dictionary (default `Bundle.main`)
+- [x] `deploy-testflight.yml`: write `CatalogConfig.xcconfig` from `ALLSPEAK_CATALOG_URL`/`ALLSPEAK_CATALOG_READ_TOKEN` secrets
+- [x] add `.catalog` tag to `Tags.swift`
+- [x] write tests: config parses from dictionary; missing/empty keys produce a clear failure
+- [x] run Validation Commands - green before task 2
 
 ### Task 2: Wire models and CatalogClient
 

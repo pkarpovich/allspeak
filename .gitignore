@@ -11,6 +11,9 @@ build/
 Allspeak/Signing.xcconfig
 AllspeakWatch/Signing.xcconfig
 
+# Local catalog backend config (real read token installed out-of-band)
+Allspeak/CatalogConfig.xcconfig
+
 # Release export artifacts
 export/
 ExportOptions.plist
