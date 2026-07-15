@@ -222,13 +222,13 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/SessionDownloader.swift`, `AllspeakTests/SessionDownloaderTests.swift`
 
-- [ ] `@MainActor @Observable` state machine keyed by serverID: `idle / downloading(Progress) / failed(resumable: Bool) / finished`; single active download, second Import rejected; the class only holds observable state - hashing and file IO are awaited off-main via `CatalogStaging`
-- [ ] input contract per Technical Details: `start(serverID: UUID, files: [CatalogFileRequest])` where `CatalogFileRequest = {filename, size, sha256, url}` - the SAME entry point serves full-manifest import and changed-files-only sync; `Progress.totalUnitCount` = sum of passed sizes
-- [ ] sequential download loop over the passed files: skip `isStaged`, download to temp, verify sha256, move into staging, advance `Progress` by file size; transport behind a protocol seam (`download(url:) async throws -> URL`)
-- [ ] 403-expiry handling: one re-fetch of session detail via `CatalogClient`, remap fresh URLs onto remaining files by sha256 (missing sha → `.failed`), continue; second 403 → `.failed`
-- [ ] cancellation support (task cancellation propagates; staging retains completed files)
-- [ ] write tests with mock transport: happy path progress accounting, subset-of-manifest call (sync shape) downloads only the passed files, skip-staged resume, 403→refresh→remap-by-sha→continue, refresh fails→failed, sha vanished from manifest→failed, corrupted download→error, cancel keeps staging
-- [ ] run Validation Commands - green before task 6
+- [x] `@MainActor @Observable` state machine keyed by serverID: `idle / downloading(Progress) / failed(resumable: Bool) / finished`; single active download, second Import rejected; the class only holds observable state - hashing and file IO are awaited off-main via `CatalogStaging`
+- [x] input contract per Technical Details: `start(serverID: UUID, files: [CatalogFileRequest])` where `CatalogFileRequest = {filename, size, sha256, url}` - the SAME entry point serves full-manifest import and changed-files-only sync; `Progress.totalUnitCount` = sum of passed sizes
+- [x] sequential download loop over the passed files: skip `isStaged`, download to temp, verify sha256, move into staging, advance `Progress` by file size; transport behind a protocol seam (`download(url:) async throws -> URL`)
+- [x] 403-expiry handling: one re-fetch of session detail via `CatalogClient`, remap fresh URLs onto remaining files by sha256 (missing sha → `.failed`), continue; second 403 → `.failed`
+- [x] cancellation support (task cancellation propagates; staging retains completed files)
+- [x] write tests with mock transport: happy path progress accounting, subset-of-manifest call (sync shape) downloads only the passed files, skip-staged resume, 403→refresh→remap-by-sha→continue, refresh fails→failed, sha vanished from manifest→failed, corrupted download→error, cancel keeps staging
+- [x] run Validation Commands - green before task 6
 
 ### Task 6: BGContinuedProcessingTask wrapper
 
