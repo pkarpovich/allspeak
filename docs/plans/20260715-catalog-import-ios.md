@@ -202,10 +202,10 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/CatalogSidecar.swift`, `AllspeakTests/CatalogSidecarTests.swift`
 
-- [ ] `CatalogSidecar` codable struct per Technical Details + `save(to sessionDir:)`, `load(from:)`, and `loadAll(documentsRoot:) -> [CatalogSidecar]` scanning `sessions/*/server.json`
-- [ ] row-state derivation helper: `(catalog entries, sidecars, activeDownloadID) -> per-entry state` (import/added/update/downloading) as a pure function
-- [ ] write tests: round-trip, loadAll over temp dirs (with sessions lacking sidecars mixed in), state derivation table-driven (all four states)
-- [ ] run Validation Commands - green before task 4
+- [x] `CatalogSidecar` codable struct per Technical Details + `save(to sessionDir:)`, `load(from:)`, and `loadAll(documentsRoot:) -> [CatalogSidecar]` scanning `sessions/*/server.json`
+- [x] row-state derivation helper: `(catalog entries, sidecars, activeDownloadID) -> per-entry state` (import/added/update/downloading) as a pure function
+- [x] write tests: round-trip, loadAll over temp dirs (with sessions lacking sidecars mixed in), state derivation table-driven (all four states)
+- [x] run Validation Commands - green before task 4
 
 ### Task 4: Staging with sha256 verification
 
