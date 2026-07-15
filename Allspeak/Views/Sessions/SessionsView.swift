@@ -8,20 +8,25 @@ struct SessionsView: View {
     ) private var sessions: FetchedResults<Session>
 
     @State private var repository = SessionRepository()
+    @State private var catalogStore: CatalogStore
+    @State private var segment: SessionsSegment = .mine
     @State private var renameTarget: RenameTarget?
     @State private var isPresentingCreate = false
     @State private var editTarget: EditTarget?
     @State private var tracksTarget: TracksTarget?
+
+    init(catalogStore: CatalogStore = .live()) {
+        _catalogStore = State(initialValue: catalogStore)
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Tokens.bg.ignoresSafeArea()
 
-                if sessions.isEmpty {
-                    emptyState
-                } else {
-                    populatedList
+                VStack(spacing: 0) {
+                    segmentPicker
+                    segmentContent
                 }
             }
             .navigationTitle("Sessions")
@@ -36,6 +41,9 @@ struct SessionsView: View {
             }
             .navigationDestination(for: NSManagedObjectID.self) { id in
                 PlayerView(sessionID: id)
+            }
+            .navigationDestination(for: CatalogSessionSummary.self) { summary in
+                CatalogDetailView(session: summary, store: catalogStore)
             }
             .sheet(isPresented: $isPresentingCreate) {
                 CreateSessionView(mode: .new, repository: repository)
@@ -66,6 +74,30 @@ struct SessionsView: View {
         }
         .preferredColorScheme(.dark)
         .tint(Tokens.accent)
+    }
+
+    private var segmentPicker: some View {
+        Picker("Section", selection: $segment) {
+            Text("Mine").tag(SessionsSegment.mine)
+            Text("Catalog").tag(SessionsSegment.catalog)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder private var segmentContent: some View {
+        switch segment {
+        case .mine:
+            if sessions.isEmpty {
+                emptyState
+            } else {
+                populatedList
+            }
+        case .catalog:
+            CatalogListView(store: catalogStore)
+        }
     }
 
     private var emptyState: some View {
@@ -148,6 +180,11 @@ struct SessionsView: View {
             await PlaybackCoordinator.shared.refreshIfActive(sessionID: id)
         }
     }
+}
+
+private enum SessionsSegment: Hashable {
+    case mine
+    case catalog
 }
 
 private struct RenameTarget: Identifiable {

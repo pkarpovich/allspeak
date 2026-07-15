@@ -1,6 +1,6 @@
 import Foundation
 
-struct CatalogSessionSummary: Codable, Equatable, Sendable, Identifiable {
+struct CatalogSessionSummary: Codable, Equatable, Hashable, Sendable, Identifiable {
     let id: UUID
     let title: String
     let revision: Int

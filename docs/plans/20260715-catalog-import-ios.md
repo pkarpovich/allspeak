@@ -272,12 +272,12 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 - Modify: `Allspeak/Views/Sessions/SessionsView.swift`, `Allspeak/Design/Tokens.swift`, `Allspeak/Design/Icons.swift`
 - Create: `AllspeakTests/CatalogListStateTests.swift`
 
-- [ ] `CatalogStore` per Service ownership in Technical Details: @MainActor @Observable holding client, downloader, runner, last fetched summaries, `activeDownloadID`; created once in `SessionsView` (`@State`) and passed down - download state survives segment switches and child dismissal
-- [ ] Mine/Catalog segmented control with two segments (Mine default) at the top of the Sessions content, below the existing large title and toolbar `+` - this sentence is the spec; styling via `Tokens`, new glyphs into `Icons`
-- [ ] `CatalogListView`: fetch on appear via the store, rows show title, formatted total size, track labels, trailing state control with exactly four states (Import / ✓ Added / Update / progress); plain inline error + Retry on fetch failure
-- [ ] row tap → `CatalogDetailView` stub created here with pinned shape `struct CatalogDetailView: View { let session: CatalogSessionSummary; let store: CatalogStore; var body ... }` (placeholder body; Task 10 replaces it); Import from row starts download+import via the runner
-- [ ] write tests: row-state mapping and size/label formatting helpers (pure functions extracted from the view)
-- [ ] run Validation Commands - green before task 10
+- [x] `CatalogStore` per Service ownership in Technical Details: @MainActor @Observable holding client, downloader, runner, last fetched summaries, `activeDownloadID`; created once in `SessionsView` (`@State`) and passed down - download state survives segment switches and child dismissal
+- [x] Mine/Catalog segmented control with two segments (Mine default) at the top of the Sessions content, below the existing large title and toolbar `+` - this sentence is the spec; styling via `Tokens`, new glyphs into `Icons`
+- [x] `CatalogListView`: fetch on appear via the store, rows show title, formatted total size, track labels, trailing state control with exactly four states (Import / ✓ Added / Update / progress); plain inline error + Retry on fetch failure
+- [x] row tap → `CatalogDetailView` stub created here with pinned shape `struct CatalogDetailView: View { let session: CatalogSessionSummary; let store: CatalogStore; var body ... }` (placeholder body; Task 10 replaces it); Import from row starts download+import via the runner
+- [x] write tests: row-state mapping and size/label formatting helpers (pure functions extracted from the view)
+- [x] run Validation Commands - green before task 10
 
 ### Task 10: Catalog detail with import progress
 
