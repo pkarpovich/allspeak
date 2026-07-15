@@ -212,10 +212,10 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Create: `Allspeak/Catalog/CatalogStaging.swift`, `AllspeakTests/CatalogStagingTests.swift`
 
-- [ ] `CatalogStaging` is a stateless non-isolated `Sendable` struct (NOT @MainActor - see Isolation in Technical Details); staging dir per serverID under Application Support; `stagedURL(for file)`, `isStaged(file) async` (exists + streaming sha256 matches), `commit`/`clear`
-- [ ] streaming SHA-256 via CryptoKit over file handles, executed off the main actor (files are ~75MB - never load whole file into memory, never hash on the main actor)
-- [ ] write tests: verify/skip logic with temp files, corrupted file re-flagged, clear removes dir
-- [ ] run Validation Commands - green before task 5
+- [x] `CatalogStaging` is a stateless non-isolated `Sendable` struct (NOT @MainActor - see Isolation in Technical Details); staging dir per serverID under Application Support; `stagedURL(for file)`, `isStaged(file) async` (exists + streaming sha256 matches), `commit`/`clear`
+- [x] streaming SHA-256 via CryptoKit over file handles, executed off the main actor (files are ~75MB - never load whole file into memory, never hash on the main actor)
+- [x] write tests: verify/skip logic with temp files, corrupted file re-flagged, clear removes dir
+- [x] run Validation Commands - green before task 5
 
 ### Task 5: SessionDownloader
 
