@@ -247,11 +247,12 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 
 **Files:**
 - Create: `Allspeak/Catalog/CatalogImporter.swift`, `AllspeakTests/CatalogImporterTests.swift`
+- Modify: `Allspeak/Storage/SessionRepository.swift` (added `sessionUUID(id:)` accessor - the sidecar dir is keyed by the local session UUID, which `importMultiTrackSession` generates internally and did not previously expose)
 
-- [ ] staged manifest → `PendingTrackImport` list ordered by `sortOrder` → `importMultiTrackSession(name:audioSources:srtSrc:catalogSrc:nil,dtwMapSrc:nil)` → **unconditional** `setActiveTrack` for the manifest's `isDefault` track (see Default-track invariant) → write sidecar mapping trackIDs **positionally** from `tracks(for:)` (both sortOrder-sorted; never join by label/filename) → `CatalogStaging.clear`
-- [ ] failure mid-import leaves staging intact (retry-able), no half-session (repository already rolls back its own dir)
-- [ ] write tests on in-memory Core Data + temp staged files: session created with right tracks/labels/default/subtitle, sidecar written with trackIDs, staging cleared on success and kept on failure
-- [ ] run Validation Commands - green before task 8
+- [x] staged manifest → `PendingTrackImport` list ordered by `sortOrder` → `importMultiTrackSession(name:audioSources:srtSrc:catalogSrc:nil,dtwMapSrc:nil)` → **unconditional** `setActiveTrack` for the manifest's `isDefault` track (see Default-track invariant) → write sidecar mapping trackIDs **positionally** from `tracks(for:)` (both sortOrder-sorted; never join by label/filename) → `CatalogStaging.clear`
+- [x] failure mid-import leaves staging intact (retry-able), no half-session (repository already rolls back its own dir)
+- [x] write tests on in-memory Core Data + temp staged files: session created with right tracks/labels/default/subtitle, sidecar written with trackIDs, staging cleared on success and kept on failure
+- [x] run Validation Commands - green before task 8
 
 ### Task 8: Sync planner and applier
 

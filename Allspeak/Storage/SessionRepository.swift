@@ -440,6 +440,22 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func sessionUUID(id: NSManagedObjectID) async throws -> UUID {
+        let context = persistence.viewContext
+        return try await context.perform {
+            let object: NSManagedObject
+            do {
+                object = try context.existingObject(with: id)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = object.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            return uuid
+        }
+    }
+
     func replaceSubtitle(id: NSManagedObjectID, srcURL: URL) async throws {
         let context = persistence.newBackgroundContext()
         let storage = self.storage
