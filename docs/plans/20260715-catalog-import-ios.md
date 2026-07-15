@@ -258,11 +258,12 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 
 **Files:**
 - Create: `Allspeak/Catalog/CatalogSync.swift`, `AllspeakTests/CatalogSyncTests.swift`
+- Note: the `SyncPlan` builder takes `(sidecar, manifest, currentTitle)` - the sidecar does not store the title, so the current local session name is required to derive the optional `renameTitle`; the caller supplies it via `fetchSnapshot`. Track identity for the add/remove diff is the `(sha256, label)` pair, which is what turns a label-only change into remove+add.
 
-- [ ] pure `SyncPlan` builder: `(sidecar, manifest) -> plan` with items (renameTitle?, replaceSubtitle?, addTracks[], removeTrackIDs[]) + `downloadBytes` + the changed `CatalogFileRequest` list for the downloader + per-file changed/same rows for the sheet UI (no default-diffing - the applier always re-asserts the default, see invariant)
-- [ ] applier follows the pinned apply order from Technical Details exactly: downloader gets ONLY the plan's changed files → addTrackImporting (new track UUID resolved by diffing `tracks(for:)` before/after) → removeTrack → replaceSubtitle → rename → unconditional setActiveTrack for the manifest default → write sidecar; runs inside the CPT wrapper via the runner's `finish` closure
-- [ ] write tests: planner table-driven (subtitle-only, add track, remove track, label change = remove+add, title change, no-op); applier on in-memory Core Data asserting final track set, `lastPositionSeconds` unchanged, **and the all-tracks-replaced revision succeeds without `lastTrackCannotBeRemoved`** (add-before-remove order)
-- [ ] run Validation Commands - green before task 9
+- [x] pure `SyncPlan` builder: `(sidecar, manifest, currentTitle) -> plan` with items (newTitle?, replaceSubtitle?, addTracks[], removeTrackIDs[]) + `downloadBytes` + the changed `CatalogFileRequest` list for the downloader (`downloadRequests`) + per-file changed/same rows for the sheet UI (`fileRows`; no default-diffing - the applier always re-asserts the default, see invariant)
+- [x] applier follows the pinned apply order from Technical Details exactly: downloader gets ONLY the plan's changed files → addTrackImporting (new track UUID resolved by diffing `tracks(for:)` before/after) → removeTrack → replaceSubtitle → rename → unconditional setActiveTrack for the manifest default → write sidecar; runs inside the CPT wrapper via the runner's `finish` closure
+- [x] write tests: planner table-driven (subtitle-only, add track, remove track, label change = remove+add, title change, no-op); applier on in-memory Core Data asserting final track set, `lastPositionSeconds` unchanged, **and the all-tracks-replaced revision succeeds without `lastTrackCannotBeRemoved`** (add-before-remove order)
+- [x] run Validation Commands - green before task 9
 
 ### Task 9: Sessions segment and catalog list UI
 
