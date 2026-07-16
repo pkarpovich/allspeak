@@ -95,13 +95,10 @@ struct CatalogSyncApplier: Sendable {
         // removeTrack's lastTrackCannotBeRemoved guard if removals ran first.
         var keyToTrackID: [TrackKey: UUID] = [:]
         for track in plan.addTracks {
-            let before = Set(try await repository.tracks(for: sessionID).map(\.trackID))
             let srcURL = staging.stagedURL(serverID: serverID, sha256: track.sha256, filename: track.filename)
-            _ = try await repository.addTrackImporting(sessionID: sessionID, srcURL: srcURL, label: track.label)
-            let after = try await repository.tracks(for: sessionID).map(\.trackID)
-            guard let newTrackID = after.first(where: { !before.contains($0) }) else {
-                throw CatalogSyncError.trackResolutionFailed
-            }
+            let newTrackID = try await repository.addTrackImporting(
+                sessionID: sessionID, srcURL: srcURL, label: track.label
+            )
             keyToTrackID[TrackKey(sha256: track.sha256, label: track.label)] = newTrackID
         }
 
