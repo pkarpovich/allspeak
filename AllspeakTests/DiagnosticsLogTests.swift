@@ -130,7 +130,7 @@ struct DiagnosticsLogTests {
     func noFileBeforeFirstEvent() {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         let url = try! #require(log.currentFileURL)
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
@@ -143,23 +143,25 @@ struct DiagnosticsLogTests {
         #expect(!FileManager.default.fileExists(atPath: diagnosticsDir(root).path))
     }
 
-    @Test("a session without a catalog never creates a file")
-    func gatingWithoutCatalog() {
+    @Test("every begun session writes its events, with no catalog gate")
+    func loggingIsUngated() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune", hasCatalog: false)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.log(.pause)
-        let url = try! #require(log.currentFileURL)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
-        #expect(!FileManager.default.fileExists(atPath: diagnosticsDir(root).path))
+        let url = try #require(log.currentFileURL)
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        let expected = #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n"
+            + #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause"}"# + "\n"
+        #expect(contents == expected)
     }
 
     @Test("appended events accumulate as one line each")
     func appendsAccumulate() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.log(.pause)
         let url = try #require(log.currentFileURL)
@@ -175,12 +177,12 @@ struct DiagnosticsLogTests {
         let clock = MutableClock(date("2026-06-12T19:43:02.000Z"))
         let log = DiagnosticsLog(rootURL: root, now: { clock.current })
 
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.end()
 
         clock.current = date("2026-06-12T21:10:00.000Z")
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.end()
 
@@ -204,11 +206,11 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
 
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.end()
 
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.pause)
         log.end()
 
@@ -231,7 +233,7 @@ struct DiagnosticsLogTests {
     func filenameSlug() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune: Part Two!", hasCatalog: true)
+        log.begin(filmTitle: "Dune: Part Two!")
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent == "dune-part-two-20260612-1943.jsonl")
     }
@@ -240,7 +242,7 @@ struct DiagnosticsLogTests {
     func blankTitleSlug() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "!!!", hasCatalog: true)
+        log.begin(filmTitle: "!!!")
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent == "session-20260612-1943.jsonl")
     }

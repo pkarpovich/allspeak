@@ -358,18 +358,7 @@ struct PlaybackCoordinatorTests {
         let root: URL
     }
 
-    private static func setCatalogFilename(
-        _ filename: String?,
-        sessionID: NSManagedObjectID,
-        in persistence: PersistenceController
-    ) throws {
-        let context = persistence.viewContext
-        let session = try context.existingObject(with: sessionID)
-        session.setValue(filename, forKey: "catalogFilename")
-        try context.save()
-    }
-
-    private static func importSession(withCatalog: Bool, name: String = "Movie") async throws -> UnstartedSession {
+    private static func importSession(name: String = "Movie") async throws -> UnstartedSession {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("allspeak-coord-diag-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -391,9 +380,6 @@ struct PlaybackCoordinatorTests {
             audioSrc: movedAudio,
             srtSrc: srtURL
         )
-        if withCatalog {
-            try setCatalogFilename("film.shazamcatalog", sessionID: sessionID, in: persistence)
-        }
         persistence.viewContext.refreshAllObjects()
 
         return UnstartedSession(sessionID: sessionID, repo: repo, persistence: persistence, storage: storage, root: root)
@@ -421,9 +407,9 @@ struct PlaybackCoordinatorTests {
         }
     }
 
-    @Test("startSession with a catalog begins a gated-on diagnostics log named after the film")
-    func startSessionWithCatalogBeginsDiagnostics() async throws {
-        let imported = try await Self.importSession(withCatalog: true)
+    @Test("startSession begins a diagnostics log named after the film")
+    func startSessionBeginsDiagnostics() async throws {
+        let imported = try await Self.importSession()
         defer { try? FileManager.default.removeItem(at: imported.root) }
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
@@ -449,37 +435,9 @@ struct PlaybackCoordinatorTests {
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
-    @Test("startSession without a catalog begins a gated-off diagnostics log that writes nothing")
-    func startSessionWithoutCatalogGatesDiagnosticsOff() async throws {
-        let imported = try await Self.importSession(withCatalog: false)
-        defer { try? FileManager.default.removeItem(at: imported.root) }
-        let (log, diagRoot) = Self.makeTempDiagnostics()
-        defer { try? FileManager.default.removeItem(at: diagRoot) }
-
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
-        coordinator.diagnostics = log
-        defer {
-            coordinator.endSession()
-            coordinator.diagnostics = .shared
-        }
-
-        try await coordinator.startSession(
-            sessionID: imported.sessionID,
-            repository: imported.repo,
-            persistence: imported.persistence,
-            storage: imported.storage
-        )
-
-        let url = try #require(log.currentFileURL)
-        log.log(.play)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
-        #expect(!FileManager.default.fileExists(atPath: Self.diagnosticsDir(diagRoot).path))
-    }
-
     @Test("endSession ends the diagnostics log")
     func endSessionEndsDiagnostics() async throws {
-        let imported = try await Self.importSession(withCatalog: true)
+        let imported = try await Self.importSession()
         defer { try? FileManager.default.removeItem(at: imported.root) }
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
@@ -501,8 +459,8 @@ struct PlaybackCoordinatorTests {
         #expect(log.currentFileURL == nil)
     }
 
-    @Test("the lightweight startSession begins a gated-off diagnostics log")
-    func lightweightStartSessionGatesDiagnosticsOff() throws {
+    @Test("the lightweight startSession begins a diagnostics log that writes events")
+    func lightweightStartSessionBeginsDiagnostics() throws {
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
 
@@ -522,14 +480,14 @@ struct PlaybackCoordinatorTests {
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent.hasPrefix("quick-play-"))
         log.log(.play)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
     @Test("starting a different cinema session begins a fresh diagnostics log")
     func startingDifferentSessionRebeginsDiagnostics() async throws {
-        let a = try await Self.importSession(withCatalog: true, name: "Alpha")
+        let a = try await Self.importSession(name: "Alpha")
         defer { try? FileManager.default.removeItem(at: a.root) }
-        let b = try await Self.importSession(withCatalog: true, name: "Bravo")
+        let b = try await Self.importSession(name: "Bravo")
         defer { try? FileManager.default.removeItem(at: b.root) }
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
@@ -559,9 +517,9 @@ struct PlaybackCoordinatorTests {
         #expect(try #require(log.currentFileURL).lastPathComponent.hasPrefix("bravo-"))
     }
 
-    @Test("attaching a catalog to an active session turns diagnostics logging on")
-    func refreshAttachingCatalogEnablesLogging() async throws {
-        let imported = try await Self.importSession(withCatalog: false)
+    @Test("refreshing an active session keeps writing to the same diagnostics file")
+    func refreshKeepsLoggingToSameFile() async throws {
+        let imported = try await Self.importSession()
         defer { try? FileManager.default.removeItem(at: imported.root) }
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
@@ -582,52 +540,18 @@ struct PlaybackCoordinatorTests {
         )
         let url = try #require(log.currentFileURL)
         log.log(.play)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
 
-        try Self.setCatalogFilename("added.shazamcatalog", sessionID: imported.sessionID, in: imported.persistence)
         await coordinator.refreshIfActive(sessionID: imported.sessionID)
+        #expect(log.currentFileURL == url)
 
         log.log(.pause)
-        #expect(FileManager.default.fileExists(atPath: url.path))
-    }
-
-    @Test("clearing a catalog on an active session turns diagnostics logging off")
-    func refreshClearingCatalogDisablesLogging() async throws {
-        let imported = try await Self.importSession(withCatalog: true)
-        defer { try? FileManager.default.removeItem(at: imported.root) }
-        let (log, diagRoot) = Self.makeTempDiagnostics()
-        defer { try? FileManager.default.removeItem(at: diagRoot) }
-
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
-        coordinator.diagnostics = log
-        defer {
-            coordinator.endSession()
-            coordinator.diagnostics = .shared
-        }
-
-        try await coordinator.startSession(
-            sessionID: imported.sessionID,
-            repository: imported.repo,
-            persistence: imported.persistence,
-            storage: imported.storage
-        )
-        let url = try #require(log.currentFileURL)
-        log.log(.play)
-        #expect(FileManager.default.fileExists(atPath: url.path))
-        let afterFirst = try String(contentsOf: url, encoding: .utf8)
-
-        try Self.setCatalogFilename(nil, sessionID: imported.sessionID, in: imported.persistence)
-        await coordinator.refreshIfActive(sessionID: imported.sessionID)
-
-        log.log(.pause)
-        let afterSecond = try String(contentsOf: url, encoding: .utf8)
-        #expect(afterFirst == afterSecond)
+        let records = try Self.readJSONLines(url)
+        #expect(records.map { $0["event"] as? String } == ["play", "pause"])
     }
 
     @Test("watch transport commands log skip, seek, pause, and play with the watch source")
     func watchTransportCommandsLogEvents() async throws {
-        let imported = try await Self.importSession(withCatalog: true)
+        let imported = try await Self.importSession()
         defer { try? FileManager.default.removeItem(at: imported.root) }
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
@@ -670,7 +594,7 @@ struct PlaybackCoordinatorTests {
 
     @Test("phone transport via the coordinator logs play, pause, skip, and seek with the phone source")
     func phoneTransportCommandsLogEvents() async throws {
-        let imported = try await Self.importSession(withCatalog: true)
+        let imported = try await Self.importSession()
         defer { try? FileManager.default.removeItem(at: imported.root) }
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
@@ -711,8 +635,8 @@ struct PlaybackCoordinatorTests {
         #expect(records[3]["source"] as? String == "phone")
     }
 
-    @Test("watch and phone transport without a catalog log nothing")
-    func transportWithoutCatalogLogsNothing() throws {
+    @Test("watch and phone transport on a lightweight session log every event")
+    func lightweightSessionTransportLogsEvents() throws {
         let (log, diagRoot) = Self.makeTempDiagnostics()
         defer { try? FileManager.default.removeItem(at: diagRoot) }
 
@@ -735,10 +659,12 @@ struct PlaybackCoordinatorTests {
         coordinator.play()
         coordinator.skip(by: 0.5)
         coordinator.seek(to: 1.0)
-        coordinator.togglePlayPause()
 
         let url = try #require(log.currentFileURL)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
+        let records = try Self.readJSONLines(url)
+        #expect(records.map { $0["event"] as? String } == ["skip", "seek", "pause", "play", "skip", "seek"])
+        #expect(records[0]["source"] as? String == "watch")
+        #expect(records[4]["source"] as? String == "phone")
     }
 }
 

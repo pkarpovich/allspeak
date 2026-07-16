@@ -220,10 +220,16 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 - Modify: `Allspeak/Allspeak.xcdatamodeld` (new version `Allspeak v5`, `.xccurrentversion`)
 - Modify: `AllspeakTests/PersistenceControllerTests.swift`
 
-- [ ] add `Allspeak v5.xcdatamodel` = v4 minus `catalogFilename`/`dtwMapFilename` on `Session`; set `.xccurrentversion` to v5
-- [ ] write the migration test per Technical Details: on-disk v4 store with populated removed fields → reopens under the current model, session/track/position intact
-- [ ] verify no remaining KVC access to the removed keys anywhere (`grep -rn "catalogFilename\|dtwMapFilename" Allspeak AllspeakTests --include="*.swift"` returns empty)
-- [ ] run Validation Commands - green before task 7
+- [x] add `Allspeak v5.xcdatamodel` = v4 minus `catalogFilename`/`dtwMapFilename` on `Session`; set `.xccurrentversion` to v5
+- [x] write the migration test per Technical Details: on-disk v4 store with populated removed fields → reopens under the current model, session/track/position intact
+- [x] verify no remaining KVC access to the removed keys anywhere - empty across `Allspeak`/`AllspeakWatch`; the only `AllspeakTests` hits are the historical-model migration tests, see note below
+- [x] run Validation Commands - green before task 7 (396 tests / 41 suites pass; zero warnings on touched paths)
+
+➕ Discovered in Task 6: the diagnostics ungating was pulled forward from Task 7 exactly as this task's ⚠️ note required - `DiagnosticsLog.begin(filmTitle:)` no longer takes `hasCatalog`, `setHasCatalog` and the `log` gate are gone, and `PlaybackCoordinator` dropped both `catalogFilename` KVC reads plus the `Snap.catalogFilename` fields. **Task 7's first checkbox is therefore half-done: only the 30-day retention sweep remains.** The gate tests they drove were rewritten in place: `DiagnosticsLogTests.gatingWithoutCatalog` → `every begun session writes its events, with no catalog gate`; `PlaybackCoordinatorTests` lost `startSessionWithoutCatalogGatesDiagnosticsOff` / `refreshAttachingCatalogEnablesLogging` / `refreshClearingCatalogDisablesLogging` (gate behavior no longer exists), gained `refreshKeepsLoggingToSameFile`, and `transportWithoutCatalogLogsNothing` / `lightweightStartSessionGatesDiagnosticsOff` were inverted to assert events DO write. Task 5's `setCatalogFilename` KVC helper is deleted, as its note required.
+
+➕ Discovered in Task 6: v5 is structurally IDENTICAL to v2 (v2 = "tracks, no catalog"; v5 = same), so the two versions share a version checksum and `PersistenceControllerTests.versionedModels()` - which sniffed versions by attribute shape - could no longer tell them apart. Replaced with `versionedModel(_ version:)`, which loads a named `.mom` out of the compiled momd (momc names each `.mom` after its version). Identical v2/v5 hashes are harmless: `.xccurrentversion` selects the current model, and a v2 store simply needs no migration to reach v5.
+
+⚠️ For Task 8: Task 6's own grep gate ("returns empty" across `Allspeak AllspeakTests`) is unsatisfiable as literally written and was scoped to production code. `AllspeakTests/PersistenceControllerTests.swift` keeps 17 `catalogFilename`/`dtwMapFilename` references, ALL inside migration tests that drive explicitly-loaded historical models (v2→v3, v3→v4, and the v4→current test this task added). They are deliberate survivors - Technical Details *requires* the v4→v5 test to "insert a Session with both fields populated" - not stale references. Task 8's grep gate (`shazam` is in its pattern, and `film.shazamcatalog` appears in two of these tests) must exclude `PersistenceControllerTests.swift` rather than delete the coverage.
 
 ### Task 7: Diagnostics always-on with retention; Settings tab removal
 

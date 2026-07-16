@@ -12,7 +12,6 @@ final class DiagnosticsLog {
     private let timestampFormatter: ISO8601DateFormatter
     private let logger = Logger(subsystem: "dev.karpovich.allspeak", category: "diagnostics")
 
-    private var hasCatalog = false
     private var fileURL: URL?
     private var handle: FileHandle?
 
@@ -37,12 +36,11 @@ final class DiagnosticsLog {
 
     var currentFileURL: URL? { fileURL }
 
-    func begin(filmTitle: String, hasCatalog: Bool) {
+    func begin(filmTitle: String) {
         closeHandle()
         let stamp = stampFormatter.string(from: now())
         let directory = rootURL.appendingPathComponent("diagnostics", isDirectory: true)
         fileURL = Self.uniqueFileURL(in: directory, slug: Self.slug(filmTitle), stamp: stamp, fileManager: fileManager)
-        self.hasCatalog = hasCatalog
     }
 
     // A new screening must never append to a prior screening's file. Minute-
@@ -59,16 +57,8 @@ final class DiagnosticsLog {
         }
     }
 
-    // Catalog state can change on an active session (a catalog attached or
-    // cleared via the edit flow, surfaced through refreshIfActive). Gating
-    // must track it: an attached catalog must start logging, a cleared one
-    // must stop, without renaming the in-progress screening's file.
-    func setHasCatalog(_ hasCatalog: Bool) {
-        self.hasCatalog = hasCatalog
-    }
-
     func log(_ event: DiagnosticsEvent) {
-        guard hasCatalog, let fileURL else { return }
+        guard let fileURL else { return }
         let line = event.jsonLine(timestamp: timestampFormatter.string(from: now()))
         logger.log("\(line, privacy: .public)")
         guard let handle = ensureHandle(at: fileURL),
@@ -80,7 +70,6 @@ final class DiagnosticsLog {
     func end() {
         closeHandle()
         fileURL = nil
-        hasCatalog = false
     }
 
     private func ensureHandle(at url: URL) -> FileHandle? {

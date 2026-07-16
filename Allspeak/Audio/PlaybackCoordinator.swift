@@ -74,7 +74,6 @@ final class PlaybackCoordinator {
             let name: String
             let audioFilename: String
             let srtFilename: String
-            let catalogFilename: String?
             let lastPosition: Double?
             let activeTrackID: UUID?
             let tracks: [TrackSnap]
@@ -88,7 +87,6 @@ final class PlaybackCoordinator {
                 let name = (object.value(forKey: "name") as? String) ?? ""
                 let audio = (object.value(forKey: "audioFilename") as? String) ?? ""
                 let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
-                let catalog = object.value(forKey: "catalogFilename") as? String
                 let pos = object.value(forKey: "lastPositionSeconds") as? Double
                 let activeID = object.value(forKey: "activeTrackID") as? UUID
                 let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
@@ -106,7 +104,6 @@ final class PlaybackCoordinator {
                     name: name,
                     audioFilename: audio,
                     srtFilename: srt,
-                    catalogFilename: catalog,
                     lastPosition: pos,
                     activeTrackID: activeID,
                     tracks: trackSnaps
@@ -177,7 +174,7 @@ final class PlaybackCoordinator {
         self.storage = storage
         self.persistence = persistence
         self.revision += 1
-        diagnostics.begin(filmTitle: snap.name, hasCatalog: snap.catalogFilename != nil)
+        diagnostics.begin(filmTitle: snap.name)
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -221,7 +218,7 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.revision += 1
-        diagnostics.begin(filmTitle: title, hasCatalog: false)
+        diagnostics.begin(filmTitle: title)
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -244,7 +241,6 @@ final class PlaybackCoordinator {
         struct Snap: Sendable {
             let name: String
             let srtFilename: String
-            let catalogFilename: String?
             let activeTrackID: UUID?
             let tracks: [TrackSnap]
         }
@@ -255,7 +251,6 @@ final class PlaybackCoordinator {
                 let object = try context.existingObject(with: sessionID)
                 let name = (object.value(forKey: "name") as? String) ?? ""
                 let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
-                let catalog = object.value(forKey: "catalogFilename") as? String
                 let activeID = object.value(forKey: "activeTrackID") as? UUID
                 let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
                 let trackSnaps: [TrackSnap] = raw.compactMap { obj in
@@ -267,7 +262,7 @@ final class PlaybackCoordinator {
                     return TrackSnap(trackID: id, filename: fn, label: label, sortOrder: order, isDefault: isDefault)
                 }
                 .sorted { $0.sortOrder < $1.sortOrder }
-                return Snap(name: name, srtFilename: srt, catalogFilename: catalog, activeTrackID: activeID, tracks: trackSnaps)
+                return Snap(name: name, srtFilename: srt, activeTrackID: activeID, tracks: trackSnaps)
             }
         } catch {
             return
@@ -290,7 +285,6 @@ final class PlaybackCoordinator {
         let previousActiveTrackID = self.activeTrackID
         let previousTracks = self.tracks
         sessionTitle = snap.name
-        diagnostics.setHasCatalog(snap.catalogFilename != nil)
         tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         activeTrackID = selectedTrack?.trackID
         let tracksChanged = previousTracks.map(\.id) != tracks.map(\.id) || previousActiveTrackID != activeTrackID
