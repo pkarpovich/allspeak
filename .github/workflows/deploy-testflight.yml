@@ -83,9 +83,10 @@ jobs:
           ALLSPEAK_CATALOG_READ_TOKEN: ${{ secrets.ALLSPEAK_CATALOG_READ_TOKEN }}
         run: |
           URL_GUARDED=$(printf '%s' "$ALLSPEAK_CATALOG_URL" | sed 's|//|/$()/|')
+          TOKEN_GUARDED=$(printf '%s' "$ALLSPEAK_CATALOG_READ_TOKEN" | sed 's|/|/$()|g')
           cat > Allspeak/CatalogConfig.xcconfig << EOF
           ALLSPEAK_CATALOG_URL = $URL_GUARDED
-          ALLSPEAK_CATALOG_READ_TOKEN = $ALLSPEAK_CATALOG_READ_TOKEN
+          ALLSPEAK_CATALOG_READ_TOKEN = $TOKEN_GUARDED
           EOF
 
       - name: Generate Xcode project

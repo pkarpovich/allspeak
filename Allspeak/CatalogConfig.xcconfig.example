@@ -4,7 +4,9 @@
 // so an absent file does not break the build (settings substitute as empty).
 //
 // The `/$()/ ` between scheme and host defeats xcconfig's `//` comment
-// stripping; it expands to `https://` at build time.
+// stripping; it expands to `https://` at build time. If your read token
+// contains `//`, break each slash the same way (`/$()`) or the value is
+// silently truncated at the first `//`.
 //
 // CI builds leave the token empty; the real values are written from GitHub
 // secrets by .github/workflows/deploy-testflight.yml.
