@@ -12,6 +12,17 @@ final class PlaybackCoordinator {
 
     static let activeTrackChangedNotification = Notification.Name("PlaybackCoordinator.activeTrackChanged")
 
+    static let latencyCompensationDefaultsKey = "cinema.syncLatencyCompensation"
+    static let defaultLatencyCompensation: TimeInterval = 0.9
+    static let maxLatencyCompensation: TimeInterval = 3.0
+
+    static func storedLatencyCompensation(_ defaults: UserDefaults = .standard) -> TimeInterval {
+        guard let stored = defaults.object(forKey: latencyCompensationDefaultsKey) as? Double else {
+            return defaultLatencyCompensation
+        }
+        return min(max(stored, 0), maxLatencyCompensation)
+    }
+
     enum StartError: Error, Equatable {
         case sessionNotFound
         case noCues
@@ -731,7 +742,7 @@ final class PlaybackCoordinator {
         let elapsed = now.timeIntervalSince(anchor.at)
         guard elapsed >= 0 else { return false }
         let projectedEN = anchor.enTime + elapsed
-        let currentLatency = CinemaSyncService.storedLatencyCompensation(defaults)
+        let currentLatency = Self.storedLatencyCompensation(defaults)
         let enNow = projectedEN - anchor.appliedLatency + currentLatency
         let ruTarget = dtwMapping?.ruTime(forEnTime: enNow) ?? enNow
         let playerBefore = controller.livePosition

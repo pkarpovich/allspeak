@@ -545,7 +545,7 @@ struct PlaybackCoordinatorTests {
 
     private static func makeLatencyDefaults(_ value: Double) throws -> UserDefaults {
         let defaults = try #require(UserDefaults(suiteName: "PlaybackCoordinatorTests.\(UUID().uuidString)"))
-        defaults.set(value, forKey: CinemaSyncService.latencyCompensationDefaultsKey)
+        defaults.set(value, forKey: PlaybackCoordinator.latencyCompensationDefaultsKey)
         return defaults
     }
 
@@ -840,7 +840,7 @@ struct PlaybackCoordinatorTests {
     func currentSnapshotCarriesDrift() async throws {
         let fixture = try await Self.makeDTWMapSessionFixture(withDTWMap: true)
         let standard = UserDefaults.standard
-        let latencyKey = CinemaSyncService.latencyCompensationDefaultsKey
+        let latencyKey = PlaybackCoordinator.latencyCompensationDefaultsKey
         let previousLatency = standard.object(forKey: latencyKey)
         standard.set(0.9, forKey: latencyKey)
         defer {

@@ -130,11 +130,15 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 - Delete: `Allspeak/Audio/CinemaSyncService.swift`, `Allspeak/Views/Player/CinemaSyncView.swift`, `AllspeakTests/CinemaSyncServiceTests.swift`, `AllspeakTests/CinemaSyncIntegrationTests.swift`, `AllspeakTests/CinemaSyncViewTests.swift`, `AllspeakTests/Fixtures/Masters.shazamcatalog`
 - Modify: `Allspeak/Views/Player/PlayerView.swift`, `Allspeak/Views/Player/PlayerTopBar.swift`, `AllspeakTests/PlayerTopBarTests.swift`, `Allspeak/Views/Settings/SettingsView.swift` (temporary stub - full removal in Task 7)
 
-- [ ] delete the four files and the shazam fixture; strip `startSync`, the sync sheet presentation, and catalogURL/dtwMapping-for-sync state from `PlayerView`
-- [ ] remove the sync button and `showsSyncButton` from `PlayerTopBar`; remove its cases from `PlayerTopBarTests`
-- [ ] `SettingsView`: replace the body with a minimal placeholder referencing no removed symbols (whole tab dies in Task 7); keep the app compiling
-- [ ] update tests for `PlayerView`/`PlayerTopBar` survivors (top bar renders back/title/tracks only)
-- [ ] run Validation Commands - green before task 2
+- [x] delete the four files and the shazam fixture; strip `startSync`, the sync sheet presentation, and catalogURL/dtwMapping-for-sync state from `PlayerView`
+- [x] remove the sync button and `showsSyncButton` from `PlayerTopBar`; remove its cases from `PlayerTopBarTests`
+- [x] `SettingsView`: replace the body with a minimal placeholder referencing no removed symbols (whole tab dies in Task 7); keep the app compiling
+- [x] update tests for `PlayerView`/`PlayerTopBar` survivors (top bar renders back/title/tracks only)
+- [x] run Validation Commands - green before task 2
+
+➕ Discovered in Task 1: `PlaybackCoordinator.applyDeadReckonSeek` (Task 2's file) called `CinemaSyncService.storedLatencyCompensation`, so deleting the service in Task 1 broke the build. The latency constants (`latencyCompensationDefaultsKey`, `defaultLatencyCompensation`, `maxLatencyCompensation`, `storedLatencyCompensation`) were temporarily rehomed onto `PlaybackCoordinator`, and `PlaybackCoordinatorTests` now reads the key from there. **Task 2 must delete all four alongside `applyDeadReckonSeek`.**
+
+➕ Discovered in Task 1: with `showsSyncButton` gone, `PlayerTopBarTests` had no logic left to assert (the remaining properties are plain stored init args). Kept the file's established testable-flag idiom by adding `showsTrackMenu: Bool { tracks.count > 1 }` to `PlayerTopBar` (replacing the inline `if tracks.count > 1` in the body) and retargeting the suite at it.
 
 ### Task 2: Remove the anchor layer from PlaybackCoordinator
 

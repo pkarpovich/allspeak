@@ -3,37 +3,34 @@ import Testing
 @testable import Allspeak
 
 @MainActor
-@Suite("PlayerTopBar sync button visibility", .tags(.cinemaSync))
+@Suite("PlayerTopBar track menu visibility")
 struct PlayerTopBarTests {
 
-    private func makeBar(hasCatalog: Bool, tracks: [TrackInfo] = []) -> PlayerTopBar {
+    private func makeBar(tracks: [TrackInfo] = [], activeTrackID: UUID? = nil) -> PlayerTopBar {
         PlayerTopBar(
             sessionName: "Movie",
             cinemaActive: false,
-            hasCatalog: hasCatalog,
             tracks: tracks,
-            activeTrackID: nil,
+            activeTrackID: activeTrackID,
             onBack: {},
             onCinema: {},
-            onSyncTap: {},
             onSwitchTrack: { _ in }
         )
     }
 
-    @Test("sync button shows when the session has a catalog")
-    func showsButtonWithCatalog() {
-        #expect(makeBar(hasCatalog: true).showsSyncButton)
+    @Test("track menu is hidden when the session has no tracks")
+    func hidesMenuWithoutTracks() {
+        #expect(!makeBar().showsTrackMenu)
     }
 
-    @Test("sync button is hidden when the session has no catalog")
-    func hidesButtonWithoutCatalog() {
-        #expect(!makeBar(hasCatalog: false).showsSyncButton)
+    @Test("track menu is hidden when the session has a single track")
+    func hidesMenuForSingleTrack() {
+        #expect(!makeBar(tracks: [TrackInfo(id: UUID(), label: "A")]).showsTrackMenu)
     }
 
-    @Test("button visibility depends only on the catalog, not on track count")
-    func visibilityIndependentOfTracks() {
+    @Test("track menu shows when the session has more than one track")
+    func showsMenuForMultipleTracks() {
         let multiTrack = [TrackInfo(id: UUID(), label: "A"), TrackInfo(id: UUID(), label: "B")]
-        #expect(makeBar(hasCatalog: true, tracks: multiTrack).showsSyncButton)
-        #expect(!makeBar(hasCatalog: false, tracks: multiTrack).showsSyncButton)
+        #expect(makeBar(tracks: multiTrack).showsTrackMenu)
     }
 }
