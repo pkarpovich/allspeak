@@ -122,8 +122,12 @@ struct AudioControllerNowPlayingTests {
         #expect(count > afterPause)
     }
 
-    @Test("load registers remote command handlers")
-    func loadRegistersRemoteCommands() throws {
+    // Remote commands belong to PlaybackCoordinator: routing them to these
+    // unlogged AudioController methods would drop lock-screen transport from
+    // the diagnostics log. PlaybackCoordinatorTests covers the live wiring.
+    @Test("load publishes metadata without claiming the remote commands")
+    func loadDoesNotRegisterRemoteCommands() throws {
+        NowPlayingCenter.shared.clear()
         defer { NowPlayingCenter.shared.clear() }
 
         let fixture = try Self.makeSilenceFile(seconds: 30)
@@ -132,13 +136,8 @@ struct AudioControllerNowPlayingTests {
         let controller = AudioController()
         try controller.load(audio: fixture, subtitles: [], title: "T")
 
-        let center = MPRemoteCommandCenter.shared()
-        #expect(center.playCommand.isEnabled)
-        #expect(center.pauseCommand.isEnabled)
-        #expect(center.togglePlayPauseCommand.isEnabled)
-        #expect(center.skipBackwardCommand.isEnabled)
-        #expect(center.skipForwardCommand.isEnabled)
-        #expect(center.changePlaybackPositionCommand.isEnabled)
+        #expect(NowPlayingCenter.shared.remoteCommandHandlers == nil)
+        #expect(NowPlayingCenter.shared.registeredTargetCount == 0)
     }
 
     private static func makeSilenceFile(seconds: Double) throws -> URL {

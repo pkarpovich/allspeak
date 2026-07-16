@@ -4,8 +4,9 @@ import Foundation
 
 // Owns the iPhone-side audio session lifecycle and broadcasts state to the
 // paired watch app (via `WatchSessionHost`). Lock-screen / Dynamic Island
-// presence is handled by the native Now Playing integration
-// (`NowPlayingCenter`), not by this coordinator.
+// metadata is published by `AudioController` through `NowPlayingCenter`; the
+// transport commands behind that UI are registered here so they converge on
+// this coordinator's logged play/pause/skip/seek.
 @MainActor
 final class PlaybackCoordinator {
     static let shared = PlaybackCoordinator()
@@ -165,6 +166,7 @@ final class PlaybackCoordinator {
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
 
         self.controller = controller
+        configureRemoteCommands()
         self.sessionID = sessionID
         self.sessionUUID = snap.uuid
         self.sessionTitle = snap.name
@@ -212,6 +214,7 @@ final class PlaybackCoordinator {
         controller.onTick = { [weak self] in self?.handleControllerTick() }
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
         self.controller = controller
+        configureRemoteCommands()
         self.sessionID = nil
         self.sessionUUID = sessionUUID
         self.sessionTitle = title
@@ -501,12 +504,39 @@ final class PlaybackCoordinator {
         return CueBundle(sessionID: sessionUUID, revision: revision, cues: controller.subtitles)
     }
 
-    // User-initiated transport convergence point. The phone player screen and
-    // the watch both route play/pause/skip/seek here so each action is logged
-    // exactly once with its source - the low-level AudioController methods stay
-    // log-free because skip() calls seek() internally and the coordinator's own
-    // restore seeks (startSession, switchTrack, refreshIfActive) would otherwise
-    // emit spurious events.
+    // Lock Screen, Dynamic Island, Control Center and AirPods transport all
+    // arrive through these handlers. They are registered once per session (the
+    // closures resolve the live controller on each call, so track switches need
+    // no re-registration) and torn down by endSession's NowPlayingCenter.clear.
+    private func configureRemoteCommands() {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        NowPlayingCenter.shared.configureRemoteCommands(
+            play: { [weak self] in
+                Task { @MainActor in self?.play() }
+            },
+            pause: { [weak self] in
+                Task { @MainActor in self?.pause() }
+            },
+            togglePlayPause: { [weak self] in
+                Task { @MainActor in self?.togglePlayPause() }
+            },
+            skip: { [weak self] seconds in
+                Task { @MainActor in self?.skip(by: seconds) }
+            },
+            seek: { [weak self] time in
+                Task { @MainActor in self?.seek(to: time) }
+            }
+        )
+        #endif
+    }
+
+    // User-initiated transport convergence point. The phone player screen, the
+    // native remote commands (lock screen / AirPods) and the watch all route
+    // play/pause/skip/seek here so each action is logged exactly once with its
+    // source - the low-level AudioController methods stay log-free because
+    // skip() calls seek() internally and the coordinator's own restore seeks
+    // (startSession, switchTrack, refreshIfActive) would otherwise emit
+    // spurious events.
     func play() {
         guard let controller else { return }
         controller.play()

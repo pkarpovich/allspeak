@@ -59,25 +59,11 @@ final class AudioController {
         self.currentIndex = Self.index(at: 0, in: subtitles)
         self.lastNowPlayingTickSecond = -1
 
+        // Metadata only. The remote command handlers are registered by
+        // PlaybackCoordinator so lock-screen transport lands on its logged
+        // methods rather than these unlogged ones.
         #if os(iOS) || os(tvOS) || os(visionOS)
         NowPlayingCenter.shared.setMetadata(title: title, duration: player.duration, trackLabel: trackLabel)
-        NowPlayingCenter.shared.configureRemoteCommands(
-            play: { [weak self] in
-                Task { @MainActor in self?.play() }
-            },
-            pause: { [weak self] in
-                Task { @MainActor in self?.pause() }
-            },
-            togglePlayPause: { [weak self] in
-                Task { @MainActor in self?.togglePlayPause() }
-            },
-            skip: { [weak self] seconds in
-                Task { @MainActor in self?.skip(by: seconds) }
-            },
-            seek: { [weak self] time in
-                Task { @MainActor in self?.seek(to: time) }
-            }
-        )
         NowPlayingCenter.shared.updateTime(0, isPlaying: false)
         #endif
     }

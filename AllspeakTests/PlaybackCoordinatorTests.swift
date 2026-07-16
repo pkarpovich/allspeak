@@ -483,6 +483,66 @@ struct PlaybackCoordinatorTests {
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
+    @Test("native remote commands route through the coordinator, so lock-screen transport is logged")
+    func remoteCommandsLogDiagnostics() async throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let audio = try Self.makeSilenceFile(seconds: 30)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Lock Screen", audio: audio, subtitles: Self.cues)
+
+        let handlers = try #require(NowPlayingCenter.shared.remoteCommandHandlers)
+        handlers.play()
+        await Self.drainRemoteCommand()
+        handlers.pause()
+        await Self.drainRemoteCommand()
+        handlers.skip(15)
+        await Self.drainRemoteCommand()
+        handlers.seek(4)
+        await Self.drainRemoteCommand()
+
+        let url = try #require(log.currentFileURL)
+        let events = try Self.readJSONLines(url)
+        #expect(events.map { $0["event"] as? String } == ["play", "pause", "skip", "seek"])
+        #expect(events[2]["seconds"] as? Double == 15)
+        #expect(events[2]["source"] as? String == "phone")
+        #expect(events[3]["time"] as? Double == 4)
+        #expect(events[3]["source"] as? String == "phone")
+    }
+
+    @Test("endSession tears down the remote command handlers")
+    func endSessionTearsDownRemoteCommands() throws {
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        defer { coordinator.endSession() }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Teardown", audio: audio, subtitles: Self.cues)
+        #expect(NowPlayingCenter.shared.remoteCommandHandlers != nil)
+
+        coordinator.endSession()
+        #expect(NowPlayingCenter.shared.remoteCommandHandlers == nil)
+    }
+
+    // The handlers hop to the main actor via Task, so the enqueued work only
+    // runs once this test suspends.
+    private static func drainRemoteCommand() async {
+        await Task.yield()
+        await Task.yield()
+    }
+
     @Test("starting a different cinema session begins a fresh diagnostics log")
     func startingDifferentSessionRebeginsDiagnostics() async throws {
         let a = try await Self.importSession(name: "Alpha")
