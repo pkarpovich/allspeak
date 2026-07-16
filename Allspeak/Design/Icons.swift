@@ -20,6 +20,4 @@ enum Icons {
     static let check          = "checkmark"
     static let checkCircle    = "checkmark.circle.fill"
     static let filmReel       = "film"
-    static let settings       = "gearshape"
-    static let home           = "house"
 }

@@ -237,11 +237,21 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 - Modify: `Allspeak/Diagnostics/DiagnosticsLog.swift`, `Allspeak/Diagnostics/DiagnosticsEvent.swift`, `Allspeak/Audio/PlaybackCoordinator.swift` (begin call site), `Allspeak/Views/RootView.swift`, `AllspeakTests/DiagnosticsLogTests.swift`
 - Delete: `Allspeak/Views/Settings/SettingsView.swift`
 
-- [ ] `DiagnosticsLog`: `begin(filmTitle:)` without gate, delete `setHasCatalog`; add 30-day retention sweep at `begin` per Technical Details
-- [ ] `DiagnosticsEvent`: remove `.sync`/`.watchAttempt`/`.deadReckon` kinds and payloads
-- [ ] `RootView`: drop the TabView, show the Sessions navigation directly; delete `SettingsView.swift`
-- [ ] write tests: begin always creates a file and events write without any gate; retention deletes an artificially-old file and keeps a fresh one; removed event kinds gone from the encoder
-- [ ] run Validation Commands - green before task 8
+- [x] `DiagnosticsLog`: `begin(filmTitle:)` without gate, delete `setHasCatalog` (both done in Task 6); add 30-day retention sweep at `begin` per Technical Details
+- [x] `DiagnosticsEvent`: remove `.sync`/`.watchAttempt`/`.deadReckon` kinds and payloads
+- [x] `RootView`: drop the TabView, show the Sessions navigation directly; delete `SettingsView.swift`
+- [x] write tests: begin always creates a file and events write without any gate (Task 6's `every begun session writes its events, with no catalog gate` covers this); retention deletes an artificially-old file and keeps a fresh one; removed event kinds gone from the encoder
+- [x] run Validation Commands - green before task 8 (397 tests / 41 suites pass; zero warnings on touched paths)
+
+➕ Discovered in Task 7: removing the `.sync` payload orphaned `DiagnosticsEvent.MatchResult` (its only referents were `.sync`/`.watchAttempt`) and both `JSONLineBuilder.addIfPresent` overloads (the removed sync payload held the only optional fields) - all deleted. `Source`, `add`, and the escaping in `encode` stay: `.skip`/`.seek` still carry a `Source`.
+
+➕ Discovered in Task 7: `DiagnosticsLogTests`'s `error message with quotes is escaped` case drove `JSONLineBuilder`'s escaping through `.sync(error:)`, the only arbitrary-string payload in the enum. No surviving kind can reach that path, so the case was deleted rather than rewritten; `encode`'s escaping is now exercised only by the ordinary key/rawValue writes.
+
+➕ Discovered in Task 7: `Icons.settings` and `Icons.home` (`Allspeak/Design/Icons.swift`, not in Task 7's Files block) were used ONLY by the deleted TabView - grep proves zero other references - so both were deleted per the design-tokens rule. `Icons.filmReel` and the rest stay.
+
+➕ Discovered in Task 7: `DiagnosticsLogTests` still carried `.tags(.cinemaSync)` on a suite that no longer tests anything cinema-related; retagged `.audio`. `Tags.swift` now has zero `.cinemaSync` referents, so **Task 8's tag checkbox is just the deletion of the `@Tag` line**.
+
+➕ Discovered in Task 7: `PlaybackCoordinator.swift` is in this task's Files block but needed no change - Task 6 already moved its `begin` call site to `begin(filmTitle:)`.
 
 ### Task 8: Verify acceptance criteria
 

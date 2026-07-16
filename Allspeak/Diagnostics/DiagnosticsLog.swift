@@ -4,6 +4,7 @@ import OSLog
 @MainActor
 final class DiagnosticsLog {
     static let shared = DiagnosticsLog()
+    static let retentionDays = 30
 
     private let rootURL: URL
     private let now: () -> Date
@@ -38,9 +39,26 @@ final class DiagnosticsLog {
 
     func begin(filmTitle: String) {
         closeHandle()
-        let stamp = stampFormatter.string(from: now())
         let directory = rootURL.appendingPathComponent("diagnostics", isDirectory: true)
+        pruneExpiredLogs(in: directory)
+        let stamp = stampFormatter.string(from: now())
         fileURL = Self.uniqueFileURL(in: directory, slug: Self.slug(filmTitle), stamp: stamp, fileManager: fileManager)
+    }
+
+    // Retention runs opportunistically at begin and must never block logging:
+    // every step swallows its failure and the new screening's file is created
+    // regardless.
+    private func pruneExpiredLogs(in directory: URL) {
+        let cutoff = now().addingTimeInterval(-Double(Self.retentionDays) * 24 * 60 * 60)
+        let urls = (try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        for url in urls {
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            guard let modified, modified < cutoff else { continue }
+            try? fileManager.removeItem(at: url)
+        }
     }
 
     // A new screening must never append to a prior screening's file. Minute-
