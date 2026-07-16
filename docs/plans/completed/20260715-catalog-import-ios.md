@@ -313,8 +313,8 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 
 ### Task 13: Update documentation
 
-- [ ] README: Catalog section (segment, import, sync, build-time config setup incl. `CatalogConfig.xcconfig` bootstrap for a fresh checkout)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README: Catalog section (segment, import, sync, build-time config setup incl. `CatalogConfig.xcconfig` bootstrap for a fresh checkout)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
