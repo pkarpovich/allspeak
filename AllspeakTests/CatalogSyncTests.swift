@@ -160,7 +160,7 @@ struct CatalogSyncPlannerTests {
         #expect(plan.hasChanges)
     }
 
-    @Test("an unchanged manifest plans no work")
+    @Test("an unchanged manifest at the same revision plans no work")
     func noOp() {
         let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [
             sidecarTrack(sha256: SHA.a, label: "original"),
@@ -174,6 +174,30 @@ struct CatalogSyncPlannerTests {
         let plan = SyncPlan(sidecar: sc, manifest: m, currentTitle: Self.title)
 
         #expect(plan.hasChanges == false)
+        #expect(plan.revisionChanged == false)
+        #expect(plan.addTracks.isEmpty)
+        #expect(plan.removeTrackIDs.isEmpty)
+        #expect(plan.replaceSubtitle == nil)
+        #expect(plan.newTitle == nil)
+        #expect(plan.downloadRequests.isEmpty)
+        #expect(plan.fileRows.allSatisfy { !$0.changed })
+    }
+
+    @Test("a revision bump that only moves the default track still plans a sync with no downloads")
+    func defaultOnlyChangeStillSyncs() {
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [
+            sidecarTrack(sha256: SHA.a, label: "original"),
+            sidecarTrack(sha256: SHA.b, label: "ft.vocals")
+        ])
+        let m = manifest(revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: false),
+            manifestTrack(filename: "b.m4a", sha256: SHA.b, label: "ft.vocals", sortOrder: 1, isDefault: true)
+        ], subtitle: subtitle(sha256: SHA.sub))
+
+        let plan = SyncPlan(sidecar: sc, manifest: m, currentTitle: Self.title)
+
+        #expect(plan.revisionChanged)
+        #expect(plan.hasChanges)
         #expect(plan.addTracks.isEmpty)
         #expect(plan.removeTrackIDs.isEmpty)
         #expect(plan.replaceSubtitle == nil)

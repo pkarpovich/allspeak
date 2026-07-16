@@ -24,16 +24,21 @@ struct SyncPlan: Equatable, Sendable {
     let removeTrackIDs: [UUID]
     let downloadRequests: [CatalogFileRequest]
     let fileRows: [SyncFileRow]
+    let revisionChanged: Bool
 
     var downloadBytes: Int64 {
         downloadRequests.reduce(0) { $0 + $1.size }
     }
 
+    // A revision bump with no file/title diff (e.g. the default track moved) still needs a
+    // sync: the applier unconditionally re-asserts the default track and writes the new sidecar
+    // revision, so without this the Update affordance would never clear.
     var hasChanges: Bool {
         newTitle != nil
             || replaceSubtitle != nil
             || !addTracks.isEmpty
             || !removeTrackIDs.isEmpty
+            || revisionChanged
     }
 
     init(sidecar: CatalogSidecar, manifest: CatalogSessionDetail, currentTitle: String) {
@@ -71,6 +76,7 @@ struct SyncPlan: Equatable, Sendable {
         self.removeTrackIDs = removed
         self.downloadRequests = requests
         self.fileRows = rows
+        self.revisionChanged = manifest.revision != sidecar.revision
     }
 }
 

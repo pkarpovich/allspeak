@@ -124,16 +124,20 @@ final class ImportTaskRunner {
         handle.progress.totalUnitCount = downloadBytes + Self.importTailUnit
         handle.progress.completedUnitCount = 0
 
+        // The whole pipeline - download AND the import/apply tail - runs inside one cancellable
+        // task so expiration reaches finish() too. If finish() ignores cooperative cancellation
+        // (a quick Core Data write) it completes and success is reported truthfully; if it is
+        // interrupted it throws and the task is reported failed with staging retained.
         let work = Task { @MainActor in
             try await self.downloader.start(serverID: serverID, files: files, into: handle.progress)
+            handle.progress.completedUnitCount = downloadBytes
+            try await finish()
+            handle.progress.completedUnitCount = downloadBytes + Self.importTailUnit
         }
         handle.setExpirationHandler { work.cancel() }
 
         do {
             try await work.value
-            handle.progress.completedUnitCount = downloadBytes
-            try await finish()
-            handle.progress.completedUnitCount = downloadBytes + Self.importTailUnit
             handle.setCompleted(success: true)
         } catch {
             handle.setCompleted(success: false)

@@ -286,6 +286,40 @@ struct ImportTaskRunnerTests {
         #expect(stagedB == false)
     }
 
+    @Test("expiration during the import tail cancels it and reports failure")
+    @MainActor
+    func expirationDuringImportTailReportsFailure() async throws {
+        let (staging, root) = makeStaging()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let serverID = UUID()
+        let (file, data) = makeFile("a.m4a", "track")
+
+        let transport = MockDownloadTransport([file.url: .data(data)])
+        let downloader = SessionDownloader(client: makeClient(), staging: staging, transport: transport)
+        let scheduler = MockImportScheduler()
+        let runner = ImportTaskRunner(downloader: downloader, scheduler: scheduler)
+
+        let finishStarted = Box(false)
+        let finishFinished = Box(false)
+        let finish: @Sendable () async throws -> Void = {
+            finishStarted.value = true
+            try await Task.sleep(for: .seconds(30))
+            finishFinished.value = true
+        }
+
+        let runTask = Task { @MainActor in
+            await runner.run(serverID: serverID, files: [file], title: "Movie", finish: finish)
+        }
+        await waitFor { finishStarted.value }
+        let handle = try #require(scheduler.handles.last)
+        await waitFor { handle.hasExpirationHandler }
+        handle.fireExpiration()
+        await runTask.value
+
+        #expect(handle.completedSuccess == false)
+        #expect(finishFinished.value == false)
+    }
+
     @Test("runs the pipeline in-process when the scheduler cannot submit")
     @MainActor
     func fallbackRunsInProcessWhenSubmitThrows() async throws {
