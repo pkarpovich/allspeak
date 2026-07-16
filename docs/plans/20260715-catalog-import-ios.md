@@ -284,11 +284,12 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 **Files:**
 - Modify (replace stub): `Allspeak/Views/Catalog/CatalogDetailView.swift`
 - Create: `AllspeakTests/CatalogDetailStateTests.swift`
+- Modify: `Allspeak/Catalog/CatalogStore.swift` (added `detail(for:)` passthrough - the detail screen needs per-track sizes + the subtitle row, which the summary does not carry; the store already owns the `CatalogClient`)
 
-- [ ] detail screen - this list IS the spec: title header, size chip row, "What's inside" section listing each track (label + formatted size) and a subtitle row, bottom full-width CTA cycling Import → progress bar with percent → ✓ Imported ("Added to Mine" caption)
-- [ ] progress binds to the downloader's `Progress`; leaving the screen does not affect the download (CPT owns it)
-- [ ] write tests: CTA state derivation helper (idle/downloading/imported/update), byte-count formatting
-- [ ] run Validation Commands - green before task 11
+- [x] detail screen - this list IS the spec: title header, size chip row, "What's inside" section listing each track (label + formatted size) and a subtitle row, bottom full-width CTA cycling Import → progress bar with percent → ✓ Imported ("Added to Mine" caption)
+- [x] progress binds to the downloader's `Progress`; leaving the screen does not affect the download (CPT owns it)
+- [x] write tests: CTA state derivation helper (idle/downloading/imported/update), byte-count formatting
+- [x] run Validation Commands - green before task 11
 
 ### Task 11: Sync sheet and Mine update affordances
 

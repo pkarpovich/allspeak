@@ -87,6 +87,10 @@ final class CatalogStore {
         sidecars = CatalogSidecar.loadAll(documentsRoot: documentsRoot)
     }
 
+    func detail(for id: UUID) async throws -> CatalogSessionDetail {
+        try await client.fetchSession(id: id)
+    }
+
     func rowState(for summary: CatalogSessionSummary) -> CatalogRowState {
         CatalogRowState.derive(for: summary, sidecars: sidecars, activeDownloadID: activeDownloadID)
     }
