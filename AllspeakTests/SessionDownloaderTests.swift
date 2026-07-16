@@ -106,6 +106,7 @@ struct SessionDownloaderTests {
             if await staging.isStaged(serverID: serverID, sha256: sha256, filename: filename) { return }
             await Task.yield()
         }
+        Issue.record("timed out waiting for \(filename) to stage")
     }
 
     @MainActor
@@ -113,6 +114,7 @@ struct SessionDownloaderTests {
         for _ in 0..<100_000 where !condition() {
             await Task.yield()
         }
+        if !condition() { Issue.record("timed out waiting for condition") }
     }
 
     @Test("downloads every file, verifies each, and advances progress to the total")

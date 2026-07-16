@@ -1,14 +1,15 @@
 # Allspeak
 
-Single-user, offline iOS app for cinema-goers who watch films in languages they
+Single-user iOS app for cinema-goers who watch films in languages they
 don't fully understand. Prepare a "session" by attaching a pre-extracted
 original-language audio file (`.m4a`) and a subtitle file (`.srt`). In the
 cinema, listen to the original audio through one AirPod while the on-screen
 scrolling subtitle window acts as a visual sync anchor. Tapping any subtitle
 line seeks the audio to that line's timestamp.
 
-No offset arithmetic, no calibration, no cloud, no accounts, no onboarding,
-no settings.
+The in-cinema experience is fully offline; the only online path is the optional
+Catalog for pulling prepared sessions onto the phone (see below). No offset
+arithmetic, no calibration, no accounts, no onboarding, no settings.
 
 ## Requirements
 

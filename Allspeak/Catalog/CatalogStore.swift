@@ -118,6 +118,7 @@ final class CatalogStore {
     func startImport(_ summary: CatalogSessionSummary) async {
         guard activeDownloadID == nil else { return }
         activeDownloadID = summary.id
+        downloader.resetProgress()
         do {
             let detail = try await client.fetchSession(id: summary.id)
             let importer = self.importer
@@ -140,6 +141,7 @@ final class CatalogStore {
     ) async {
         guard activeDownloadID == nil, plan.hasChanges else { return }
         activeDownloadID = detail.id
+        downloader.resetProgress()
         let applier = self.applier
         await runner.run(serverID: detail.id, files: plan.downloadRequests, title: detail.title) {
             try await applier.apply(plan: plan, detail: detail, sessionID: sessionID, sidecar: sidecar)

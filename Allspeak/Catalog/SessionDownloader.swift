@@ -102,12 +102,17 @@ final class SessionDownloader {
         return nil
     }
 
-    func start(serverID: UUID, files: [CatalogFileRequest]) async throws {
+    func resetProgress() {
+        progress = nil
+        state = .idle
+    }
+
+    func start(serverID: UUID, files: [CatalogFileRequest], into external: Progress? = nil) async throws {
         guard activeServerID == nil else { throw SessionDownloadError.busy }
         activeServerID = serverID
         defer { activeServerID = nil }
 
-        let progress = Progress(totalUnitCount: files.reduce(0) { $0 + $1.size })
+        let progress = external ?? Progress(totalUnitCount: files.reduce(0) { $0 + $1.size })
         self.progress = progress
         state = .downloading(progress)
 
@@ -123,6 +128,7 @@ final class SessionDownloader {
             do {
                 try Task.checkCancellation()
                 let temp = try await transport.download(from: file.url)
+                defer { try? FileManager.default.removeItem(at: temp) }
                 try await staging.commit(
                     tempURL: temp, serverID: serverID, sha256: file.sha256, filename: file.filename
                 )

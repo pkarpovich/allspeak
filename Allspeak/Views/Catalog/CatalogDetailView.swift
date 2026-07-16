@@ -84,7 +84,7 @@ struct CatalogDetailView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Tokens.text3)
             VStack(spacing: 0) {
-                ForEach(detail.tracks.sorted { $0.sortOrder < $1.sortOrder }, id: \.sha256) { track in
+                ForEach(detail.tracks.sorted { $0.sortOrder < $1.sortOrder }, id: \.filename) { track in
                     fileRow(icon: Icons.audio, title: track.label, size: track.size)
                 }
                 fileRow(icon: Icons.caption, title: detail.subtitle.filename, size: detail.subtitle.size)
@@ -159,7 +159,15 @@ struct CatalogDetailView: View {
                 }
                 .frame(maxWidth: .infinity)
             case .update:
-                ctaLabel("Update", background: Tokens.accentDim, foreground: Tokens.accent)
+                VStack(spacing: 4) {
+                    Label("Update available", systemImage: Icons.catalog)
+                        .font(Tokens.Font.bodyEmphasized)
+                        .foregroundStyle(Tokens.text)
+                    Text("Update from Mine")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Tokens.text3)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(16)

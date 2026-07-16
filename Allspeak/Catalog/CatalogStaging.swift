@@ -26,7 +26,8 @@ struct CatalogStaging: Sendable {
     }
 
     func stagedURL(serverID: UUID, sha256: String, filename: String) -> URL {
-        serverDir(for: serverID).appendingPathComponent("\(sha256.lowercased())-\(filename)")
+        let safeName = (filename as NSString).lastPathComponent
+        return serverDir(for: serverID).appendingPathComponent("\(sha256.lowercased())-\(safeName)")
     }
 
     func isStaged(serverID: UUID, sha256: String, filename: String) async -> Bool {

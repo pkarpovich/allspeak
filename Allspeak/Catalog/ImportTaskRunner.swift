@@ -125,7 +125,7 @@ final class ImportTaskRunner {
         handle.progress.completedUnitCount = 0
 
         let work = Task { @MainActor in
-            try await self.downloader.start(serverID: serverID, files: files)
+            try await self.downloader.start(serverID: serverID, files: files, into: handle.progress)
         }
         handle.setExpirationHandler { work.cancel() }
 
