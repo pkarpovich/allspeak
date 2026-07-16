@@ -173,4 +173,51 @@ struct DocumentsStorageTests {
         try storage.removeTrackFile(sessionID: sessionID, trackID: trackID, originalFilename: "missing.m4a")
         try storage.removeTrackFile(sessionID: sessionID, trackID: trackID, originalFilename: "missing.m4a")
     }
+
+    @Test("removeLegacySyncFiles deletes catalog and dtw map leftovers in every session dir")
+    func removeLegacySyncFilesSweepsAllSessions() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = UUID()
+        let second = UUID()
+        for id in [first, second] {
+            _ = try writeFile(in: storage.sessionDir(for: id), name: "Masters.shazamcatalog", contents: "catalog")
+            _ = try writeFile(in: storage.sessionDir(for: id), name: "Masters.dtwmap.json", contents: "{}")
+        }
+
+        storage.removeLegacySyncFiles()
+
+        for id in [first, second] {
+            let dir = storage.sessionDir(for: id)
+            #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.shazamcatalog").path) == false)
+            #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.dtwmap.json").path) == false)
+        }
+    }
+
+    @Test("removeLegacySyncFiles keeps audio, subtitles, and the catalog-import sidecar")
+    func removeLegacySyncFilesKeepsLiveFiles() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let dir = storage.sessionDir(for: id)
+        let survivors = ["audio.m4a", "subs.srt", CatalogSidecar.filename]
+        for name in survivors {
+            _ = try writeFile(in: dir, name: name, contents: "keep")
+        }
+        _ = try writeFile(in: dir, name: "Masters.shazamcatalog", contents: "catalog")
+
+        storage.removeLegacySyncFiles()
+
+        for name in survivors {
+            #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path))
+        }
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.shazamcatalog").path) == false)
+    }
+
+    @Test("removeLegacySyncFiles is a no-op when there are no sessions")
+    func removeLegacySyncFilesNoSessions() {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        storage.removeLegacySyncFiles()
+    }
 }

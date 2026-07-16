@@ -187,7 +187,10 @@ struct CatalogSyncSheet: View {
 
     private func startSync() {
         guard let detail, let plan else { return }
-        Task { await store.startSync(sessionID: sessionID, detail: detail, plan: plan, sidecar: sidecar) }
+        Task {
+            await store.startSync(sessionID: sessionID, detail: detail, plan: plan, sidecar: sidecar)
+            await PlaybackCoordinator.shared.refreshIfActive(sessionID: sessionID)
+        }
     }
 
     private func load(force: Bool = false) async {

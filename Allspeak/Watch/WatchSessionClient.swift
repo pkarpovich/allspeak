@@ -65,11 +65,12 @@ final class WatchSessionClient: NSObject {
 
     var interpolatedTime: TimeInterval {
         _ = interpolationTick
-        if lastSnapshot == nil, let metadata {
-            let upper = metadata.duration > 0 ? metadata.duration : metadata.currentTime
-            return min(max(metadata.currentTime, 0), upper)
+        if let anchor = Self.progressAnchor(snapshot: lastSnapshot, metadata: metadata) {
+            return Self.interpolatedTime(anchor: anchor, now: Date())
         }
-        return Self.interpolatedTime(snapshot: lastSnapshot, now: Date())
+        guard let metadata else { return 0 }
+        let upper = metadata.duration > 0 ? metadata.duration : metadata.currentTime
+        return min(max(metadata.currentTime, 0), upper)
     }
 
     var interpolatedIndex: Int {

@@ -284,6 +284,55 @@ struct WatchSessionClientInterpolationTests {
         #expect(WatchSessionClient.interpolatedTime(anchor: anchor, now: now) == 42)
     }
 
+    @Test("computed interpolatedTime re-anchors on a fresher metadata anchor")
+    func computedInterpolatedTimeUsesFresherMetadataAnchor() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        // A seek landed via the metadata context while the snapshot transport was
+        // unreachable, so lastSnapshot still holds the pre-seek position.
+        client.lastSnapshot = Self.snapshot(currentTime: 10, isPlaying: false, serverDate: Self.baseDate)
+        client.metadata = Self.metadata(
+            currentTime: 300,
+            isPlaying: false,
+            serverDate: Self.baseDate.addingTimeInterval(60)
+        )
+        #expect(client.interpolatedTime == 300)
+    }
+
+    @Test("computed interpolatedIndex re-anchors on a fresher metadata anchor")
+    func computedInterpolatedIndexUsesFresherMetadataAnchor() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        client.cues = Self.cues
+        client.lastSnapshot = Self.snapshot(currentTime: 0, isPlaying: false, serverDate: Self.baseDate)
+        client.metadata = Self.metadata(
+            currentTime: 6,
+            isPlaying: false,
+            serverDate: Self.baseDate.addingTimeInterval(30)
+        )
+        #expect(client.interpolatedIndex == 4)
+    }
+
+    @Test("computed interpolatedTime extrapolates from a metadata anchor with no snapshot")
+    func computedInterpolatedTimeExtrapolatesMetadataAnchor() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        client.metadata = Self.metadata(currentTime: 30, isPlaying: true, serverDate: Date())
+        // Playing with a live anchor: the readout must advance past currentTime
+        // rather than freeze at it.
+        #expect(client.interpolatedTime >= 30)
+        #expect(client.interpolatedTime < 40)
+    }
+
+    @Test("computed interpolatedTime keeps the snapshot when it is the fresher anchor")
+    func computedInterpolatedTimeKeepsFresherSnapshot() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        client.lastSnapshot = Self.snapshot(
+            currentTime: 77,
+            isPlaying: false,
+            serverDate: Self.baseDate.addingTimeInterval(60)
+        )
+        client.metadata = Self.metadata(currentTime: 5, isPlaying: false, serverDate: Self.baseDate)
+        #expect(client.interpolatedTime == 77)
+    }
+
     @Test("interpolatedTime(anchor:) clamps to duration upper bound")
     func anchorInterpolationClampsToDuration() {
         let anchor: WatchSessionClient.ProgressAnchor = (currentTime: 590, serverDate: Self.baseDate, isPlaying: true, duration: 600)

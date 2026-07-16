@@ -56,6 +56,33 @@ struct DocumentsStorage: Sendable {
         return dest
     }
 
+    // Sessions imported by a pre-v5 build copied a ShazamKit catalog and a DTW map
+    // into their session dir. The v5 model drops the columns that named them, so
+    // nothing references the files any more and only the suffix identifies them.
+    // `server.json` (the catalog-import sidecar) does not match either suffix.
+    static let legacySyncFileSuffixes = [".shazamcatalog", ".dtwmap.json"]
+
+    func removeLegacySyncFiles() {
+        let manager = FileManager.default
+        guard let dirs = try? manager.contentsOfDirectory(
+            at: sessionsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return }
+        for dir in dirs {
+            guard let files = try? manager.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: nil
+            ) else { continue }
+            for file in files where Self.isLegacySyncFile(file.lastPathComponent) {
+                try? manager.removeItem(at: file)
+            }
+        }
+    }
+
+    static func isLegacySyncFile(_ filename: String) -> Bool {
+        legacySyncFileSuffixes.contains { filename.hasSuffix($0) }
+    }
+
     func removeSessionDir(_ id: UUID) throws {
         let dir = sessionDir(for: id)
         if FileManager.default.fileExists(atPath: dir.path) {

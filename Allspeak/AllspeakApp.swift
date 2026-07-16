@@ -7,6 +7,8 @@ struct AllspeakApp: App {
     init() {
         _ = PlaybackCoordinator.shared
         WatchSessionHost.shared.activate()
+        let storage = DocumentsStorage.default
+        Task.detached(priority: .utility) { storage.removeLegacySyncFiles() }
     }
 
     var body: some Scene {
