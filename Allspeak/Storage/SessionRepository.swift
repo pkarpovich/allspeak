@@ -446,6 +446,33 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func setSortOrders(sessionID: NSManagedObjectID, orderedTrackIDs: [UUID]) async throws {
+        let context = persistence.newBackgroundContext()
+        try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            let tracks = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
+            let byTrackID = Dictionary(
+                tracks.compactMap { obj -> (UUID, NSManagedObject)? in
+                    guard let trackID = obj.value(forKey: "id") as? UUID else { return nil }
+                    return (trackID, obj)
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
+            for (index, trackID) in orderedTrackIDs.enumerated() {
+                guard let track = byTrackID[trackID] else {
+                    throw SessionRepositoryError.trackNotFound
+                }
+                track.setValue(Int16(index), forKey: "sortOrder")
+            }
+            try context.save()
+        }
+    }
+
     func setActiveTrack(sessionID: NSManagedObjectID, trackID: UUID) async throws {
         let context = persistence.newBackgroundContext()
         try await context.perform {

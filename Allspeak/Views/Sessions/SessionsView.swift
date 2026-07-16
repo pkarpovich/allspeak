@@ -198,7 +198,11 @@ struct SessionsView: View {
 
     private func deleteSession(_ id: NSManagedObjectID) {
         let repo = repository
-        Task { try? await repo.delete(id: id) }
+        let store = catalogStore
+        Task {
+            try? await repo.delete(id: id)
+            store.reloadSidecars()
+        }
     }
 
     private func updateAction(objectID: NSManagedObjectID, localID: UUID?, title: String) -> () -> Void {
