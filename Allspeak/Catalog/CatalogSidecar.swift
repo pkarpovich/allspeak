@@ -21,6 +21,20 @@ struct CatalogSidecar: Codable, Equatable, Sendable {
     static let filename = "server.json"
     static let sessionsDirName = "sessions"
 
+    // The sidecar records the trackID it minted at import, but nothing stops the user deleting
+    // that track from the Tracks sheet afterwards. Drop entries whose track is gone so the
+    // planner treats the manifest counterpart as an add and re-downloads it - left in, the dead
+    // trackID reaches setSortOrders and throws trackNotFound after the rename already committed,
+    // failing every future sync for that session.
+    func reconciled(liveTrackIDs: Set<UUID>) -> CatalogSidecar {
+        CatalogSidecar(
+            serverID: serverID,
+            revision: revision,
+            subtitle: subtitle,
+            tracks: tracks.filter { liveTrackIDs.contains($0.trackID) }
+        )
+    }
+
     func save(to sessionDir: URL) throws {
         try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()

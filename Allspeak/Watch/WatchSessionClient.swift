@@ -77,15 +77,6 @@ final class WatchSessionClient: NSObject {
         Self.interpolatedIndex(time: interpolatedTime, in: cues)
     }
 
-    static func interpolatedTime(snapshot: PlaybackSnapshot?, now: Date) -> TimeInterval {
-        guard let snapshot else { return 0 }
-        let raw: TimeInterval = snapshot.isPlaying
-            ? snapshot.currentTime + now.timeIntervalSince(snapshot.serverDate)
-            : snapshot.currentTime
-        let upper = snapshot.duration > 0 ? snapshot.duration : raw
-        return min(max(raw, 0), upper)
-    }
-
     // The extrapolation anchor for the film-progress readout. Two sources can
     // carry one: the live snapshot (sendMessage, only while reachable) and the
     // SessionMetadata application context (latest-wins, delivered on wake). Pick

@@ -44,75 +44,50 @@ struct WatchSessionClientInterpolationTests {
         )
     }
 
-    @Test("nil snapshot returns 0")
-    func nilSnapshotReturnsZero() {
-        let t = WatchSessionClient.interpolatedTime(snapshot: nil, now: Self.baseDate)
-        #expect(t == 0)
+    private static func anchor(
+        currentTime: Double,
+        duration: Double = 600,
+        isPlaying: Bool,
+        serverDate: Date = baseDate
+    ) -> WatchSessionClient.ProgressAnchor {
+        (currentTime: currentTime, serverDate: serverDate, isPlaying: isPlaying, duration: duration)
     }
 
-    @Test("paused snapshot ignores wall-clock drift")
-    func pausedSnapshotReturnsStoredTime() {
-        let snap = Self.snapshot(currentTime: 42, isPlaying: false)
-        let now = Self.baseDate.addingTimeInterval(120)
-        let t = WatchSessionClient.interpolatedTime(snapshot: snap, now: now)
-        #expect(t == 42)
-    }
-
-    @Test("playing snapshot advances by elapsed wall-clock seconds")
-    func playingSnapshotAdvancesWithWallClock() {
-        let snap = Self.snapshot(currentTime: 30, isPlaying: true)
-        let now = Self.baseDate.addingTimeInterval(60)
-        let t = WatchSessionClient.interpolatedTime(snapshot: snap, now: now)
-        #expect(abs(t - 90) < 0.001)
+    @Test("computed interpolatedTime returns 0 when neither source has an anchor")
+    func noAnchorReturnsZero() {
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        #expect(client.interpolatedTime == 0)
     }
 
     @Test("drift after 60s matches seconds * 1.0")
     func driftAfter60SecondsIsLinear() {
-        let snap = Self.snapshot(currentTime: 0, isPlaying: true)
         let now = Self.baseDate.addingTimeInterval(60)
-        let t = WatchSessionClient.interpolatedTime(snapshot: snap, now: now)
+        let t = WatchSessionClient.interpolatedTime(anchor: Self.anchor(currentTime: 0, isPlaying: true), now: now)
         #expect(abs(t - 60.0) < 0.001)
     }
 
     @Test("negative elapsed time clamps to 0")
     func negativeElapsedClampsToZero() {
-        let snap = Self.snapshot(currentTime: 5, isPlaying: true)
         let now = Self.baseDate.addingTimeInterval(-30)
-        let t = WatchSessionClient.interpolatedTime(snapshot: snap, now: now)
+        let t = WatchSessionClient.interpolatedTime(anchor: Self.anchor(currentTime: 5, isPlaying: true), now: now)
         #expect(t == 0)
-    }
-
-    @Test("interpolated time clamps to duration upper bound")
-    func clampsToDurationUpperBound() {
-        let snap = Self.snapshot(currentTime: 590, duration: 600, isPlaying: true)
-        let now = Self.baseDate.addingTimeInterval(60)
-        let t = WatchSessionClient.interpolatedTime(snapshot: snap, now: now)
-        #expect(t == 600)
     }
 
     @Test("interpolation across pause boundary uses isPlaying flag")
     func pauseBoundaryUsesIsPlayingFlag() {
-        let playing = Self.snapshot(currentTime: 10, isPlaying: true)
-        let paused = Self.snapshot(currentTime: 10, isPlaying: false)
         let now = Self.baseDate.addingTimeInterval(5)
-        let playingT = WatchSessionClient.interpolatedTime(snapshot: playing, now: now)
-        let pausedT = WatchSessionClient.interpolatedTime(snapshot: paused, now: now)
+        let playingT = WatchSessionClient.interpolatedTime(anchor: Self.anchor(currentTime: 10, isPlaying: true), now: now)
+        let pausedT = WatchSessionClient.interpolatedTime(anchor: Self.anchor(currentTime: 10, isPlaying: false), now: now)
         #expect(abs(playingT - 15) < 0.001)
         #expect(pausedT == 10)
     }
 
-    @Test("zero-duration snapshot does not clamp to zero when raw is positive")
+    @Test("zero-duration anchor does not clamp to zero when raw is positive")
     func zeroDurationDoesNotClampDown() {
-        let snap = PlaybackSnapshot(
-            sessionID: Self.sessionID,
-            revision: 1,
-            currentTime: 12,
-            duration: 0,
-            currentIndex: 0,
-            isPlaying: false,
-            serverDate: Self.baseDate
+        let t = WatchSessionClient.interpolatedTime(
+            anchor: Self.anchor(currentTime: 12, duration: 0, isPlaying: false),
+            now: Self.baseDate
         )
-        let t = WatchSessionClient.interpolatedTime(snapshot: snap, now: Self.baseDate)
         #expect(t == 12)
     }
 

@@ -39,6 +39,7 @@ struct CatalogSyncSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var detail: CatalogSessionDetail?
     @State private var plan: SyncPlan?
+    @State private var reconciledSidecar: CatalogSidecar?
     @State private var loadFailed = false
     @State private var fraction: Double = 0
 
@@ -186,9 +187,11 @@ struct CatalogSyncSheet: View {
     }
 
     private func startSync() {
-        guard let detail, let plan else { return }
+        guard let detail, let plan, let reconciledSidecar else { return }
         Task {
-            await store.startSync(sessionID: sessionID, detail: detail, plan: plan, sidecar: sidecar)
+            await store.startSync(
+                sessionID: sessionID, detail: detail, plan: plan, sidecar: reconciledSidecar
+            )
             await PlaybackCoordinator.shared.refreshIfActive(sessionID: sessionID)
         }
     }
@@ -198,8 +201,11 @@ struct CatalogSyncSheet: View {
         loadFailed = false
         do {
             let detail = try await store.detail(for: summary.id)
+            let liveTrackIDs = try await store.liveTrackIDs(sessionID: sessionID)
+            let reconciled = sidecar.reconciled(liveTrackIDs: liveTrackIDs)
             self.detail = detail
-            plan = SyncPlan(sidecar: sidecar, manifest: detail, currentTitle: currentTitle)
+            reconciledSidecar = reconciled
+            plan = SyncPlan(sidecar: reconciled, manifest: detail, currentTitle: currentTitle)
         } catch {
             loadFailed = true
         }

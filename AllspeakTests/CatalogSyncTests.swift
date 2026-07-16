@@ -124,6 +124,42 @@ struct CatalogSyncPlannerTests {
         #expect(plan.hasChanges)
     }
 
+    @Test("a sidecar track deleted locally is re-added rather than resolved to its dead trackID")
+    func locallyDeletedTrackIsReAdded() {
+        let liveID = UUID()
+        let deadID = UUID()
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [
+            sidecarTrack(sha256: SHA.a, label: "original", trackID: liveID),
+            sidecarTrack(sha256: SHA.b, label: "ft.vocals", trackID: deadID)
+        ])
+        let vocals = manifestTrack(filename: "b.m4a", sha256: SHA.b, label: "ft.vocals", sortOrder: 1, isDefault: false)
+        let m = manifest(revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true),
+            vocals
+        ], subtitle: subtitle(sha256: SHA.sub))
+
+        let plan = SyncPlan(
+            sidecar: sc.reconciled(liveTrackIDs: [liveID]), manifest: m, currentTitle: Self.title
+        )
+
+        #expect(plan.addTracks == [vocals])
+        #expect(plan.removeTrackIDs.isEmpty)
+        #expect(plan.downloadRequests == [CatalogFileRequest(track: vocals)])
+        #expect(plan.hasChanges)
+    }
+
+    @Test("reconciling against intact live tracks leaves the sidecar unchanged")
+    func reconcileKeepsLiveTracks() {
+        let liveA = UUID()
+        let liveB = UUID()
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [
+            sidecarTrack(sha256: SHA.a, label: "original", trackID: liveA),
+            sidecarTrack(sha256: SHA.b, label: "ft.vocals", trackID: liveB)
+        ])
+
+        #expect(sc.reconciled(liveTrackIDs: [liveA, liveB]) == sc)
+    }
+
     @Test("a label change on an unchanged sha plans a remove and an add")
     func labelChangeIsRemoveAndAdd() {
         let oldID = UUID()
