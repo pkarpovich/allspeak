@@ -16,8 +16,8 @@ final class AudioController {
 
     // Live playhead straight from the player. `currentTime` is only refreshed by
     // the CADisplayLink, which pauses while the app is backgrounded, so it goes
-    // stale in the pocket - use this for diagnostics that must reflect the real
-    // position (e.g. dead-reckon/sync playerBefore).
+    // stale in the pocket - use this for snapshots and diagnostics that must
+    // reflect the real position.
     var livePosition: TimeInterval {
         player?.currentTime ?? currentTime
     }

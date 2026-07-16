@@ -434,7 +434,7 @@ final class PlaybackCoordinator {
         WatchSessionHost.shared.forceBroadcastSnapshot()
         // Refresh the latest-wins application context so a watch waking after a
         // stretch of being unreachable re-anchors from a fresh serverDate. State
-        // changes only (play/pause/seek/skip/track/sync) - not per tick.
+        // changes only (play/pause/seek/skip/track) - not per tick.
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
     }
