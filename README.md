@@ -93,8 +93,8 @@ on the Apple Watch as a third TabView page — see below.
 There is no mic matching, no offset arithmetic, and no calibration. When the dub
 drifts from the screen, tap the subtitle line currently showing — on the phone's
 scrolling subtitle window or in the watch's cue list — and the audio seeks to
-that line's timestamp. The ±3s / ±1s skips (phone remote commands or the watch
-transport) cover the fine adjustment from there.
+that line's timestamp. The skip controls cover the fine adjustment from there —
+±0.5s on the phone's player, ±3s / ±1s on the watch transport.
 
 ### Session diagnostics
 

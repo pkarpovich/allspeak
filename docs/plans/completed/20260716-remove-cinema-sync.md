@@ -253,6 +253,8 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 
 ➕ Discovered in Task 7: `PlaybackCoordinator.swift` is in this task's Files block but needed no change - Task 6 already moved its `begin` call site to `begin(filmTitle:)`.
 
+➕ Code review: the `removed event kinds gone from the encoder` checkbox above cannot be met by a runtime test. The test written for it (`retiredKindsAreGone`) hand-built the four surviving cases and asserted they had their own names - a tautology that stayed green even if `.sync` were restored. `DiagnosticsEvent` carries associated values so it is not `CaseIterable`, and a deleted case cannot be referenced, so no assertion can observe absence. The test was deleted: the compiler is the real guard, and `transportRecords` already pins each surviving kind's exact encoded envelope. `appendsAccumulate` was deleted alongside it as a byte-identical duplicate of `loggingIsUngated` (`end()` clears `fileURL`, so there is no public path to force a handle reopen - the behavior its name promised is unreachable).
+
 ### Task 8: Verify acceptance criteria
 
 - [x] repo-wide grep gate from Code-Quality Rules returns empty (case-insensitive `CinemaSync|DTWMapping|deadReckon|cinemaMatch|requestCatalog|shazam` across all targets, `CinemaMode` excluded); `git diff main -- Allspeak/Views/Player/CinemaMode.swift` is empty

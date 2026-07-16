@@ -52,25 +52,14 @@ struct DiagnosticsLogTests {
         )
     }
 
-    @Test("the retired sync, watch attempt and dead reckon kinds are gone from the encoder")
-    func retiredKindsAreGone() {
-        let names = [
-            DiagnosticsEvent.skip(seconds: -3.0, source: .phone),
-            DiagnosticsEvent.seek(time: 95.5, source: .watch),
-            DiagnosticsEvent.pause,
-            DiagnosticsEvent.play
-        ].map(\.name)
-        #expect(names == ["skip", "seek", "pause", "play"])
-    }
-
     // MARK: - File lifecycle
 
     @Test("no file is created before the first event")
-    func noFileBeforeFirstEvent() {
+    func noFileBeforeFirstEvent() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
         log.begin(filmTitle: "Dune")
-        let url = try! #require(log.currentFileURL)
+        let url = try #require(log.currentFileURL)
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
@@ -84,20 +73,6 @@ struct DiagnosticsLogTests {
 
     @Test("every begun session writes its events, with no catalog gate")
     func loggingIsUngated() throws {
-        let root = makeTempRoot()
-        let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune")
-        log.log(.play)
-        log.log(.pause)
-        let url = try #require(log.currentFileURL)
-        let contents = try String(contentsOf: url, encoding: .utf8)
-        let expected = #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n"
-            + #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause"}"# + "\n"
-        #expect(contents == expected)
-    }
-
-    @Test("appended events accumulate as one line each")
-    func appendsAccumulate() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
         log.begin(filmTitle: "Dune")
