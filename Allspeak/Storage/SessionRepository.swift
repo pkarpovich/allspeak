@@ -440,6 +440,22 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func sessionUUID(id: NSManagedObjectID) async throws -> UUID {
+        let context = persistence.viewContext
+        return try await context.perform {
+            let object: NSManagedObject
+            do {
+                object = try context.existingObject(with: id)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            guard let uuid = object.value(forKey: "id") as? UUID else {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            return uuid
+        }
+    }
+
     func replaceSubtitle(id: NSManagedObjectID, srcURL: URL) async throws {
         let context = persistence.newBackgroundContext()
         let storage = self.storage
@@ -555,7 +571,7 @@ final class SessionRepository: @unchecked Sendable {
         sessionID: NSManagedObjectID,
         srcURL: URL,
         label: String
-    ) async throws -> NSManagedObjectID {
+    ) async throws -> UUID {
         let context = persistence.newBackgroundContext()
         let storage = self.storage
 
@@ -586,7 +602,7 @@ final class SessionRepository: @unchecked Sendable {
         )
 
         do {
-            return try await context.perform {
+            try await context.perform {
                 let session: NSManagedObject
                 do {
                     session = try context.existingObject(with: sessionID)
@@ -603,8 +619,8 @@ final class SessionRepository: @unchecked Sendable {
                 track.setValue(existing.isEmpty, forKey: "isDefault")
                 track.setValue(session, forKey: "session")
                 try context.save()
-                return track.objectID
             }
+            return trackID
         } catch {
             try? FileManager.default.removeItem(at: copiedURL)
             throw error

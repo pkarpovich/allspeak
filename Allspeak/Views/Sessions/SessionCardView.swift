@@ -4,6 +4,7 @@ struct SessionCardView: View {
     let name: String
     let duration: Double?
     let createdAt: Date
+    var catalogBadge: MineCatalogBadge?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -19,6 +20,10 @@ struct SessionCardView: View {
                 Text(metadataLine)
                     .font(Tokens.Font.mono)
                     .foregroundStyle(Tokens.text2)
+
+                if let catalogBadge {
+                    CatalogBadge(revision: catalogBadge.revision)
+                }
             }
         }
     }
@@ -38,5 +43,19 @@ private struct FilmReelIcon: View {
             .font(.system(size: 16, weight: .regular))
             .foregroundStyle(Tokens.text2)
             .frame(width: 28, height: 28)
+    }
+}
+
+private struct CatalogBadge: View {
+    let revision: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: Icons.catalog)
+            Text(MineCatalogAffordances.badgeText(revision: revision))
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(Tokens.text3)
+        .padding(.top, 2)
     }
 }

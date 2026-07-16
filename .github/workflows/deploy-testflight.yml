@@ -65,6 +65,7 @@ jobs:
       - name: Write manual-signing xcconfigs
         run: |
           cat > Allspeak/Signing.xcconfig << EOF
+          #include? "CatalogConfig.xcconfig"
           CODE_SIGN_STYLE = Manual
           CODE_SIGN_IDENTITY = Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER = $UUID_IOS
@@ -74,6 +75,18 @@ jobs:
           CODE_SIGN_STYLE = Manual
           CODE_SIGN_IDENTITY = Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER = $UUID_WATCHOS
+          EOF
+
+      - name: Write catalog config xcconfig
+        env:
+          ALLSPEAK_CATALOG_URL: ${{ secrets.ALLSPEAK_CATALOG_URL }}
+          ALLSPEAK_CATALOG_READ_TOKEN: ${{ secrets.ALLSPEAK_CATALOG_READ_TOKEN }}
+        run: |
+          URL_GUARDED=$(printf '%s' "$ALLSPEAK_CATALOG_URL" | sed 's|//|/$()/|')
+          TOKEN_GUARDED=$(printf '%s' "$ALLSPEAK_CATALOG_READ_TOKEN" | sed 's|/|/$()|g')
+          cat > Allspeak/CatalogConfig.xcconfig << EOF
+          ALLSPEAK_CATALOG_URL = $URL_GUARDED
+          ALLSPEAK_CATALOG_READ_TOKEN = $TOKEN_GUARDED
           EOF
 
       - name: Generate Xcode project

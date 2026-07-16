@@ -1,14 +1,15 @@
 # Allspeak
 
-Single-user, offline iOS app for cinema-goers who watch films in languages they
+Single-user iOS app for cinema-goers who watch films in languages they
 don't fully understand. Prepare a "session" by attaching a pre-extracted
 original-language audio file (`.m4a`) and a subtitle file (`.srt`). In the
 cinema, listen to the original audio through one AirPod while the on-screen
 scrolling subtitle window acts as a visual sync anchor. Tapping any subtitle
 line seeks the audio to that line's timestamp.
 
-No offset arithmetic, no calibration, no cloud, no accounts, no onboarding,
-no settings.
+The in-cinema experience is fully offline; the only online path is the optional
+Catalog for pulling prepared sessions onto the phone (see below). No offset
+arithmetic, no calibration, no accounts, no onboarding, no settings.
 
 ## Requirements
 
@@ -128,6 +129,72 @@ It is gated to sessions with a catalog — ordinary listening writes nothing —
 has no UI. See
 [`docs/cinema-sync.md`](docs/cinema-sync.md#session-diagnostics).
 
+## Catalog (online session distribution)
+
+Sessions prepared on the Mac no longer have to reach the phone over AirDrop.
+The Mac uploads a session once to the personal catalog backend
+(`https://allspeak.pkarpovich.dev`), and the phone imports it from anywhere -
+LTE on the way to the cinema included.
+
+The Sessions screen carries a `Mine` / `Catalog` segmented control below the
+large title. `Mine` (the default) is the usual list of local sessions; `Catalog`
+lists the sessions published to the backend, newest first, each row showing the
+title, total download size, and track labels.
+
+### Importing from the catalog
+
+1. Switch to the `Catalog` segment. Rows fetch on appear; a fetch failure shows
+   a plain inline error with a `Retry` button.
+2. Tap a row for the detail screen (title, size, a `What's inside` list of every
+   audio track with its size, plus the subtitle row) or tap `Import` directly on
+   the row.
+3. Import downloads all files (audio tracks + `.srt`) from Cloudflare R2 via
+   short-lived presigned URLs, then creates a regular local session through the
+   same `importMultiTrackSession` pipeline used for manual imports - an imported
+   session is indistinguishable from a hand-made one and appears under `Mine`
+   with its tracks (the server's default track pre-selected) and subtitles.
+4. Downloads run inside a `BGContinuedProcessingTask`: locking the phone
+   mid-download does not stop it, and the system shows a progress card. Files are
+   staged and sha256-verified one at a time under `Application Support`, so a
+   download interrupted by lock, expiry, or a killed app resumes by skipping the
+   files already verified on the next `Import` tap.
+
+### Staying in sync
+
+Each imported session records the server `id`, `revision`, and per-file sha256
+hashes in a sidecar `server.json` inside the session directory (invisible to the
+rest of the app, deleted with the session folder - no Core Data schema change).
+
+`Mine` rows for catalog-linked sessions show a `Catalog · v<revision>` badge.
+When the last catalog fetch reports a higher revision, that row gains an `Update`
+button and an `N updates available` banner appears above the list (no background
+polling - the state derives from the store's last fetch). Tapping `Update` opens
+a sync sheet that shows, per file, whether it `changed` or is the `same`, plus
+the total download size. Applying the sync downloads **only** the changed files
+and reconciles the local session with existing repository mutations (add / remove
+track, replace subtitle, rename), preserving the current playback position.
+
+### Build-time config (the iOS ".env")
+
+The backend URL and read token are baked in at build time via an xcconfig, the
+same pattern used for signing. For a fresh checkout:
+
+```fish
+cp Allspeak/CatalogConfig.xcconfig.example Allspeak/CatalogConfig.xcconfig
+# then edit Allspeak/CatalogConfig.xcconfig:
+#   ALLSPEAK_CATALOG_URL       = https://allspeak.pkarpovich.dev
+#   ALLSPEAK_CATALOG_READ_TOKEN = <your read token>
+```
+
+`Allspeak/CatalogConfig.xcconfig` is git-ignored; `Signing.xcconfig` pulls it in
+with `#include? "CatalogConfig.xcconfig"` (optional - an absent file does not
+break the build, and undefined settings substitute as empty strings, so CI and
+first-run builds still compile). The two values flow into `Info.plist`
+(`AllspeakCatalogURL` / `AllspeakCatalogReadToken`) and are read by
+`CatalogConfig`. On push to `main`,
+`.github/workflows/deploy-testflight.yml` writes the real `CatalogConfig.xcconfig`
+from the `ALLSPEAK_CATALOG_URL` / `ALLSPEAK_CATALOG_READ_TOKEN` GitHub secrets.
+
 ## Apple Watch remote
 
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
@@ -245,7 +312,7 @@ xcodebuild test -scheme Allspeak \
 ```
 
 Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`,
-`.cinemaSync`) so subsets can be run with the `--filter` flag.
+`.cinemaSync`, `.catalog`) so subsets can be run with the `--filter` flag.
 
 ## Project-local agent skills
 

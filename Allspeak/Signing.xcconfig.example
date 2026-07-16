@@ -1,3 +1,5 @@
+#include? "CatalogConfig.xcconfig"
+
 // Local development defaults. Copy to Signing.xcconfig (which is git-ignored)
 // and Xcode will use Automatic signing with your personal Apple ID team.
 //
