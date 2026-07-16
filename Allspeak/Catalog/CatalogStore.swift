@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import Observation
 
@@ -13,6 +14,7 @@ final class CatalogStore {
 
     private(set) var summaries: [CatalogSessionSummary] = []
     private(set) var sidecars: [CatalogSidecar] = []
+    private(set) var sidecarsByLocalID: [UUID: CatalogSidecar] = [:]
     private(set) var fetchState: FetchState = .idle
     private(set) var activeDownloadID: UUID?
 
@@ -21,6 +23,7 @@ final class CatalogStore {
     @ObservationIgnored private let client: CatalogClient
     @ObservationIgnored private let runner: ImportTaskRunner
     @ObservationIgnored private let importer: CatalogImporter
+    @ObservationIgnored private let applier: CatalogSyncApplier
     @ObservationIgnored private let documentsRoot: URL
 
     init(
@@ -28,12 +31,14 @@ final class CatalogStore {
         downloader: SessionDownloader,
         runner: ImportTaskRunner,
         importer: CatalogImporter,
+        applier: CatalogSyncApplier,
         documentsRoot: URL
     ) {
         self.client = client
         self.downloader = downloader
         self.runner = runner
         self.importer = importer
+        self.applier = applier
         self.documentsRoot = documentsRoot
     }
 
@@ -57,9 +62,12 @@ final class CatalogStore {
         let importer = CatalogImporter(
             repository: SessionRepository(), staging: staging, storage: storage
         )
+        let applier = CatalogSyncApplier(
+            repository: SessionRepository(), staging: staging, storage: storage
+        )
         return CatalogStore(
             client: client, downloader: downloader, runner: runner,
-            importer: importer, documentsRoot: storage.documentsURL
+            importer: importer, applier: applier, documentsRoot: storage.documentsURL
         )
     }
 
@@ -84,7 +92,9 @@ final class CatalogStore {
     }
 
     func reloadSidecars() {
-        sidecars = CatalogSidecar.loadAll(documentsRoot: documentsRoot)
+        let keyed = CatalogSidecar.loadAllKeyed(documentsRoot: documentsRoot)
+        sidecarsByLocalID = keyed
+        sidecars = Array(keyed.values)
     }
 
     func detail(for id: UUID) async throws -> CatalogSessionDetail {
@@ -93,6 +103,16 @@ final class CatalogStore {
 
     func rowState(for summary: CatalogSessionSummary) -> CatalogRowState {
         CatalogRowState.derive(for: summary, sidecars: sidecars, activeDownloadID: activeDownloadID)
+    }
+
+    func mineBadge(localID: UUID) -> MineCatalogBadge? {
+        MineCatalogAffordances.badge(sidecar: sidecarsByLocalID[localID], summaries: summaries)
+    }
+
+    var updateBannerText: String? {
+        MineCatalogAffordances.bannerText(
+            updateCount: MineCatalogAffordances.updateCount(sidecars: sidecars, summaries: summaries)
+        )
     }
 
     func startImport(_ summary: CatalogSessionSummary) async {
@@ -107,6 +127,22 @@ final class CatalogStore {
         } catch {
             // Fetching the manifest failed before any download started; the row falls back to its
             // sidecar-derived state and the user can retry from the row.
+        }
+        reloadSidecars()
+        activeDownloadID = nil
+    }
+
+    func startSync(
+        sessionID: NSManagedObjectID,
+        detail: CatalogSessionDetail,
+        plan: SyncPlan,
+        sidecar: CatalogSidecar
+    ) async {
+        guard activeDownloadID == nil, plan.hasChanges else { return }
+        activeDownloadID = detail.id
+        let applier = self.applier
+        await runner.run(serverID: detail.id, files: plan.downloadRequests, title: detail.title) {
+            try await applier.apply(plan: plan, detail: detail, sessionID: sessionID, sidecar: sidecar)
         }
         reloadSidecars()
         activeDownloadID = nil

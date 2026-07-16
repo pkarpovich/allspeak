@@ -297,11 +297,12 @@ Written to `Documents/sessions/<local uuid>/server.json` after successful import
 - Create: `Allspeak/Views/Catalog/CatalogSyncSheet.swift`
 - Modify: `Allspeak/Views/Sessions/SessionsView.swift`, `Allspeak/Views/Sessions/SessionCardView.swift`
 - Create: `AllspeakTests/CatalogSyncSheetStateTests.swift`
+- Modify: `Allspeak/Catalog/CatalogStore.swift` (added `sidecarsByLocalID` keyed map, `mineBadge`/`updateBannerText` passthroughs, and a `startSync` entry point that runs `CatalogSyncApplier` inside the runner's CPT `finish` closure - the store owns the applier, mirroring `startImport`), `Allspeak/Catalog/CatalogSidecar.swift` (added `loadAllKeyed` local-UUID→sidecar map so Mine rows resolve their sidecar, plus pure `MineCatalogAffordances` badge/banner/count derivation next to `CatalogRowState`)
 
-- [ ] Mine rows for sidecar-linked sessions show a `Catalog · v<revision>` badge; when the store's last catalog fetch reports a higher revision - an Update button on the row and an "N updates available" banner above the list; no background polling. This sentence is the spec
-- [ ] sync sheet - this list IS the spec: header `v<local> → v<server>`, "What changed" rows (per file: name, changed/same, size), note "Your playback position is kept", CTA cycling Sync → progress → done
-- [ ] write tests: sheet content derivation from a `SyncPlan` (changed/same rows, delta size string), badge/banner derivation
-- [ ] run Validation Commands - green before task 12
+- [x] Mine rows for sidecar-linked sessions show a `Catalog · v<revision>` badge; when the store's last catalog fetch reports a higher revision - an Update button on the row and an "N updates available" banner above the list; no background polling. This sentence is the spec
+- [x] sync sheet - this list IS the spec: header `v<local> → v<server>`, "What changed" rows (per file: name, changed/same, size), note "Your playback position is kept", CTA cycling Sync → progress → done
+- [x] write tests: sheet content derivation from a `SyncPlan` (changed/same rows, delta size string), badge/banner derivation
+- [x] run Validation Commands - green before task 12
 
 ### Task 12: Verify acceptance criteria
 

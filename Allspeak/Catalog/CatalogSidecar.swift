@@ -42,6 +42,21 @@ struct CatalogSidecar: Codable, Equatable, Sendable {
         )) ?? []
         return dirs.compactMap { try? load(from: $0) }
     }
+
+    static func loadAllKeyed(documentsRoot: URL) -> [UUID: CatalogSidecar] {
+        let sessionsRoot = documentsRoot.appendingPathComponent(sessionsDirName, isDirectory: true)
+        let dirs = (try? FileManager.default.contentsOfDirectory(
+            at: sessionsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )) ?? []
+        var result: [UUID: CatalogSidecar] = [:]
+        for dir in dirs {
+            guard let localID = UUID(uuidString: dir.lastPathComponent),
+                  let sidecar = try? load(from: dir) else { continue }
+            result[localID] = sidecar
+        }
+        return result
+    }
 }
 
 enum CatalogRowState: Equatable, Sendable {
@@ -62,5 +77,36 @@ enum CatalogRowState: Equatable, Sendable {
             return .importable
         }
         return sidecar.revision < entry.revision ? .update : .added
+    }
+}
+
+struct MineCatalogBadge: Equatable, Sendable {
+    let revision: Int
+    let updateAvailable: Bool
+}
+
+enum MineCatalogAffordances {
+    static func badge(sidecar: CatalogSidecar?, summaries: [CatalogSessionSummary]) -> MineCatalogBadge? {
+        guard let sidecar else { return nil }
+        let serverRevision = summaries.first { $0.id == sidecar.serverID }?.revision
+        let updateAvailable = (serverRevision ?? sidecar.revision) > sidecar.revision
+        return MineCatalogBadge(revision: sidecar.revision, updateAvailable: updateAvailable)
+    }
+
+    static func updateCount(sidecars: [CatalogSidecar], summaries: [CatalogSessionSummary]) -> Int {
+        let revisionByServerID = Dictionary(summaries.map { ($0.id, $0.revision) }) { first, _ in first }
+        return sidecars.filter { sidecar in
+            guard let serverRevision = revisionByServerID[sidecar.serverID] else { return false }
+            return serverRevision > sidecar.revision
+        }.count
+    }
+
+    static func bannerText(updateCount: Int) -> String? {
+        guard updateCount > 0 else { return nil }
+        return updateCount == 1 ? "1 update available" : "\(updateCount) updates available"
+    }
+
+    static func badgeText(revision: Int) -> String {
+        "Catalog · v\(revision)"
     }
 }
