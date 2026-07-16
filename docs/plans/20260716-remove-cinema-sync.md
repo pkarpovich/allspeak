@@ -255,10 +255,18 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] repo-wide grep gate from Code-Quality Rules returns empty (case-insensitive `CinemaSync|DTWMapping|deadReckon|cinemaMatch|requestCatalog|shazam` across all targets, `CinemaMode` excluded); `git diff main -- Allspeak/Views/Player/CinemaMode.swift` is empty
-- [ ] `Tags.swift` no longer defines `.cinemaSync` and no suite references it
-- [ ] walk the acceptance scenario from Overview in the Simulator with any local session (forms, player top bar, watch transport in the watch simulator if paired - otherwise code-reading for the two rows, Settings gone, diagnostics file appears after playback)
-- [ ] full suite green via Validation Commands; zero warnings on touched paths
+- [x] repo-wide grep gate from Code-Quality Rules returns empty (case-insensitive `CinemaSync|DTWMapping|deadReckon|cinemaMatch|requestCatalog|shazam` across all targets, `CinemaMode` excluded); `git diff main -- Allspeak/Views/Player/CinemaMode.swift` is empty
+- [x] `Tags.swift` no longer defines `.cinemaSync` and no suite references it
+- [x] walk the acceptance scenario from Overview - verified by code-reading (Simulator UI walk skipped, not automatable); see note below
+- [x] full suite green via Validation Commands; zero warnings on touched paths (397 tests / 41 suites pass)
+
+➕ Discovered in Task 8: the grep gate returns exactly the four deliberate survivors the earlier tasks flagged, and nothing else - `WireProtocolTests.swift:68` (`"deadReckonSeek"` literal pinning the retired kind's rejection, per Task 4's ⚠️) and `PersistenceControllerTests.swift:266/294/337` (`film.shazamcatalog` inside the historical-model migration tests, per Task 6's ⚠️). Both exclusions were pre-authorized by those notes; the gate is otherwise empty across `Allspeak`/`AllspeakWatch`/`AllspeakTests`. `git diff main -- CinemaMode.swift` is empty, proving it untouched.
+
+➕ Discovered in Task 8: the `.cinemaSync` `@Tag` was its own only referent (Task 7 retagged the last suite to `.audio`), so the deletion was the single line.
+
+➕ Discovered in Task 8: acceptance scenario verified by code-reading rather than a Simulator walk (no interactive session available). Each surface confirmed at its source: `CreateSessionView`'s `ActivePicker` has only `.audio`/`.subtitles`; `PlayerTopBar` has back / track menu / cinema-mode (`onCinema` = `CinemaMode`, a non-goal) and no sync button; `TransportView`'s `coarseRowContent`/`fineRowContent` are each a bare two-button `HStack` (±3s, ±1s) with no center element; `Allspeak/Views/Settings/` no longer exists and `RootView` renders `SessionsView()` directly with no TabView; `DiagnosticsLog.begin(filmTitle:)` is ungated with a `retentionDays = 30` sweep, called from both `PlaybackCoordinator` start paths. The v4→v5 store migration is covered by the automated `PersistenceControllerTests` rather than a device upgrade - the real-data upgrade check stays a Post-Completion item.
+
+➕ Discovered in Task 8: the build log's 4 warnings are all pre-existing and unrelated to this plan - 3 `appintentsmetadataprocessor` toolchain notices and 1 `UIRequiresFullScreen` plist deprecation. `git show main:Allspeak/Info.plist` proves the latter predates the branch and this plan's diff never touches that key; left alone per the Surgical-deletion rule.
 
 ### Task 9: Update documentation
 
