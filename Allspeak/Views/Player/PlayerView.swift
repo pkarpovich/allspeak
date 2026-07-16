@@ -43,7 +43,7 @@ struct PlayerView: View {
                     currentIndex: controller.currentIndex,
                     cinema: cinema,
                     onSeek: {
-                        PlaybackCoordinator.shared.seekToCue($0)
+                        PlaybackCoordinator.shared.seek(to: $0)
                         PlaybackCoordinator.shared.play()
                     },
                     onCinemaInput: { applyCinema($0) }

@@ -146,11 +146,17 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 - Modify: `Allspeak/Audio/PlaybackCoordinator.swift`, `AllspeakTests/PlaybackCoordinatorTests.swift`
 - Delete: `Allspeak/Sync/DTWMapping.swift`, `Allspeak/Sync/CinemaMatch.swift`, `Allspeak/Sync/README.md`, `AllspeakTests/DTWMappingTests.swift`, `AllspeakTests/Fixtures/Masters.dtwmap.json`
 
-- [ ] remove `cinemaAnchor`, `dtwMapping`, `catalogURL`, `applySyncOffset`, `applyDeadReckonSeek`, `cinemaDrift`, `loadDTWMapping`, and anchor bookkeeping inside `seek`/`skip`/`seekToCue`; `currentSnapshot()` stops computing drift (field itself removed in Task 3)
-- [ ] update the coordinator's invariant block comments - no stale anchor/latency text remains
-- [ ] delete the `Sync/` directory files and their tests/fixture
-- [ ] update `PlaybackCoordinatorTests`: drop anchor/drift/dead-reckon cases; keep transport, track-switch, and snapshot cases green
-- [ ] run Validation Commands - green before task 3
+- [x] remove `cinemaAnchor`, `dtwMapping`, `catalogURL`, `applySyncOffset`, `applyDeadReckonSeek`, `cinemaDrift`, `loadDTWMapping`, and anchor bookkeeping inside `seek`/`skip`/`seekToCue`; `currentSnapshot()` stops computing drift (field itself removed in Task 3)
+- [x] update the coordinator's invariant block comments - no stale anchor/latency text remains
+- [x] delete the `Sync/` directory files and their tests/fixture
+- [x] update `PlaybackCoordinatorTests`: drop anchor/drift/dead-reckon cases; keep transport, track-switch, and snapshot cases green
+- [x] run Validation Commands - green before task 3
+
+➕ Discovered in Task 2: with the anchor gone, `seekToCue` became a byte-for-byte duplicate of `seek` (its entire body was the anchoring, and its doc comment was purely about alignment). It only ever existed to serve the anchor, so it was deleted and its two call sites (`PlayerView`'s cue tap, `apply(.seek)`) now call `seek(to:source:)` directly. `PlayerView.swift` is outside Task 2's Files block.
+
+➕ Discovered in Task 2: `WatchSessionHost.dispatch` (Task 3's file) routed `.deadReckonSeek` through `applyDeadReckonSeek`, so removing the coordinator method broke the build. The case now returns `.empty` unconditionally (honest: without an anchor the resync can never succeed) and **Task 3 deletes the case with the command**.
+
+➕ Discovered in Task 2: the latency constants Task 1 rehomed onto `PlaybackCoordinator` (`latencyCompensationDefaultsKey`, `defaultLatencyCompensation`, `maxLatencyCompensation`, `storedLatencyCompensation`) are deleted, as Task 1's note required. `AllspeakTests/Fixtures/` is now empty and gone; `project.yml` globs directories, so no file-list edit was needed.
 
 ### Task 3: Shrink the wire protocol and watch plumbing
 
