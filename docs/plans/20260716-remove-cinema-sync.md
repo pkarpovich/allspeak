@@ -199,12 +199,20 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 - Modify: `Allspeak/Views/Create/CreateSessionView.swift`, `Allspeak/Views/Create/CreateSessionFormState.swift`, `Allspeak/Views/Create/FileSlotView.swift`, `Allspeak/Storage/SessionRepository.swift`, `Allspeak/Storage/DocumentsStorage.swift`, `Allspeak/Storage/UTType+Catalog.swift`, `Allspeak/Catalog/CatalogImporter.swift`, `Allspeak/Views/Sessions/SessionEditView.swift` (if it offers catalog/mapping actions), `AllspeakTests/SessionRepositoryTests.swift`, `AllspeakTests/CreateSessionViewModelTests.swift`, `AllspeakTests/SessionEditViewModelTests.swift`, `AllspeakTests/DocumentsStorageTests.swift`, `AllspeakTests/UTTypeCatalogTests.swift`, `AllspeakTests/CatalogImporterTests.swift`
 - Modify: `Allspeak/Info.plist` (drop shazamcatalog UT declaration + `NSMicrophoneUsageDescription`), `AllspeakWatch/Info.plist` (mic string)
 
-- [ ] forms: remove catalog/mapping slots, `ActivePicker` cases, and form-state fields; save paths no longer reference them
-- [ ] `SessionRepository`: remove `setCatalog`/`clearCatalog`/`setDTWMap`/`clearDTWMap`; drop `catalogSrc`/`dtwMapSrc` from both import methods; drop the fields from `SessionSnapshot`; `CatalogImporter` call site updated
-- [ ] `DocumentsStorage`: remove catalog/dtwMap URL helpers and removal helpers; `UTType+Catalog`: remove `.shazamCatalog`/`.dtwMap` (file keeps the srt type; rename the file only if trivial in xcodegen terms, else keep name)
-- [ ] Info.plist edits per Files block (keep the srt UT declaration)
-- [ ] update all listed test suites: remove catalog/dtw cases, keep import/track/subtitle cases green
-- [ ] run Validation Commands - green before task 6
+- [x] forms: remove catalog/mapping slots, `ActivePicker` cases, and form-state fields; save paths no longer reference them
+- [x] `SessionRepository`: remove `setCatalog`/`clearCatalog`/`setDTWMap`/`clearDTWMap`; drop `catalogSrc`/`dtwMapSrc` from both import methods; drop the fields from `SessionSnapshot`; `CatalogImporter` call site updated
+- [x] `DocumentsStorage`: remove catalog/dtwMap URL helpers and removal helpers; `UTType+Catalog`: whole file deleted, see note below
+- [x] Info.plist edits per Files block (keep the srt UT declaration)
+- [x] update all listed test suites: remove catalog/dtw cases, keep import/track/subtitle cases green
+- [x] run Validation Commands - green before task 6 (401 tests / 41 suites pass; zero warnings on touched paths)
+
+➕ Discovered in Task 5: `UTType+Catalog.swift` held ONLY `.shazamCatalog` and `.dtwMap` - the inventory's "file keeps the srt type" is wrong; the srt type is constructed inline in `CreateSessionView` (`UTType("public.subtitle.srt")`). With both entries gone the file was empty, so it and `AllspeakTests/UTTypeCatalogTests.swift` were deleted whole. `project.yml` globs the app target's sources, so no file-list edit was needed.
+
+➕ Discovered in Task 5: `Icons.dtwMap` was orphaned by `FileSlotView` and deleted. `Icons.catalog` STAYS - it is used by the surviving Catalog import feature (`CatalogDetailView`, `SessionsView`, `SessionCardView`), not by cinema sync.
+
+➕ Discovered in Task 5: `AllspeakTests/PlaybackCoordinatorTests.swift` (not in Task 5's Files block) drove the still-live diagnostics catalog gate through `importSession(catalogSrc:)`, `setCatalog`, and `clearCatalog`. Those tests are Task 7's to delete, so rather than lose gate coverage early they now set `catalogFilename` by KVC through a `setCatalogFilename(_:sessionID:in:)` helper. **Task 7 deletes the helper along with the gate tests.**
+
+⚠️ For Task 6: `PlaybackCoordinator.swift` still reads `catalogFilename` by KVC (lines ~91, ~258) purely to feed `diagnostics.begin(hasCatalog:)`/`setHasCatalog`. Task 5 left it (out of scope, still compiles), but Task 6 removes the attribute from the model, which makes that KVC read hit a missing key at runtime AND trips Task 6's own `catalogFilename|dtwMapFilename` grep gate. Task 6 must therefore pull the diagnostics ungating (Task 7's first checkbox) forward, or Task 6 and Task 7 must be done together.
 
 ### Task 6: Core Data v5 migration
 

@@ -26,28 +26,6 @@ struct DocumentsStorage: Sendable {
         sessionDir(for: sessionID).appendingPathComponent(filename)
     }
 
-    func catalogURL(sessionID: UUID, filename: String) -> URL {
-        sessionDir(for: sessionID).appendingPathComponent(filename)
-    }
-
-    func removeCatalogFile(sessionID: UUID, filename: String) throws {
-        let url = catalogURL(sessionID: sessionID, filename: filename)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
-    func dtwMapURL(sessionID: UUID, filename: String) -> URL {
-        sessionDir(for: sessionID).appendingPathComponent(filename)
-    }
-
-    func removeDTWMapFile(sessionID: UUID, filename: String) throws {
-        let url = dtwMapURL(sessionID: sessionID, filename: filename)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
     static func trackFilename(trackID: UUID, originalFilename: String) -> String {
         "track-\(trackID.uuidString)-\(originalFilename)"
     }

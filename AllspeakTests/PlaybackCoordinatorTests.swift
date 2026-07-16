@@ -358,6 +358,17 @@ struct PlaybackCoordinatorTests {
         let root: URL
     }
 
+    private static func setCatalogFilename(
+        _ filename: String?,
+        sessionID: NSManagedObjectID,
+        in persistence: PersistenceController
+    ) throws {
+        let context = persistence.viewContext
+        let session = try context.existingObject(with: sessionID)
+        session.setValue(filename, forKey: "catalogFilename")
+        try context.save()
+    }
+
     private static func importSession(withCatalog: Bool, name: String = "Movie") async throws -> UnstartedSession {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("allspeak-coord-diag-\(UUID().uuidString)", isDirectory: true)
@@ -375,19 +386,14 @@ struct PlaybackCoordinatorTests {
         let srtText = "1\n00:00:00,500 --> 00:00:01,500\nfirst\n\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n"
         try srtText.write(to: srtURL, atomically: true, encoding: .utf8)
 
-        var catalogSrc: URL?
-        if withCatalog {
-            let url = srcDir.appendingPathComponent("film.shazamcatalog")
-            try Data([0x01, 0x02, 0x03]).write(to: url)
-            catalogSrc = url
-        }
-
         let sessionID = try await repo.importSession(
             name: name,
             audioSrc: movedAudio,
-            srtSrc: srtURL,
-            catalogSrc: catalogSrc
+            srtSrc: srtURL
         )
+        if withCatalog {
+            try setCatalogFilename("film.shazamcatalog", sessionID: sessionID, in: persistence)
+        }
         persistence.viewContext.refreshAllObjects()
 
         return UnstartedSession(sessionID: sessionID, repo: repo, persistence: persistence, storage: storage, root: root)
@@ -578,9 +584,7 @@ struct PlaybackCoordinatorTests {
         log.log(.play)
         #expect(!FileManager.default.fileExists(atPath: url.path))
 
-        let catalogSrc = imported.root.appendingPathComponent("inbox/added.shazamcatalog")
-        try Data([0x07, 0x08, 0x09]).write(to: catalogSrc)
-        try await imported.repo.setCatalog(sessionID: imported.sessionID, srcURL: catalogSrc)
+        try Self.setCatalogFilename("added.shazamcatalog", sessionID: imported.sessionID, in: imported.persistence)
         await coordinator.refreshIfActive(sessionID: imported.sessionID)
 
         log.log(.pause)
@@ -613,7 +617,7 @@ struct PlaybackCoordinatorTests {
         #expect(FileManager.default.fileExists(atPath: url.path))
         let afterFirst = try String(contentsOf: url, encoding: .utf8)
 
-        try await imported.repo.clearCatalog(sessionID: imported.sessionID)
+        try Self.setCatalogFilename(nil, sessionID: imported.sessionID, in: imported.persistence)
         await coordinator.refreshIfActive(sessionID: imported.sessionID)
 
         log.log(.pause)
