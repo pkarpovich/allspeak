@@ -16,8 +16,6 @@ struct CreateSessionView: View {
     @State private var isPickerPresented = false
     @State private var isSaving = false
     @State private var loadError: String?
-    @State private var loadedCatalogFilename: String?
-    @State private var loadedDTWMapFilename: String?
 
     private let repository: SessionRepository
 
@@ -45,18 +43,6 @@ struct CreateSessionView: View {
                         filename: form.srtDisplayName,
                         onChoose: { presentPicker(.subtitles) },
                         onClear: { form.srtURL = nil; form.existingSrtFilename = nil }
-                    )
-                    FileSlotRow(
-                        kind: .catalog,
-                        filename: form.catalogDisplayName,
-                        onChoose: { presentPicker(.catalog) },
-                        onClear: { form.catalogURL = nil; form.existingCatalogFilename = nil }
-                    )
-                    FileSlotRow(
-                        kind: .dtwMap,
-                        filename: form.dtwMapDisplayName,
-                        onChoose: { presentPicker(.dtwMap) },
-                        onClear: { form.dtwMapURL = nil; form.existingDTWMapFilename = nil }
                     )
                 } header: {
                     Text("Files")
@@ -162,10 +148,6 @@ struct CreateSessionView: View {
             form.name = snapshot.name
             form.existingAudioFilename = snapshot.audioFilename
             form.existingSrtFilename = snapshot.srtFilename
-            form.existingCatalogFilename = snapshot.catalogFilename
-            form.existingDTWMapFilename = snapshot.dtwMapFilename
-            loadedCatalogFilename = snapshot.catalogFilename
-            loadedDTWMapFilename = snapshot.dtwMapFilename
         } catch {
             loadError = "Couldn't load session: \(error.localizedDescription)"
         }
@@ -192,16 +174,6 @@ struct CreateSessionView: View {
                     form.srtURL = url
                     form.existingSrtFilename = nil
                 }
-            case .catalog:
-                if let url = urls.first {
-                    form.catalogURL = url
-                    form.existingCatalogFilename = nil
-                }
-            case .dtwMap:
-                if let url = urls.first {
-                    form.dtwMapURL = url
-                    form.existingDTWMapFilename = nil
-                }
             case .none:
                 break
             }
@@ -216,16 +188,12 @@ struct CreateSessionView: View {
         let snapshot = form
         let mode = self.mode
         let repo = repository
-        let originalCatalog = loadedCatalogFilename
-        let originalDTWMap = loadedDTWMapFilename
         Task {
             do {
                 try await Self.performSave(
                     snapshot: snapshot,
                     mode: mode,
-                    repository: repo,
-                    originalCatalogFilename: originalCatalog,
-                    originalDTWMapFilename: originalDTWMap
+                    repository: repo
                 )
                 await MainActor.run {
                     isSaving = false
@@ -243,9 +211,7 @@ struct CreateSessionView: View {
     static func performSave(
         snapshot: CreateSessionFormState,
         mode: CreateSessionMode,
-        repository: SessionRepository,
-        originalCatalogFilename: String? = nil,
-        originalDTWMapFilename: String? = nil
+        repository: SessionRepository
     ) async throws {
         switch mode {
         case .new:
@@ -257,25 +223,13 @@ struct CreateSessionView: View {
             _ = try await repository.importMultiTrackSession(
                 name: snapshot.trimmedName,
                 audioSources: sources,
-                srtSrc: srt,
-                catalogSrc: snapshot.catalogURL,
-                dtwMapSrc: snapshot.dtwMapURL
+                srtSrc: srt
             )
         case .edit(let id):
             var saveError: Error?
             do {
                 if let srt = snapshot.srtURL {
                     try await repository.replaceSubtitle(id: id, srcURL: srt)
-                }
-                if let catalog = snapshot.catalogURL {
-                    try await repository.setCatalog(sessionID: id, srcURL: catalog)
-                } else if originalCatalogFilename != nil, snapshot.existingCatalogFilename == nil {
-                    try await repository.clearCatalog(sessionID: id)
-                }
-                if let dtwMap = snapshot.dtwMapURL {
-                    try await repository.setDTWMap(sessionID: id, srcURL: dtwMap)
-                } else if originalDTWMapFilename != nil, snapshot.existingDTWMapFilename == nil {
-                    try await repository.clearDTWMap(sessionID: id)
                 }
                 try await repository.rename(id: id, to: snapshot.trimmedName)
             } catch {
@@ -330,8 +284,6 @@ private struct PendingTrackRow: View {
 private enum ActivePicker: Hashable {
     case audio
     case subtitles
-    case catalog
-    case dtwMap
 
     var allowedTypes: [UTType] {
         switch self {
@@ -342,10 +294,6 @@ private enum ActivePicker: Hashable {
                 return [srt, .plainText]
             }
             return [.plainText]
-        case .catalog:
-            return [.shazamCatalog]
-        case .dtwMap:
-            return [.dtwMap]
         }
     }
 
@@ -353,8 +301,6 @@ private enum ActivePicker: Hashable {
         switch self {
         case .audio: return true
         case .subtitles: return false
-        case .catalog: return false
-        case .dtwMap: return false
         }
     }
 }

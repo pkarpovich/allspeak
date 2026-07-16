@@ -24,9 +24,7 @@ struct CatalogImporter: Sendable {
         let sessionID = try await repository.importMultiTrackSession(
             name: detail.title,
             audioSources: audioSources,
-            srtSrc: srtSrc,
-            catalogSrc: nil,
-            dtwMapSrc: nil
+            srtSrc: srtSrc
         )
 
         let snapshots = try await repository.tracks(for: sessionID)

@@ -63,19 +63,25 @@ struct WireProtocolTests {
         }
     }
 
+    @Test("WatchCommand rejects a retired command kind")
+    func watchCommandRetiredKind() throws {
+        let payload = #"{"kind": "deadReckonSeek", "sessionID": "AA00BB00-CC00-DD00-EE00-FF0000000001"}"#
+            .data(using: .utf8)!
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.command.rawValue,
+            WirePayloadKey.payload: payload,
+        ]
+        #expect(throws: DecodingError.self) {
+            _ = try WatchCommand(propertyList: plist)
+        }
+    }
+
     @Test("WatchCommand rejects missing payload")
     func watchCommandMissingPayload() throws {
         let plist: [String: Any] = [WirePayloadKey.kind: WirePayloadKind.command.rawValue]
         #expect(throws: WireCodingError.self) {
             _ = try WatchCommand(propertyList: plist)
         }
-    }
-
-    @Test("deadReckonSeek round-trips via property list")
-    func deadReckonSeekRoundTrip() throws {
-        let command = WatchCommand.deadReckonSeek(sessionID: UUID())
-        let decoded = try WatchCommand(propertyList: try command.toPropertyList())
-        #expect(decoded == command)
     }
 
     @Test("PlaybackSnapshot round-trips via property list")
@@ -123,37 +129,6 @@ struct WireProtocolTests {
         )
         let decoded = try PlaybackSnapshot(propertyList: try snapshot.toPropertyList())
         #expect(decoded.volume == nil)
-    }
-
-    @Test("PlaybackSnapshot round-trips the cinema drift")
-    func playbackSnapshotDriftRoundTrip() throws {
-        let snapshot = PlaybackSnapshot(
-            sessionID: UUID(),
-            revision: 1,
-            currentTime: 1.0,
-            duration: 10.0,
-            currentIndex: 0,
-            isPlaying: false,
-            serverDate: Date(timeIntervalSince1970: 1_700_000_000),
-            drift: -1.4
-        )
-        let decoded = try PlaybackSnapshot(propertyList: try snapshot.toPropertyList())
-        #expect(decoded.drift == -1.4)
-    }
-
-    @Test("PlaybackSnapshot decodes a payload without drift (older phone build)")
-    func playbackSnapshotMissingDrift() throws {
-        let snapshot = PlaybackSnapshot(
-            sessionID: UUID(),
-            revision: 1,
-            currentTime: 1.0,
-            duration: 10.0,
-            currentIndex: 0,
-            isPlaying: false,
-            serverDate: Date(timeIntervalSince1970: 1_700_000_000)
-        )
-        let decoded = try PlaybackSnapshot(propertyList: try snapshot.toPropertyList())
-        #expect(decoded.drift == nil)
     }
 
     @Test("SessionMetadata round-trips via property list")

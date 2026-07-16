@@ -107,75 +107,6 @@ struct DocumentsStorageTests {
         #expect(url == storage.sessionDir(for: id).appendingPathComponent("audio.m4a"))
     }
 
-    @Test("catalogURL composes session-dir filename path")
-    func catalogURLComposition() {
-        let (storage, root) = makeTempStorage()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let id = UUID()
-        let url = storage.catalogURL(sessionID: id, filename: "movie.shazamcatalog")
-        #expect(url == storage.sessionDir(for: id).appendingPathComponent("movie.shazamcatalog"))
-    }
-
-    @Test("removeCatalogFile deletes the catalog file")
-    func removeCatalogFileDeletes() throws {
-        let (storage, root) = makeTempStorage()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let id = UUID()
-        let srcDir = root.appendingPathComponent("src", isDirectory: true)
-        let src = try writeFile(in: srcDir, name: "movie.shazamcatalog", contents: "catalog-bytes")
-        _ = try storage.copyIntoSession(srcURL: src, sessionID: id, as: "movie.shazamcatalog")
-        let url = storage.catalogURL(sessionID: id, filename: "movie.shazamcatalog")
-        #expect(FileManager.default.fileExists(atPath: url.path))
-
-        try storage.removeCatalogFile(sessionID: id, filename: "movie.shazamcatalog")
-
-        #expect(FileManager.default.fileExists(atPath: url.path) == false)
-    }
-
-    @Test("removeCatalogFile is idempotent for a missing file")
-    func removeCatalogFileIdempotent() throws {
-        let (storage, root) = makeTempStorage()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let id = UUID()
-        try storage.removeCatalogFile(sessionID: id, filename: "missing.shazamcatalog")
-        try storage.removeCatalogFile(sessionID: id, filename: "missing.shazamcatalog")
-    }
-
-    @Test("dtwMapURL composes session-dir filename path under sessions/<uuid>")
-    func dtwMapURLComposition() {
-        let (storage, root) = makeTempStorage()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let id = UUID()
-        let url = storage.dtwMapURL(sessionID: id, filename: "movie.dtwmap.json")
-        #expect(url == storage.sessionDir(for: id).appendingPathComponent("movie.dtwmap.json"))
-        #expect(url.path.hasSuffix("sessions/\(id.uuidString)/movie.dtwmap.json"))
-    }
-
-    @Test("removeDTWMapFile deletes the dtw map file")
-    func removeDTWMapFileDeletes() throws {
-        let (storage, root) = makeTempStorage()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let id = UUID()
-        let srcDir = root.appendingPathComponent("src", isDirectory: true)
-        let src = try writeFile(in: srcDir, name: "movie.dtwmap.json", contents: "{}")
-        _ = try storage.copyIntoSession(srcURL: src, sessionID: id, as: "movie.dtwmap.json")
-        let url = storage.dtwMapURL(sessionID: id, filename: "movie.dtwmap.json")
-        #expect(FileManager.default.fileExists(atPath: url.path))
-
-        try storage.removeDTWMapFile(sessionID: id, filename: "movie.dtwmap.json")
-
-        #expect(FileManager.default.fileExists(atPath: url.path) == false)
-    }
-
-    @Test("removeDTWMapFile is idempotent for a missing file")
-    func removeDTWMapFileIdempotent() throws {
-        let (storage, root) = makeTempStorage()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let id = UUID()
-        try storage.removeDTWMapFile(sessionID: id, filename: "missing.dtwmap.json")
-        try storage.removeDTWMapFile(sessionID: id, filename: "missing.dtwmap.json")
-    }
-
     @Test("trackURL formats as track-<trackID>-<originalFilename>")
     func trackURLFormat() {
         let (storage, root) = makeTempStorage()
@@ -241,5 +172,52 @@ struct DocumentsStorageTests {
         let trackID = UUID()
         try storage.removeTrackFile(sessionID: sessionID, trackID: trackID, originalFilename: "missing.m4a")
         try storage.removeTrackFile(sessionID: sessionID, trackID: trackID, originalFilename: "missing.m4a")
+    }
+
+    @Test("removeLegacySyncFiles deletes catalog and dtw map leftovers in every session dir")
+    func removeLegacySyncFilesSweepsAllSessions() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = UUID()
+        let second = UUID()
+        for id in [first, second] {
+            _ = try writeFile(in: storage.sessionDir(for: id), name: "Masters.shazamcatalog", contents: "catalog")
+            _ = try writeFile(in: storage.sessionDir(for: id), name: "Masters.dtwmap.json", contents: "{}")
+        }
+
+        storage.removeLegacySyncFiles()
+
+        for id in [first, second] {
+            let dir = storage.sessionDir(for: id)
+            #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.shazamcatalog").path) == false)
+            #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.dtwmap.json").path) == false)
+        }
+    }
+
+    @Test("removeLegacySyncFiles keeps audio, subtitles, and the catalog-import sidecar")
+    func removeLegacySyncFilesKeepsLiveFiles() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let dir = storage.sessionDir(for: id)
+        let survivors = ["audio.m4a", "subs.srt", CatalogSidecar.filename]
+        for name in survivors {
+            _ = try writeFile(in: dir, name: name, contents: "keep")
+        }
+        _ = try writeFile(in: dir, name: "Masters.shazamcatalog", contents: "catalog")
+
+        storage.removeLegacySyncFiles()
+
+        for name in survivors {
+            #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path))
+        }
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.shazamcatalog").path) == false)
+    }
+
+    @Test("removeLegacySyncFiles is a no-op when there are no sessions")
+    func removeLegacySyncFilesNoSessions() {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        storage.removeLegacySyncFiles()
     }
 }

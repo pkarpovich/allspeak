@@ -1,0 +1,297 @@
+# Remove Cinema Sync (ShazamKit, DTW, anchor, watch drift)
+
+## Overview
+
+- Delete the entire cinema-sync feature family from the Allspeak app: ShazamKit mic matching on the phone, the DTW EN-to-RU timeline mapping, the playback "cinema anchor" and everything derived from it (watch dead-reckon resync button, watch drift readout, dormant watch mic-match plumbing), the catalog/mapping file slots in the session forms, and the Core Data fields that carried those files.
+- Why: the feature is no longer used. Resync in the cinema is done by tapping a subtitle line (phone or watch cue list) - the original v1 interaction. Removing the dead weight simplifies the transport UI, the wire protocol, the repository, and drops the ShazamKit framework and microphone permission entirely.
+- Two things survive with changed shape: the JSONL session diagnostics become always-on (previously gated on a shazam catalog being attached) with a 30-day log retention, and the Core Data model gets a v5 version that drops the two file-reference fields.
+- Acceptance scenario: build and run; create/edit session forms show only audio + subtitles slots; the player top bar has no sync button; the watch transport shows symmetric ±3s and ±1s skip pairs with no center buttons; Settings tab is gone; playing any session writes a diagnostics JSONL; a store created by the previous build (v4 model, sessions with catalog/dtwMap values) opens and plays with all sessions intact.
+
+### Non-goals
+
+- No changes to the Catalog import feature (Mine/Catalog segment, downloader, sync sheet) beyond dropping the two nil arguments it passes to the repository import.
+- No changes to `CinemaMode.swift` / `CinemaInput` - that is the player's dim/chrome presentation mode, unrelated to cinema sync. Do not touch it.
+- No changes to `SkipCoalescer`, `VolumeThrottler`, `SnapshotBroadcastGate`, Crown volume, cue list, track list, Now Playing, or the interpolation/Always-On progress machinery.
+- No Mac-side script changes (`scripts/bifrost.fish`, `scripts/sidon_infer.py` stay as-is; they are outside the app).
+- No new features - this is a pure removal plus the two shape changes named above.
+
+### Rejected alternatives
+
+- **Keep dead-reckon + drift without Shazam** - rejected: without the DTW mapping the drift number loses half its meaning, and the whole anchor concept exists to serve sync; product decision is the wrist stays a plain remote and in-hall resync is a subtitle tap.
+- **Leave Core Data columns dormant** - rejected: attribute removal is a standard inferable lightweight migration; a clean v5 schema beats dead fields.
+- **Keep an empty Settings tab** - rejected: the only setting (Sync delay) belongs to the removed feature; RootView returns to a single Sessions screen (the original "no settings" philosophy). Re-adding a tab later is trivial.
+- **Delete diagnostics too** - rejected by product decision: the JSONL log stays, ungated, with simple age-based retention.
+
+## Skills to invoke
+
+Load each skill below with the Skill tool and follow its conventions before implementing any task in this plan.
+
+- `swiftui-expert-skill` (project-local) - view changes (RootView, TransportView, forms) and state management
+- `swift-testing-expert` (project-local) - editing and deleting Swift Testing suites
+- `core-data-expert` (project-local) - the v5 model version and migration test
+
+## Context (from discovery)
+
+- Base state: this plan assumes the catalog-import feature (PR #30, branch `session-destribution`) is merged into `main`; the cleanup branch starts from that `main`. All file references below exist at that state.
+
+➕ Code review: **that assumption did not hold.** PR #30 was never merged - `git merge-base --is-ancestor f8e60b6 main` fails - so this branch is stacked on the unmerged #30, and #29 (watch progress anchor) rides along too. The real base for reviewing this plan is `f8e60b6`, not `main`: `git diff main...HEAD` carries ~5,900 insertions of catalog-import feature alongside the removal, so the removal cannot be reviewed or reverted independently and merging this to `main` lands #30 with it. Every completion figure below (test counts, grep gate, "zero warnings on touched paths") was measured on the stacked tree. Merge #30 first and rebase, or state the stacking in the PR description. See the Post-Completion note on merge order.
+- Full inventory of the cinema-sync surface (grep-verified):
+  - Files that die whole: `Allspeak/Audio/CinemaSyncService.swift`, `Allspeak/Views/Player/CinemaSyncView.swift`, `Allspeak/Sync/DTWMapping.swift`, `Allspeak/Sync/CinemaMatch.swift`, `Allspeak/Sync/README.md`, `Allspeak/Watch/WatchDeadReckon.swift`, `Allspeak/Views/Settings/SettingsView.swift`
+  - Tests that die whole: `CinemaSyncServiceTests`, `CinemaSyncIntegrationTests`, `CinemaSyncViewTests`, `DTWMappingTests`, `WatchDeadReckonTests` + fixtures `AllspeakTests/Fixtures/Masters.shazamcatalog`, `Masters.dtwmap.json`
+  - Docs: `docs/cinema-sync.md` deleted; README sections rewritten (cinema sync, watch dead-reckon/drift, settings)
+  - `Allspeak/Audio/PlaybackCoordinator.swift`: `cinemaAnchor` (~line 58), `dtwMapping`, `catalogURL`, `applySyncOffset`, `applyDeadReckonSeek`, `cinemaDrift`, `loadDTWMapping`, anchor bookkeeping inside `seek`/`skip`/`seekToCue`, drift in `currentSnapshot()`
+  - `Allspeak/Watch/WireProtocol.swift`: commands `requestCatalog`, `cinemaMatch`, `deadReckonSeek`; `PlaybackSnapshot.drift`; header-comment contract text for all of them. Both targets ship together in one bundle - no cross-version wire compatibility is needed when removing
+  - `Allspeak/Watch/WatchSessionHost.swift` (routing for removed commands), `Allspeak/Watch/WatchTransportFormat.swift` (drift formatting), `AllspeakWatch/Views/TransportView.swift` (dead-reckon button, drift readout, dormant `WatchCinemaSync` glue)
+  - `Allspeak/Views/Player/PlayerTopBar.swift` (`showsSyncButton`, sync button), `Allspeak/Views/Player/PlayerView.swift` (`startSync`, sync sheet, catalogURL/dtwMapping state)
+  - Forms: `Allspeak/Views/Create/CreateSessionView.swift`, `CreateSessionFormState.swift`, `FileSlotView.swift` - catalog + mapping slots, `ActivePicker` cases
+  - `Allspeak/Storage/SessionRepository.swift`: `setCatalog`/`clearCatalog`/`setDTWMap`/`clearDTWMap`, `catalogSrc`/`dtwMapSrc` params on `importSession` and `importMultiTrackSession`, `SessionSnapshot.catalogFilename/dtwMapFilename`; `Allspeak/Storage/DocumentsStorage.swift`: `catalogURL`/`dtwMapURL`/`removeCatalogFile`/`removeDTWMapFile`; `Allspeak/Storage/UTType+Catalog.swift`: `.shazamCatalog`, `.dtwMap`
+  - `Allspeak/Catalog/CatalogImporter.swift` passes `catalogSrc: nil, dtwMapSrc: nil` - drop with the params
+  - Info.plist (both targets): `NSMicrophoneUsageDescription`; app Info.plist: `UTImportedTypeDeclarations` entry for `com.apple.shazamcatalog` (keep the srt declaration)
+  - `Allspeak/Views/Settings/SettingsView.swift` contains ONLY the Sync delay slider (verified) - the whole Settings tab goes; `Allspeak/Views/RootView.swift` drops the TabView
+  - Diagnostics: `Allspeak/Diagnostics/DiagnosticsLog.swift` (`begin(filmTitle:hasCatalog:)`, `setHasCatalog`, gate at ~line 70), `DiagnosticsEvent.swift` (kinds `.sync`, `.watchAttempt`, `.deadReckon` lose their sources)
+  - Core Data: `Allspeak/Allspeak.xcdatamodeld` current version `Allspeak v4`; `Session.catalogFilename` (added v3), `Session.dtwMapFilename` (added v4), both optional String; `.xccurrentversion` file selects the version; `PersistenceController.swift` uses lightweight migration (`shouldInferMappingModelAutomatically`)
+  - Tests to edit (not delete): `PlaybackCoordinatorTests` (anchor/drift cases), `WireProtocolTests` (removed commands + drift field), `WatchTransportFormatTests` (drift formatting), `PlayerTopBarTests` (`showsSyncButton`), `WatchSessionHostTests` (removed-command routing), `DiagnosticsLogTests` (gate behavior), `SessionRepositoryTests` + `CreateSessionViewModelTests` (catalog/dtw params and slots), `Tags.swift` (`.cinemaSync` tag)
+- Execution environment: this plan runs on the author's Mac. Simulator `iPhone 17 Pro` is the test destination.
+
+## Development Approach
+
+- **Testing approach**: Regular (code first, then tests in the same task)
+- Complete each task fully before moving to the next; surgical changes only - every deleted line traces to the inventory above
+- **CRITICAL: every task MUST include new/updated tests** for code changed in that task (deletion tasks update the survivor suites; the two shape-change tasks add new tests)
+- **CRITICAL: all tests must pass before starting next task** - no exceptions
+- **CRITICAL: update this plan file when scope changes during implementation**
+
+## Code-Quality Rules (verify before marking each task complete)
+
+The project skills carry no formal Hard-rules block; this gate materializes the codebase's established conventions.
+
+- **Surgical deletion**: remove only what the inventory names; do not refactor, rename, or "improve" surviving code. `CinemaMode.swift` must be untouched (`git diff` proves it).
+- **State**: surviving code keeps `@MainActor` + `@Observable` patterns; no new `ObservableObject`.
+- **Design tokens**: any layout change in `TransportView` uses existing `Tokens`/`Icon` entries; delete orphaned token/icon entries that were only used by removed UI.
+- **Comments**: update block comments that describe removed behavior (WireProtocol header, PlaybackCoordinator invariants) - stale contract comments are bugs.
+- **Tests**: Swift Testing; deleting a suite removes its file; edited suites keep full-sentence test names; remove the `.cinemaSync` tag from `Tags.swift` only when no suite references it (grep proves it).
+- **Per-task gate**: `xcodegen generate` (when file lists/Info.plist change) + full suite green via Validation Commands; zero warnings referencing files touched by this plan (grep the build log for `warning:` filtered by those paths); no references to deleted symbols anywhere (`grep -rn "CinemaSync\|DTWMapping\|deadReckon\|cinemaMatch\|requestCatalog\|shazam" Allspeak AllspeakWatch AllspeakTests --include="*.swift" -i` returns empty at plan completion, excluding `CinemaMode`).
+
+## Validation Commands
+
+Run after each task; all must pass before the next task:
+
+```sh
+xcodegen generate
+xcodebuild test -scheme Allspeak -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
+## Testing Strategy
+
+- Deletion tasks: the survivor suites (PlaybackCoordinator, WireProtocol, WatchTransportFormat, PlayerTopBar, WatchSessionHost, SessionRepository, CreateSessionViewModel) are edited in the same task as the code they cover.
+- New tests: v4→v5 store migration (real on-disk store built against the v4 model, reopened with the current model); diagnostics ungated begin + retention.
+- No UI/e2e harness; the acceptance scenario runs in the Simulator at the end (in-repo, no network needed - any local session).
+
+## Progress Tracking
+
+- Mark completed items with `[x]` immediately when done
+- Add newly discovered tasks with ➕ prefix; blockers with ⚠️ prefix
+
+## Solution Overview
+
+Removal proceeds bottom-up so every task leaves the tree compiling: first the phone-side sync service and UI, then the anchor layer in the coordinator, then the wire protocol and watch UI, then forms/repository/storage, then the Core Data v5 migration, then diagnostics reshape, then Settings removal and docs. Wire-protocol removal is safe in one step because both targets always ship together.
+
+## Technical Details
+
+### Core Data v5
+
+- Add model version `Allspeak v5` to `Allspeak.xcdatamodeld`: identical to v4 minus `Session.catalogFilename` and `Session.dtwMapFilename`. Set `.xccurrentversion` to v5.
+- Lightweight migration infers attribute removal automatically - no mapping model. `PersistenceController` needs no code change.
+- Migration test: build a store on disk using the v4 model loaded explicitly from the momd's v4 .mom, insert a Session with both fields populated plus a track; reopen through `PersistenceController` (current model); assert the session, its name, track, and lastPosition survive and the store opens without error.
+
+### Diagnostics reshape
+
+- `DiagnosticsLog.begin(filmTitle:hasCatalog:)` → `begin(filmTitle:)`; delete `setHasCatalog` and the `hasCatalog` gate - every `begin` creates a log file and events always write.
+- Retention: at the top of `begin`, delete files in `Documents/diagnostics/` with a modification date older than 30 days (constant `retentionDays = 30` in `DiagnosticsLog`). Failures are ignored (`try?`) - retention must never block logging.
+- `DiagnosticsEvent`: remove kinds `.sync`, `.watchAttempt`, `.deadReckon` and their payload fields; `.skip/.seek/.pause/.play` stay unchanged.
+- Call sites: `PlaybackCoordinator` keeps play/pause/skip/seek logging; all sync/dead-reckon logging disappears with the removed methods; `CinemaSyncService.logSyncFailure` dies with its file.
+
+### Watch transport layout after removal
+
+- Coarse row: exactly two circular ±3s buttons, centered as a pair with the existing inter-button spacing token. Fine row: exactly two ±1s buttons, same treatment. No center element in either row; play pill, progress bar, Crown behavior untouched.
+
+### Wire protocol after removal
+
+- `WatchCommand` kinds left: `play`, `pause`, `togglePlayPause`, `skip`, `seek`, `switchTrack`, `setVolume`, `requestCueChunk`. `PlaybackSnapshot` fields left: `currentTime`, `duration`, `currentIndex`, `isPlaying`, `serverDate`, `activeTrackID`, `volume`. Update the header contract comment to match exactly.
+
+## What Goes Where
+
+- **Implementation Steps**: everything - all changes are in this repo.
+- **Post-Completion**: TestFlight upgrade check on a real device (v4 store migration on real data), README screenshots if any exist.
+
+## Implementation Steps
+
+### Task 1: Remove phone-side ShazamKit sync service and UI
+
+**Files:**
+- Delete: `Allspeak/Audio/CinemaSyncService.swift`, `Allspeak/Views/Player/CinemaSyncView.swift`, `AllspeakTests/CinemaSyncServiceTests.swift`, `AllspeakTests/CinemaSyncIntegrationTests.swift`, `AllspeakTests/CinemaSyncViewTests.swift`, `AllspeakTests/Fixtures/Masters.shazamcatalog`
+- Modify: `Allspeak/Views/Player/PlayerView.swift`, `Allspeak/Views/Player/PlayerTopBar.swift`, `AllspeakTests/PlayerTopBarTests.swift`, `Allspeak/Views/Settings/SettingsView.swift` (temporary stub - full removal in Task 7)
+
+- [x] delete the four files and the shazam fixture; strip `startSync`, the sync sheet presentation, and catalogURL/dtwMapping-for-sync state from `PlayerView`
+- [x] remove the sync button and `showsSyncButton` from `PlayerTopBar`; remove its cases from `PlayerTopBarTests`
+- [x] `SettingsView`: replace the body with a minimal placeholder referencing no removed symbols (whole tab dies in Task 7); keep the app compiling
+- [x] update tests for `PlayerView`/`PlayerTopBar` survivors (top bar renders back/title/tracks only)
+- [x] run Validation Commands - green before task 2
+
+➕ Discovered in Task 1: `PlaybackCoordinator.applyDeadReckonSeek` (Task 2's file) called `CinemaSyncService.storedLatencyCompensation`, so deleting the service in Task 1 broke the build. The latency constants (`latencyCompensationDefaultsKey`, `defaultLatencyCompensation`, `maxLatencyCompensation`, `storedLatencyCompensation`) were temporarily rehomed onto `PlaybackCoordinator`, and `PlaybackCoordinatorTests` now reads the key from there. **Task 2 must delete all four alongside `applyDeadReckonSeek`.**
+
+➕ Discovered in Task 1: with `showsSyncButton` gone, `PlayerTopBarTests` had no logic left to assert (the remaining properties are plain stored init args). Kept the file's established testable-flag idiom by adding `showsTrackMenu: Bool { tracks.count > 1 }` to `PlayerTopBar` (replacing the inline `if tracks.count > 1` in the body) and retargeting the suite at it.
+
+### Task 2: Remove the anchor layer from PlaybackCoordinator
+
+**Files:**
+- Modify: `Allspeak/Audio/PlaybackCoordinator.swift`, `AllspeakTests/PlaybackCoordinatorTests.swift`
+- Delete: `Allspeak/Sync/DTWMapping.swift`, `Allspeak/Sync/CinemaMatch.swift`, `Allspeak/Sync/README.md`, `AllspeakTests/DTWMappingTests.swift`, `AllspeakTests/Fixtures/Masters.dtwmap.json`
+
+- [x] remove `cinemaAnchor`, `dtwMapping`, `catalogURL`, `applySyncOffset`, `applyDeadReckonSeek`, `cinemaDrift`, `loadDTWMapping`, and anchor bookkeeping inside `seek`/`skip`/`seekToCue`; `currentSnapshot()` stops computing drift (field itself removed in Task 3)
+- [x] update the coordinator's invariant block comments - no stale anchor/latency text remains
+- [x] delete the `Sync/` directory files and their tests/fixture
+- [x] update `PlaybackCoordinatorTests`: drop anchor/drift/dead-reckon cases; keep transport, track-switch, and snapshot cases green
+- [x] run Validation Commands - green before task 3
+
+➕ Discovered in Task 2: with the anchor gone, `seekToCue` became a byte-for-byte duplicate of `seek` (its entire body was the anchoring, and its doc comment was purely about alignment). It only ever existed to serve the anchor, so it was deleted and its two call sites (`PlayerView`'s cue tap, `apply(.seek)`) now call `seek(to:source:)` directly. `PlayerView.swift` is outside Task 2's Files block.
+
+➕ Discovered in Task 2: `WatchSessionHost.dispatch` (Task 3's file) routed `.deadReckonSeek` through `applyDeadReckonSeek`, so removing the coordinator method broke the build. The case now returns `.empty` unconditionally (honest: without an anchor the resync can never succeed) and **Task 3 deletes the case with the command**.
+
+➕ Discovered in Task 2: the latency constants Task 1 rehomed onto `PlaybackCoordinator` (`latencyCompensationDefaultsKey`, `defaultLatencyCompensation`, `maxLatencyCompensation`, `storedLatencyCompensation`) are deleted, as Task 1's note required. `AllspeakTests/Fixtures/` is now empty and gone; `project.yml` globs directories, so no file-list edit was needed.
+
+### Task 3: Shrink the wire protocol and watch plumbing
+
+**Files:**
+- Modify: `Allspeak/Watch/WireProtocol.swift`, `Allspeak/Watch/PlaybackSnapshot.swift`, `Allspeak/Watch/WatchSessionHost.swift`, `Allspeak/Watch/WatchTransportFormat.swift`, `AllspeakTests/WireProtocolTests.swift`, `AllspeakTests/WatchSessionHostTests.swift`, `AllspeakTests/WatchTransportFormatTests.swift`
+- Delete: `Allspeak/Watch/WatchDeadReckon.swift`, `AllspeakTests/WatchDeadReckonTests.swift`
+
+- [x] remove `requestCatalog`, `cinemaMatch`, `deadReckonSeek` from `WatchCommand` (cases, Kind, coding); remove `drift` from `PlaybackSnapshot`; rewrite the header contract comment to the exact surviving surface per Technical Details
+- [x] `WatchSessionHost`: remove routing/special-casing for the removed commands and any catalog file-transfer remnants
+- [x] `WatchTransportFormat`: remove drift formatting helpers
+- [x] delete `WatchDeadReckon` + its tests; update the three survivor suites (round-trip tests for removed kinds/fields deleted, remaining cases green)
+- [x] run Validation Commands - green before task 4
+
+➕ Discovered in Task 3: the inventory's `requestCatalog` and `cinemaMatch` commands do not exist at this base state - `deadReckonSeek` was the only cinema command left in `WatchCommand`, and `WatchSessionHost` had no catalog file-transfer remnants. Nothing to remove for those two; the header contract comment never documented them either.
+
+➕ Discovered in Task 3: `AllspeakWatch/Views/TransportView.swift` (Task 4's file) referenced `WatchDeadReckon`, `WatchTransportFormat.driftDisplay`, and `PlaybackSnapshot.drift`, so deleting them here broke the watch build. **Task 4's first two checkboxes are therefore already done**: the dead-reckon button, drift readout, `driftArrow`/`driftColor`, and the reset-task glue are gone, and both rows are now centered two-button pairs (`coarseRowContent` lost its `centerWidth` param; existing button sizes and spacings kept). Task 4 is reduced to the orphaned-token sweep and verification.
+
+➕ Discovered in Task 3: `PlaybackCoordinator.swift` (not in Task 3's Files block) had to drop `drift: nil` from `currentSnapshot()` and the `.deadReckonSeek` case from `apply(_:)`; `PlaybackCoordinatorTests`'s `currentSnapshotReportsNoDrift` case (added in Task 2) asserted a field that no longer exists and was deleted with it.
+
+➕ Discovered in Task 3: `project.yml` lists the watch target's shared sources file-by-file (not globbed) and named `Allspeak/Watch/WatchDeadReckon.swift` - `xcodegen generate` fails on the missing path until that line is removed.
+
+### Task 4: Watch transport UI - symmetric skip rows
+
+**Files:**
+- Modify: `AllspeakWatch/Views/TransportView.swift`, `AllspeakWatch/Tokens.swift` (only if orphaned entries remain)
+
+- [x] remove the dead-reckon button, drift readout, and dormant `WatchCinemaSync` glue (`onChange` cancel handlers, state) from `TransportView` (done in Task 3 - deleting `WatchDeadReckon`/`driftDisplay`/`PlaybackSnapshot.drift` forced it; verified here)
+- [x] coarse and fine rows become centered two-button pairs per Technical Details; play pill, progress bar, Crown untouched (done in Task 3; verified here)
+- [x] delete watch token/icon entries now unused (grep proves orphanhood before deleting) - nothing to delete, see note below
+- [x] tests: `WatchTransportFormatTests` already updated in Task 3; verify no watch test references removed UI helpers - grep for `driftDisplay|driftArrow|driftColor|WatchDeadReckon|centerWidth|WatchCinemaSync` across `AllspeakTests`/`AllspeakWatch` returns nothing
+- [x] run Validation Commands - green before task 5 (446 tests / 42 suites pass; zero warnings on `TransportView.swift`/`Tokens.swift`)
+
+➕ Discovered in Task 4: the orphaned-token sweep deletes nothing. Every `Tokens`/`Tokens.Icon` entry `TransportView` still uses stays; the removed UI only ever referenced `Tokens.accent` and `Tokens.text` (`git diff main -- AllspeakWatch/Views/TransportView.swift | grep '^-'`), both still used heavily elsewhere. The only zero-reference entries in `Tokens.swift` are `surfaceTop` and `Font.subtitleCurrent`, and `git grep` on `main` proves both were already unused before this plan - pre-existing dead code, out of scope per the Surgical-deletion rule.
+
+⚠️ For Task 8: `AllspeakTests/WireProtocolTests.swift:68` contains the string literal `"deadReckonSeek"` inside the `WatchCommand rejects a retired command kind` regression test. That is a deliberate survivor (it pins the retired kind's rejection), not a stale reference, but it WILL trip Task 8's case-insensitive `deadReckon` grep gate. Task 8 should exclude that test's literal from the gate rather than delete the test.
+
+### Task 5: Forms, repository, and storage cleanup
+
+**Files:**
+- Modify: `Allspeak/Views/Create/CreateSessionView.swift`, `Allspeak/Views/Create/CreateSessionFormState.swift`, `Allspeak/Views/Create/FileSlotView.swift`, `Allspeak/Storage/SessionRepository.swift`, `Allspeak/Storage/DocumentsStorage.swift`, `Allspeak/Storage/UTType+Catalog.swift`, `Allspeak/Catalog/CatalogImporter.swift`, `Allspeak/Views/Sessions/SessionEditView.swift` (if it offers catalog/mapping actions), `AllspeakTests/SessionRepositoryTests.swift`, `AllspeakTests/CreateSessionViewModelTests.swift`, `AllspeakTests/SessionEditViewModelTests.swift`, `AllspeakTests/DocumentsStorageTests.swift`, `AllspeakTests/UTTypeCatalogTests.swift`, `AllspeakTests/CatalogImporterTests.swift`
+- Modify: `Allspeak/Info.plist` (drop shazamcatalog UT declaration + `NSMicrophoneUsageDescription`), `AllspeakWatch/Info.plist` (mic string)
+
+- [x] forms: remove catalog/mapping slots, `ActivePicker` cases, and form-state fields; save paths no longer reference them
+- [x] `SessionRepository`: remove `setCatalog`/`clearCatalog`/`setDTWMap`/`clearDTWMap`; drop `catalogSrc`/`dtwMapSrc` from both import methods; drop the fields from `SessionSnapshot`; `CatalogImporter` call site updated
+- [x] `DocumentsStorage`: remove catalog/dtwMap URL helpers and removal helpers; `UTType+Catalog`: whole file deleted, see note below
+- [x] Info.plist edits per Files block (keep the srt UT declaration)
+- [x] update all listed test suites: remove catalog/dtw cases, keep import/track/subtitle cases green
+- [x] run Validation Commands - green before task 6 (401 tests / 41 suites pass; zero warnings on touched paths)
+
+➕ Discovered in Task 5: `UTType+Catalog.swift` held ONLY `.shazamCatalog` and `.dtwMap` - the inventory's "file keeps the srt type" is wrong; the srt type is constructed inline in `CreateSessionView` (`UTType("public.subtitle.srt")`). With both entries gone the file was empty, so it and `AllspeakTests/UTTypeCatalogTests.swift` were deleted whole. `project.yml` globs the app target's sources, so no file-list edit was needed.
+
+➕ Discovered in Task 5: `Icons.dtwMap` was orphaned by `FileSlotView` and deleted. `Icons.catalog` STAYS - it is used by the surviving Catalog import feature (`CatalogDetailView`, `SessionsView`, `SessionCardView`), not by cinema sync.
+
+➕ Discovered in Task 5: `AllspeakTests/PlaybackCoordinatorTests.swift` (not in Task 5's Files block) drove the still-live diagnostics catalog gate through `importSession(catalogSrc:)`, `setCatalog`, and `clearCatalog`. Those tests are Task 7's to delete, so rather than lose gate coverage early they now set `catalogFilename` by KVC through a `setCatalogFilename(_:sessionID:in:)` helper. **Task 7 deletes the helper along with the gate tests.**
+
+⚠️ For Task 6: `PlaybackCoordinator.swift` still reads `catalogFilename` by KVC (lines ~91, ~258) purely to feed `diagnostics.begin(hasCatalog:)`/`setHasCatalog`. Task 5 left it (out of scope, still compiles), but Task 6 removes the attribute from the model, which makes that KVC read hit a missing key at runtime AND trips Task 6's own `catalogFilename|dtwMapFilename` grep gate. Task 6 must therefore pull the diagnostics ungating (Task 7's first checkbox) forward, or Task 6 and Task 7 must be done together.
+
+➕ Code review: **this plan's Non-goals were breached** - a review pass (`8e931e3`) changed the Catalog import feature past "dropping the two nil arguments". Two real defects surfaced in the catalog code that rides along in `main...HEAD` (see the Context note - PR #30 is not in `main`): `CatalogSyncApplier.apply` never re-asserted manifest order after its add/remove phase, and `addTrackImporting` appends at `maxOrder + 1`, so a revision that re-cut a middle track moved it to the end and Core Data diverged from both the manifest and the sidecar; separately, deleting an imported session left a stale sidecar in `CatalogStore`, so the Catalog row kept rendering "Added" with no Import button and the Mine banner kept counting a session that no longer existed. Fixed with `SessionRepository.setSortOrders` + a call after the applier's add/remove phase, and `store.reloadSidecars()` in `SessionsView.deleteSession`; `CatalogSyncTests` gained an order-pinning case (the existing applier tests asserted labels as an unordered `Set`, which is why it slipped through). Recorded here because **`Allspeak/Catalog/CatalogSync.swift`, `Allspeak/Storage/SessionRepository.swift` (`setSortOrders`) and `Allspeak/Views/Sessions/SessionsView.swift` (`deleteSession`) now carry changes that do not trace to the removal inventory** and belong to PR #30's feature, not to this cleanup. Both fixes are tested and green; the debt is that they are in the wrong commit, so they should move to #30 if that branch is still open.
+
+### Task 6: Core Data v5 migration
+
+**Files:**
+- Modify: `Allspeak/Allspeak.xcdatamodeld` (new version `Allspeak v5`, `.xccurrentversion`)
+- Modify: `AllspeakTests/PersistenceControllerTests.swift`
+
+- [x] add `Allspeak v5.xcdatamodel` = v4 minus `catalogFilename`/`dtwMapFilename` on `Session`; set `.xccurrentversion` to v5
+- [x] write the migration test per Technical Details: on-disk v4 store with populated removed fields → reopens under the current model, session/track/position intact
+- [x] verify no remaining KVC access to the removed keys anywhere - empty across `Allspeak`/`AllspeakWatch`; the only `AllspeakTests` hits are the historical-model migration tests, see note below
+- [x] run Validation Commands - green before task 7 (396 tests / 41 suites pass; zero warnings on touched paths)
+
+➕ Discovered in Task 6: the diagnostics ungating was pulled forward from Task 7 exactly as this task's ⚠️ note required - `DiagnosticsLog.begin(filmTitle:)` no longer takes `hasCatalog`, `setHasCatalog` and the `log` gate are gone, and `PlaybackCoordinator` dropped both `catalogFilename` KVC reads plus the `Snap.catalogFilename` fields. **Task 7's first checkbox is therefore half-done: only the 30-day retention sweep remains.** The gate tests they drove were rewritten in place: `DiagnosticsLogTests.gatingWithoutCatalog` → `every begun session writes its events, with no catalog gate`; `PlaybackCoordinatorTests` lost `startSessionWithoutCatalogGatesDiagnosticsOff` / `refreshAttachingCatalogEnablesLogging` / `refreshClearingCatalogDisablesLogging` (gate behavior no longer exists), gained `refreshKeepsLoggingToSameFile`, and `transportWithoutCatalogLogsNothing` / `lightweightStartSessionGatesDiagnosticsOff` were inverted to assert events DO write. Task 5's `setCatalogFilename` KVC helper is deleted, as its note required.
+
+➕ Discovered in Task 6: v5 is structurally IDENTICAL to v2 (v2 = "tracks, no catalog"; v5 = same), so the two versions share a version checksum and `PersistenceControllerTests.versionedModels()` - which sniffed versions by attribute shape - could no longer tell them apart. Replaced with `versionedModel(_ version:)`, which loads a named `.mom` out of the compiled momd (momc names each `.mom` after its version). Identical v2/v5 hashes are harmless: `.xccurrentversion` selects the current model, and a v2 store simply needs no migration to reach v5.
+
+⚠️ For Task 8: Task 6's own grep gate ("returns empty" across `Allspeak AllspeakTests`) is unsatisfiable as literally written and was scoped to production code. `AllspeakTests/PersistenceControllerTests.swift` keeps 17 `catalogFilename`/`dtwMapFilename` references, ALL inside migration tests that drive explicitly-loaded historical models (v2→v3, v3→v4, and the v4→current test this task added). They are deliberate survivors - Technical Details *requires* the v4→v5 test to "insert a Session with both fields populated" - not stale references. Task 8's grep gate (`shazam` is in its pattern, and `film.shazamcatalog` appears in two of these tests) must exclude `PersistenceControllerTests.swift` rather than delete the coverage.
+
+### Task 7: Diagnostics always-on with retention; Settings tab removal
+
+**Files:**
+- Modify: `Allspeak/Diagnostics/DiagnosticsLog.swift`, `Allspeak/Diagnostics/DiagnosticsEvent.swift`, `Allspeak/Audio/PlaybackCoordinator.swift` (begin call site), `Allspeak/Views/RootView.swift`, `AllspeakTests/DiagnosticsLogTests.swift`
+- Delete: `Allspeak/Views/Settings/SettingsView.swift`
+
+- [x] `DiagnosticsLog`: `begin(filmTitle:)` without gate, delete `setHasCatalog` (both done in Task 6); add 30-day retention sweep at `begin` per Technical Details
+- [x] `DiagnosticsEvent`: remove `.sync`/`.watchAttempt`/`.deadReckon` kinds and payloads
+- [x] `RootView`: drop the TabView, show the Sessions navigation directly; delete `SettingsView.swift`
+- [x] write tests: begin always creates a file and events write without any gate (Task 6's `every begun session writes its events, with no catalog gate` covers this); retention deletes an artificially-old file and keeps a fresh one; removed event kinds gone from the encoder
+- [x] run Validation Commands - green before task 8 (397 tests / 41 suites pass; zero warnings on touched paths)
+
+➕ Discovered in Task 7: removing the `.sync` payload orphaned `DiagnosticsEvent.MatchResult` (its only referents were `.sync`/`.watchAttempt`) and both `JSONLineBuilder.addIfPresent` overloads (the removed sync payload held the only optional fields) - all deleted. `Source`, `add`, and the escaping in `encode` stay: `.skip`/`.seek` still carry a `Source`.
+
+➕ Discovered in Task 7: `DiagnosticsLogTests`'s `error message with quotes is escaped` case drove `JSONLineBuilder`'s escaping through `.sync(error:)`, the only arbitrary-string payload in the enum. No surviving kind can reach that path, so the case was deleted rather than rewritten; `encode`'s escaping is now exercised only by the ordinary key/rawValue writes.
+
+➕ Discovered in Task 7: `Icons.settings` and `Icons.home` (`Allspeak/Design/Icons.swift`, not in Task 7's Files block) were used ONLY by the deleted TabView - grep proves zero other references - so both were deleted per the design-tokens rule. `Icons.filmReel` and the rest stay.
+
+➕ Discovered in Task 7: `DiagnosticsLogTests` still carried `.tags(.cinemaSync)` on a suite that no longer tests anything cinema-related; retagged `.audio`. `Tags.swift` now has zero `.cinemaSync` referents, so **Task 8's tag checkbox is just the deletion of the `@Tag` line**.
+
+➕ Discovered in Task 7: `PlaybackCoordinator.swift` is in this task's Files block but needed no change - Task 6 already moved its `begin` call site to `begin(filmTitle:)`.
+
+➕ Code review: ungating diagnostics forced the remote-command registration to move (`3ff1307`), which this task's checkboxes never anticipated. With the catalog gate gone every begun session logs - but Lock Screen / Dynamic Island / Control Center / AirPods transport was registered in `AudioController.load` and landed on that type's deliberately log-free `play`/`pause`/`skip`/`seek`, so those actions were silently absent from every JSONL the moment logging became always-on. `configureRemoteCommands` now lives on `PlaybackCoordinator` (called from both start paths, torn down by `endSession`'s `NowPlayingCenter.clear`), so lock-screen transport converges on the same logged methods the phone screen and watch already route through; the closures resolve the live controller per call, so track switches need no re-registration. `NowPlayingCenter` gained `RemoteCommandHandlers` + `remoteCommandHandlers` purely for the assertion - `MPRemoteCommand` targets cannot be invoked from a test (`PlaybackCoordinatorTests:514`, `:551`). `Allspeak/Audio/NowPlayingCenter.swift` and `Allspeak/Audio/AudioController.swift` are outside every task's Files block; the `PlaybackCoordinator` header comment was rewritten to match, per the stale-contract-comments rule.
+
+➕ Code review: the `removed event kinds gone from the encoder` checkbox above cannot be met by a runtime test. The test written for it (`retiredKindsAreGone`) hand-built the four surviving cases and asserted they had their own names - a tautology that stayed green even if `.sync` were restored. `DiagnosticsEvent` carries associated values so it is not `CaseIterable`, and a deleted case cannot be referenced, so no assertion can observe absence. The test was deleted: the compiler is the real guard, and `transportRecords` already pins each surviving kind's exact encoded envelope. `appendsAccumulate` was deleted alongside it as a byte-identical duplicate of `loggingIsUngated` (`end()` clears `fileURL`, so there is no public path to force a handle reopen - the behavior its name promised is unreachable).
+
+### Task 8: Verify acceptance criteria
+
+- [x] repo-wide grep gate from Code-Quality Rules returns empty (case-insensitive `CinemaSync|DTWMapping|deadReckon|cinemaMatch|requestCatalog|shazam` across all targets, `CinemaMode` excluded); `git diff main -- Allspeak/Views/Player/CinemaMode.swift` is empty
+- [x] `Tags.swift` no longer defines `.cinemaSync` and no suite references it
+- [x] walk the acceptance scenario from Overview - verified by code-reading (Simulator UI walk skipped, not automatable); see note below
+- [x] full suite green via Validation Commands; zero warnings on touched paths (397 tests / 41 suites pass)
+
+➕ Discovered in Task 8: the grep gate returns exactly the four deliberate survivors the earlier tasks flagged, and nothing else - `WireProtocolTests.swift:68` (`"deadReckonSeek"` literal pinning the retired kind's rejection, per Task 4's ⚠️) and `PersistenceControllerTests.swift:266/294/337` (`film.shazamcatalog` inside the historical-model migration tests, per Task 6's ⚠️). Both exclusions were pre-authorized by those notes; the gate is otherwise empty across `Allspeak`/`AllspeakWatch`/`AllspeakTests`. `git diff main -- CinemaMode.swift` is empty, proving it untouched.
+
+➕ Discovered in Task 8: the `.cinemaSync` `@Tag` was its own only referent (Task 7 retagged the last suite to `.audio`), so the deletion was the single line.
+
+➕ Discovered in Task 8: acceptance scenario verified by code-reading rather than a Simulator walk (no interactive session available). Each surface confirmed at its source: `CreateSessionView`'s `ActivePicker` has only `.audio`/`.subtitles`; `PlayerTopBar` has back / track menu / cinema-mode (`onCinema` = `CinemaMode`, a non-goal) and no sync button; `TransportView`'s `coarseRowContent`/`fineRowContent` are each a bare two-button `HStack` (±3s, ±1s) with no center element; `Allspeak/Views/Settings/` no longer exists and `RootView` renders `SessionsView()` directly with no TabView; `DiagnosticsLog.begin(filmTitle:)` is ungated with a `retentionDays = 30` sweep, called from both `PlaybackCoordinator` start paths. The v4→v5 store migration is covered by the automated `PersistenceControllerTests` rather than a device upgrade - the real-data upgrade check stays a Post-Completion item.
+
+➕ Discovered in Task 8: the build log's 4 warnings are all pre-existing and unrelated to this plan - 3 `appintentsmetadataprocessor` toolchain notices and 1 `UIRequiresFullScreen` plist deprecation. `git show main:Allspeak/Info.plist` proves the latter predates the branch and this plan's diff never touches that key; left alone per the Surgical-deletion rule.
+
+### Task 9: Update documentation
+
+- [x] README: remove cinema-sync section and watch dead-reckon/drift/Settings mentions; update the watch transport description (two symmetric skip rows) and the commands list; note diagnostics is always-on with 30-day retention
+- [x] delete `docs/cinema-sync.md`
+- [x] move this plan to `docs/plans/completed/`
+
+➕ Discovered in Task 9: the README's `Cinema sync (ShazamKit)` section is replaced by a short `Resyncing in the cinema` section (tap the showing subtitle line; ±3s/±1s skips for fine adjustment) rather than deleted outright - the intro promises an in-cinema experience, so the resync interaction needs *some* home. The catalog/mapping paragraph under `Preparing files` and the dormant-watch-mic paragraph are gone whole. Diagnostics got its own `Session diagnostics` section stating always-on + 30-day retention, since its old text lived inside the deleted cinema-sync section and pointed at `docs/cinema-sync.md`.
+
+➕ Discovered in Task 9: two README statements outside this plan's inventory were stale and are corrected while rewriting their sentences. The commands list named `requestCueBundle(sessionID:revision:)`, but the real surviving command is `requestCueChunk(sessionID:revision:index:)` (`WireProtocol.swift:100`) - the list had to be retyped to drop the three cinema commands anyway. The Architecture persistence bullet described `Allspeak v4` as current and its two cinema fields as live schema; it now reads v5 with those fields named only as migration history. The `.cinemaSync` entry is also dropped from the tags list (`Tags.swift` no longer defines it, per Task 8).
+
+➕ Discovered in Task 9: no dangling links resulted - `grep -rn "cinema-sync.md"` across the repo (excluding `docs/plans/`) returns nothing after the delete, so the README's three former links were the only referents. The intro's existing "no offset arithmetic, no calibration, ... no settings" claim needed no edit: it was written for v1 and is true again now.
+
+## Post-Completion
+
+*Manual / external items - no checkboxes*
+
+- Merge order: this branch is stacked on the unmerged PR #30 (and #29), contrary to the Context's base-state assumption. Land #30 first and rebase this branch onto the resulting `main`, or say so in the PR description so reviewers diff against `f8e60b6` instead of `main`. Merging this as-is lands #30's catalog-import feature with it.
+- TestFlight build after merge; on the real device confirm the v4→v5 store migration by upgrading over the previous build with real sessions present (sessions, tracks, positions intact; catalog import still works).
+- The two stale cinema-sync plans in `docs/plans/` (`20260609-watch-cinema-sync.md` - never completed, feature now removed) should be deleted or moved to an `abandoned/` folder at the operator's discretion.

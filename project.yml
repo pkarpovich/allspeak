@@ -72,7 +72,6 @@ targets:
       - path: Allspeak/Watch/CueCache.swift
       - path: Allspeak/Watch/WatchMessageSender.swift
       - path: Allspeak/Watch/WatchSessionClient.swift
-      - path: Allspeak/Watch/WatchDeadReckon.swift
       - path: Allspeak/Watch/WatchHaptics.swift
       - path: Allspeak/Watch/SkipCoalescer.swift
       - path: Allspeak/Watch/VolumeThrottler.swift

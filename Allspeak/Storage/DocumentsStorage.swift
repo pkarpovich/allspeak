@@ -26,28 +26,6 @@ struct DocumentsStorage: Sendable {
         sessionDir(for: sessionID).appendingPathComponent(filename)
     }
 
-    func catalogURL(sessionID: UUID, filename: String) -> URL {
-        sessionDir(for: sessionID).appendingPathComponent(filename)
-    }
-
-    func removeCatalogFile(sessionID: UUID, filename: String) throws {
-        let url = catalogURL(sessionID: sessionID, filename: filename)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
-    func dtwMapURL(sessionID: UUID, filename: String) -> URL {
-        sessionDir(for: sessionID).appendingPathComponent(filename)
-    }
-
-    func removeDTWMapFile(sessionID: UUID, filename: String) throws {
-        let url = dtwMapURL(sessionID: sessionID, filename: filename)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
     static func trackFilename(trackID: UUID, originalFilename: String) -> String {
         "track-\(trackID.uuidString)-\(originalFilename)"
     }
@@ -76,6 +54,33 @@ struct DocumentsStorage: Sendable {
         defer { if scoped { srcURL.stopAccessingSecurityScopedResource() } }
         try FileManager.default.copyItem(at: srcURL, to: dest)
         return dest
+    }
+
+    // Sessions imported by a pre-v5 build copied a ShazamKit catalog and a DTW map
+    // into their session dir. The v5 model drops the columns that named them, so
+    // nothing references the files any more and only the suffix identifies them.
+    // `server.json` (the catalog-import sidecar) does not match either suffix.
+    static let legacySyncFileSuffixes = [".shazamcatalog", ".dtwmap.json"]
+
+    func removeLegacySyncFiles() {
+        let manager = FileManager.default
+        guard let dirs = try? manager.contentsOfDirectory(
+            at: sessionsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return }
+        for dir in dirs {
+            guard let files = try? manager.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: nil
+            ) else { continue }
+            for file in files where Self.isLegacySyncFile(file.lastPathComponent) {
+                try? manager.removeItem(at: file)
+            }
+        }
+    }
+
+    static func isLegacySyncFile(_ filename: String) -> Bool {
+        legacySyncFileSuffixes.contains { filename.hasSuffix($0) }
     }
 
     func removeSessionDir(_ id: UUID) throws {

@@ -7,9 +7,21 @@ import MediaPlayer
 final class NowPlayingCenter {
     static let shared = NowPlayingCenter()
 
+    struct RemoteCommandHandlers {
+        let play: @Sendable () -> Void
+        let pause: @Sendable () -> Void
+        let togglePlayPause: @Sendable () -> Void
+        let skip: @Sendable (TimeInterval) -> Void
+        let seek: @Sendable (TimeInterval) -> Void
+    }
+
     private var info: [String: Any] = [:]
 
     private var registeredTargets: [(command: MPRemoteCommand, target: Any)] = []
+
+    // MPRemoteCommand targets cannot be invoked from a test, so the handlers
+    // are kept addressable to assert what the transport is wired to.
+    private(set) var remoteCommandHandlers: RemoteCommandHandlers?
 
     private init() {}
 
@@ -47,6 +59,13 @@ final class NowPlayingCenter {
         let center = MPRemoteCommandCenter.shared()
 
         removeAllRegisteredTargets()
+        remoteCommandHandlers = RemoteCommandHandlers(
+            play: play,
+            pause: pause,
+            togglePlayPause: togglePlayPause,
+            skip: skip,
+            seek: seek
+        )
 
         register(command: center.playCommand) { _ in
             play()
@@ -123,6 +142,7 @@ final class NowPlayingCenter {
             entry.command.removeTarget(entry.target)
         }
         registeredTargets.removeAll()
+        remoteCommandHandlers = nil
     }
 }
 #endif

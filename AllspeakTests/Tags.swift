@@ -5,6 +5,5 @@ extension Tag {
     @Tag static var coreData: Self
     @Tag static var audio: Self
     @Tag static var storage: Self
-    @Tag static var cinemaSync: Self
     @Tag static var catalog: Self
 }

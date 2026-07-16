@@ -3,7 +3,7 @@ import Testing
 @testable import Allspeak
 
 @MainActor
-@Suite("DiagnosticsLog", .tags(.cinemaSync))
+@Suite("DiagnosticsLog", .tags(.audio))
 struct DiagnosticsLogTests {
 
     private final class MutableClock: @unchecked Sendable {
@@ -31,57 +31,6 @@ struct DiagnosticsLogTests {
 
     // MARK: - Event JSON shape
 
-    @Test("sync matched encodes full record on one line with stable ordered keys")
-    func syncMatchedRecord() {
-        let event = DiagnosticsEvent.sync(
-            source: .phone,
-            result: .matched,
-            enTime: 120.5,
-            ruTime: 110.25,
-            playerBefore: 108.0,
-            delta: 2.25,
-            latencyComp: 0.9,
-            absStart: 1800.0,
-            listenSeconds: 4.0,
-            error: nil
-        )
-        let line = event.jsonLine(timestamp: "2026-06-12T19:43:02.115Z")
-        #expect(line == #"{"ts":"2026-06-12T19:43:02.115Z","event":"sync","source":"phone","result":"matched","enTime":120.5,"ruTime":110.25,"playerBefore":108,"delta":2.25,"latencyComp":0.9,"absStart":1800,"listenSeconds":4}"#)
-        #expect(!line.contains("\n"))
-    }
-
-    @Test("sync failure omits nil fields and keeps the error message")
-    func syncFailureRecord() {
-        let event = DiagnosticsEvent.sync(
-            source: .phone,
-            result: .noMatch,
-            enTime: nil,
-            ruTime: nil,
-            playerBefore: nil,
-            delta: nil,
-            latencyComp: 0.9,
-            absStart: nil,
-            listenSeconds: 4.0,
-            error: "no match"
-        )
-        let line = event.jsonLine(timestamp: "2026-06-12T19:43:02.115Z")
-        #expect(line == #"{"ts":"2026-06-12T19:43:02.115Z","event":"sync","source":"phone","result":"noMatch","latencyComp":0.9,"listenSeconds":4,"error":"no match"}"#)
-    }
-
-    @Test("watch attempt encodes result and listenSeconds")
-    func watchAttemptRecords() {
-        let matched = DiagnosticsEvent.watchAttempt(result: .matched, listenSeconds: 3.5)
-        #expect(
-            matched.jsonLine(timestamp: "2026-06-12T19:43:02.000Z")
-                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"matched","listenSeconds":3.5}"#
-        )
-        let failed = DiagnosticsEvent.watchAttempt(result: .error, listenSeconds: 2.0)
-        #expect(
-            failed.jsonLine(timestamp: "2026-06-12T19:43:02.000Z")
-                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"watch_attempt","result":"error","listenSeconds":2}"#
-        )
-    }
-
     @Test("skip, seek, pause and play encode their envelopes")
     func transportRecords() {
         let ts = "2026-06-12T19:43:02.000Z"
@@ -103,35 +52,14 @@ struct DiagnosticsLogTests {
         )
     }
 
-    @Test("error message with quotes is escaped")
-    func escapesErrorMessage() {
-        let event = DiagnosticsEvent.sync(
-            source: .phone,
-            result: .error,
-            enTime: nil,
-            ruTime: nil,
-            playerBefore: nil,
-            delta: nil,
-            latencyComp: nil,
-            absStart: nil,
-            listenSeconds: nil,
-            error: "broke \"hard\"\nline"
-        )
-        let line = event.jsonLine(timestamp: "2026-06-12T19:43:02.000Z")
-        #expect(
-            line == #"{"ts":"2026-06-12T19:43:02.000Z","event":"sync","source":"phone","result":"error","error":"broke \"hard\"\nline"}"#
-        )
-        #expect(line.filter { $0 == "\n" }.isEmpty)
-    }
-
     // MARK: - File lifecycle
 
     @Test("no file is created before the first event")
-    func noFileBeforeFirstEvent() {
+    func noFileBeforeFirstEvent() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune", hasCatalog: true)
-        let url = try! #require(log.currentFileURL)
+        log.begin(filmTitle: "Dune")
+        let url = try #require(log.currentFileURL)
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
@@ -143,23 +71,11 @@ struct DiagnosticsLogTests {
         #expect(!FileManager.default.fileExists(atPath: diagnosticsDir(root).path))
     }
 
-    @Test("a session without a catalog never creates a file")
-    func gatingWithoutCatalog() {
+    @Test("every begun session writes its events, with no catalog gate")
+    func loggingIsUngated() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune", hasCatalog: false)
-        log.log(.play)
-        log.log(.pause)
-        let url = try! #require(log.currentFileURL)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
-        #expect(!FileManager.default.fileExists(atPath: diagnosticsDir(root).path))
-    }
-
-    @Test("appended events accumulate as one line each")
-    func appendsAccumulate() throws {
-        let root = makeTempRoot()
-        let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.log(.pause)
         let url = try #require(log.currentFileURL)
@@ -175,12 +91,12 @@ struct DiagnosticsLogTests {
         let clock = MutableClock(date("2026-06-12T19:43:02.000Z"))
         let log = DiagnosticsLog(rootURL: root, now: { clock.current })
 
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.end()
 
         clock.current = date("2026-06-12T21:10:00.000Z")
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.end()
 
@@ -204,11 +120,11 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
 
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.play)
         log.end()
 
-        log.begin(filmTitle: "Dune", hasCatalog: true)
+        log.begin(filmTitle: "Dune")
         log.log(.pause)
         log.end()
 
@@ -231,7 +147,7 @@ struct DiagnosticsLogTests {
     func filenameSlug() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "Dune: Part Two!", hasCatalog: true)
+        log.begin(filmTitle: "Dune: Part Two!")
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent == "dune-part-two-20260612-1943.jsonl")
     }
@@ -240,8 +156,73 @@ struct DiagnosticsLogTests {
     func blankTitleSlug() throws {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.begin(filmTitle: "!!!", hasCatalog: true)
+        log.begin(filmTitle: "!!!")
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent == "session-20260612-1943.jsonl")
+    }
+
+    // MARK: - Retention
+
+    private func writeLog(named name: String, in root: URL, modified: Date) throws {
+        let directory = diagnosticsDir(root)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(name)
+        try Data("{}\n".utf8).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+    }
+
+    @Test("begin deletes logs older than the retention window and keeps fresher ones")
+    func retentionSweepsExpiredLogs() throws {
+        let root = makeTempRoot()
+        let today = date("2026-06-12T19:43:02.000Z")
+        let day = 24.0 * 60 * 60
+        try writeLog(named: "ancient-20260101-1200.jsonl", in: root, modified: today - 90 * day)
+        try writeLog(named: "expired-20260510-1200.jsonl", in: root, modified: today - 31 * day)
+        try writeLog(named: "fresh-20260611-1200.jsonl", in: root, modified: today - 29 * day)
+
+        let log = DiagnosticsLog(rootURL: root, now: { today })
+        log.begin(filmTitle: "Dune")
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
+        #expect(Set(files) == ["fresh-20260611-1200.jsonl"])
+    }
+
+    @Test("retention keeps a log that is exactly at the retention boundary")
+    func retentionKeepsBoundaryLog() throws {
+        let root = makeTempRoot()
+        let today = date("2026-06-12T19:43:02.000Z")
+        let day = 24.0 * 60 * 60
+        try writeLog(named: "boundary-20260513-1943.jsonl", in: root, modified: today - Double(DiagnosticsLog.retentionDays) * day)
+
+        let log = DiagnosticsLog(rootURL: root, now: { today })
+        log.begin(filmTitle: "Dune")
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
+        #expect(files == ["boundary-20260513-1943.jsonl"])
+    }
+
+    @Test("retention never blocks the new screening's own log")
+    func retentionDoesNotBlockLogging() throws {
+        let root = makeTempRoot()
+        let today = date("2026-06-12T19:43:02.000Z")
+        try writeLog(named: "expired-20260101-1200.jsonl", in: root, modified: today - 90 * 24 * 60 * 60)
+
+        let log = DiagnosticsLog(rootURL: root, now: { today })
+        log.begin(filmTitle: "Dune")
+        log.log(.play)
+
+        let url = try #require(log.currentFileURL)
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        #expect(contents == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n")
+    }
+
+    @Test("retention on a missing diagnostics directory is a no-op")
+    func retentionToleratesMissingDirectory() throws {
+        let root = makeTempRoot()
+        let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
+        log.begin(filmTitle: "Dune")
+        log.log(.play)
+        let url = try #require(log.currentFileURL)
+        #expect(FileManager.default.fileExists(atPath: url.path))
     }
 }

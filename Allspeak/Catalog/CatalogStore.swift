@@ -101,6 +101,10 @@ final class CatalogStore {
         try await client.fetchSession(id: id)
     }
 
+    func liveTrackIDs(sessionID: NSManagedObjectID) async throws -> Set<UUID> {
+        Set(try await applier.repository.tracks(for: sessionID).map(\.trackID))
+    }
+
     func rowState(for summary: CatalogSessionSummary) -> CatalogRowState {
         CatalogRowState.derive(for: summary, sidecars: sidecars, activeDownloadID: activeDownloadID)
     }

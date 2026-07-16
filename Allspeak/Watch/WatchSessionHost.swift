@@ -98,12 +98,6 @@ final class WatchSessionHost: NSObject {
         switch command {
         case .switchTrack(let id):
             try? await coordinator.switchTrack(to: id)
-        case .deadReckonSeek(let sessionID):
-            // Empty-snapshot contract: no anchor yet (or another session) means
-            // nothing seeked, and the wrist must feel failure.
-            guard coordinator.applyDeadReckonSeek(sessionID: sessionID) else {
-                return .empty
-            }
         case .requestCueChunk:
             // Served directly in didReceiveMessage with a CueChunkReply; never
             // routed here.

@@ -57,8 +57,6 @@ struct TransportView: View {
     @State private var volume: Double = 0.5
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
-    @State private var deadReckon = WatchDeadReckon(haptics: WatchDeviceHaptics())
-    @State private var deadReckonResetTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -113,56 +111,26 @@ struct TransportView: View {
             .padding(.horizontal, 12)
     }
 
-    // Top row: ±3s coarse skips with the sync-drift readout in the center
-    // (swapped with the dead-reckon button, which now lives in the fine row).
+    // Top row: the ±3s coarse skip pair, centered.
     private var coarseRow: some View {
         ViewThatFits(in: .horizontal) {
-            coarseRowContent(buttonSize: 52, centerWidth: 64, spacing: 9)
-            coarseRowContent(buttonSize: 48, centerWidth: 54, spacing: 7)
-            coarseRowContent(buttonSize: 44, centerWidth: 48, spacing: 5)
+            coarseRowContent(buttonSize: 52, spacing: 9)
+            coarseRowContent(buttonSize: 48, spacing: 7)
+            coarseRowContent(buttonSize: 44, spacing: 5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func coarseRowContent(buttonSize: CGFloat, centerWidth: CGFloat, spacing: CGFloat) -> some View {
+    private func coarseRowContent(buttonSize: CGFloat, spacing: CGFloat) -> some View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "3", size: buttonSize, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
-            driftReadout
-                .frame(width: centerWidth)
             skipButton(icon: Tokens.Icon.skipForward, seconds: "3", size: buttonSize, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
     }
 
-    // Mic-free resync from the anchor (subtitle tap / last ShazamKit sync).
-    // Always visible during a session - no catalog required; the phone replies
-    // with failure (felt as the failure haptic) when no anchor exists yet.
-    private var deadReckonButton: some View {
-        Button(action: handleDeadReckon) {
-            ZStack {
-                if let glyph = deadReckon.state.buttonGlyph {
-                    Image(systemName: glyph)
-                        .font(.system(size: 16, weight: .medium))
-                } else {
-                    ProgressView()
-                }
-            }
-            .foregroundStyle(Tokens.text)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .frame(width: 44, height: 44)
-        .accessibilityLabel(deadReckon.state.buttonAccessibilityLabel)
-        .onChange(of: deadReckon.state) { _, newState in
-            scheduleDeadReckonReset(for: newState)
-        }
-    }
-
-    // Bottom row: ±1s fine skips with the dead-reckon resync button in the center
-    // (swapped down from the coarse row; the drift readout took its old slot up
-    // top). The center button is a fixed 44pt, so ViewThatFits only steps the ±1
-    // buttons; the compact variant totals 146pt (40mm's 162pt minus 16pt padding).
+    // Bottom row: the ±1s fine skip pair, centered.
     private var fineRow: some View {
         ViewThatFits(in: .horizontal) {
             fineRowContent(buttonSize: 60, spacing: 14)
@@ -176,52 +144,8 @@ struct TransportView: View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "1", size: buttonSize, action: handleSkipBackFine)
                 .accessibilityLabel("Skip back 1 second")
-            deadReckonButton
             skipButton(icon: Tokens.Icon.skipForward, seconds: "1", size: buttonSize, action: handleSkipForwardFine)
                 .accessibilityLabel("Skip forward 1 second")
-        }
-    }
-
-    // Sync drift relative to the cinema, shown in the top row center. Rides
-    // existing snapshots (no new resync/timer): big signed seconds with a
-    // direction caption - gold when AHEAD/BEHIND, gray IN SYNC within the 0.3s
-    // band, muted "-- / NO SYNC" before an anchor exists.
-    private var driftReadout: some View {
-        let display = WatchTransportFormat.driftDisplay(client.lastSnapshot?.drift)
-        return VStack(spacing: 1) {
-            Text(display.value)
-                .font(.system(size: 17, weight: .semibold))
-                .monospacedDigit()
-            HStack(spacing: 2) {
-                if let arrow = driftArrow(display.kind) {
-                    Image(systemName: arrow)
-                        .font(.system(size: 8, weight: .bold))
-                }
-                Text(display.caption)
-                    .font(.system(size: 9, weight: .medium))
-            }
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.6)
-        .foregroundStyle(driftColor(display.kind))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Sync drift")
-        .accessibilityValue("\(display.value) \(display.caption)")
-    }
-
-    private func driftArrow(_ kind: WatchTransportFormat.DriftKind) -> String? {
-        switch kind {
-        case .behind: return "arrow.down"
-        case .ahead: return "arrow.up"
-        case .inSync, .noSync: return nil
-        }
-    }
-
-    private func driftColor(_ kind: WatchTransportFormat.DriftKind) -> Color {
-        switch kind {
-        case .behind, .ahead: return Tokens.accent
-        case .inSync: return Tokens.text2
-        case .noSync: return Tokens.text3
         }
     }
 
@@ -347,21 +271,6 @@ struct TransportView: View {
 
     private func handlePlayPause() {
         client.send(.togglePlayPause)
-    }
-
-    private func handleDeadReckon() {
-        guard let metadata = client.metadata else { return }
-        deadReckon.tap(sessionID: metadata.sessionID)
-    }
-
-    private func scheduleDeadReckonReset(for state: WatchDeadReckonState) {
-        deadReckonResetTask?.cancel()
-        guard state == .done || state == .failed else { return }
-        deadReckonResetTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            deadReckon.reset()
-        }
     }
 
     private func handleSkipBackFine() {

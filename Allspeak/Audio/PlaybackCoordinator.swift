@@ -4,8 +4,9 @@ import Foundation
 
 // Owns the iPhone-side audio session lifecycle and broadcasts state to the
 // paired watch app (via `WatchSessionHost`). Lock-screen / Dynamic Island
-// presence is handled by the native Now Playing integration
-// (`NowPlayingCenter`), not by this coordinator.
+// metadata is published by `AudioController` through `NowPlayingCenter`; the
+// transport commands behind that UI are registered here so they converge on
+// this coordinator's logged play/pause/skip/seek.
 @MainActor
 final class PlaybackCoordinator {
     static let shared = PlaybackCoordinator()
@@ -32,9 +33,6 @@ final class PlaybackCoordinator {
     private(set) var revision: Int = 0
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
-    private(set) var catalogURL: URL?
-    private(set) var dtwMapURL: URL?
-    private(set) var dtwMapping: DTWMapping?
     private var isSwitching: Bool = false
     // Bumped by every startSession/endSession so an invocation resuming from
     // its awaits can detect it was superseded and must not publish state.
@@ -48,21 +46,6 @@ final class PlaybackCoordinator {
     private var persistence: PersistenceController = .shared
     var diagnostics: DiagnosticsLog = .shared
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
-    // Last trusted alignment between the cinema's EN timeline and wall time:
-    // (the dub playhead was at enTime when the clock read at). Set by every
-    // applied ShazamKit sync and every subtitle-cue tap (both are "we are
-    // aligned NOW" gestures). Cinemas play continuously at 1.0x, so the
-    // playhead's projected position is anchor.enTime + elapsed - the basis for
-    // mic-free resync.
-    //
-    // appliedLatency is the seek-to-audible offset already baked into enTime.
-    // The sync paths and a dead-reckon seek the playhead latency-ahead of the
-    // true cinema, so they store the latency they applied; a cue tap jumps the
-    // dub exactly onto the tapped line (no offset), so it stores 0. The
-    // dead-reckon strips this old offset and re-adds the current Sync delay, so
-    // repeated resyncs neither march the playhead further ahead each tap nor pin
-    // it to a stale latency after the user changes the setting.
-    private(set) var cinemaAnchor: (enTime: Double, at: Date, appliedLatency: Double)?
 
     init() {}
 
@@ -92,8 +75,6 @@ final class PlaybackCoordinator {
             let name: String
             let audioFilename: String
             let srtFilename: String
-            let catalogFilename: String?
-            let dtwMapFilename: String?
             let lastPosition: Double?
             let activeTrackID: UUID?
             let tracks: [TrackSnap]
@@ -107,8 +88,6 @@ final class PlaybackCoordinator {
                 let name = (object.value(forKey: "name") as? String) ?? ""
                 let audio = (object.value(forKey: "audioFilename") as? String) ?? ""
                 let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
-                let catalog = object.value(forKey: "catalogFilename") as? String
-                let dtwMap = object.value(forKey: "dtwMapFilename") as? String
                 let pos = object.value(forKey: "lastPositionSeconds") as? Double
                 let activeID = object.value(forKey: "activeTrackID") as? UUID
                 let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
@@ -126,8 +105,6 @@ final class PlaybackCoordinator {
                     name: name,
                     audioFilename: audio,
                     srtFilename: srt,
-                    catalogFilename: catalog,
-                    dtwMapFilename: dtwMap,
                     lastPosition: pos,
                     activeTrackID: activeID,
                     tracks: trackSnaps
@@ -170,13 +147,10 @@ final class PlaybackCoordinator {
             throw StartError.noCues
         }
 
-        // Hash and DTW loads finish before anything is published, and the
-        // generation check rejects an invocation superseded while suspended -
-        // otherwise rapid session switches let the older start resume and
-        // clobber the newer session's stamp, mapping, and broadcast.
-        let catalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: snap.uuid, filename: $0) }
-        let dtwMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: snap.uuid, filename: $0) }
-        let dtwMapping = await Self.loadDTWMapping(url: dtwMapURL)
+        // Nothing is published before this check, so an invocation superseded
+        // while suspended in the fetch bails out here - otherwise rapid session
+        // switches let the older start resume and clobber the newer session's
+        // stamp and broadcast.
         guard generation == loadGeneration else { return }
 
         let controller = AudioController(repository: repository, sessionID: sessionID)
@@ -192,19 +166,17 @@ final class PlaybackCoordinator {
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
 
         self.controller = controller
+        configureRemoteCommands()
         self.sessionID = sessionID
         self.sessionUUID = snap.uuid
         self.sessionTitle = snap.name
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
-        self.catalogURL = catalogURL
-        self.dtwMapURL = dtwMapURL
-        self.dtwMapping = dtwMapping
         self.repository = repository
         self.storage = storage
         self.persistence = persistence
         self.revision += 1
-        diagnostics.begin(filmTitle: snap.name, hasCatalog: snap.catalogFilename != nil)
+        diagnostics.begin(filmTitle: snap.name)
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -221,13 +193,6 @@ final class PlaybackCoordinator {
             return candidate
         }
         return storage.audioURL(sessionID: sessionUUID, filename: filename)
-    }
-
-    private static func loadDTWMapping(url: URL?) async -> DTWMapping? {
-        guard let url else { return nil }
-        return await Task.detached(priority: .userInitiated) {
-            try? DTWMapping(jsonURL: url)
-        }.value
     }
 
     func startSession(
@@ -249,16 +214,14 @@ final class PlaybackCoordinator {
         controller.onTick = { [weak self] in self?.handleControllerTick() }
         controller.onStateChange = { [weak self] in self?.handleControllerStateChange() }
         self.controller = controller
+        configureRemoteCommands()
         self.sessionID = nil
         self.sessionUUID = sessionUUID
         self.sessionTitle = title
         self.tracks = []
         self.activeTrackID = nil
-        self.catalogURL = nil
-        self.dtwMapURL = nil
-        self.dtwMapping = nil
         self.revision += 1
-        diagnostics.begin(filmTitle: title, hasCatalog: false)
+        diagnostics.begin(filmTitle: title)
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -281,8 +244,6 @@ final class PlaybackCoordinator {
         struct Snap: Sendable {
             let name: String
             let srtFilename: String
-            let catalogFilename: String?
-            let dtwMapFilename: String?
             let activeTrackID: UUID?
             let tracks: [TrackSnap]
         }
@@ -293,8 +254,6 @@ final class PlaybackCoordinator {
                 let object = try context.existingObject(with: sessionID)
                 let name = (object.value(forKey: "name") as? String) ?? ""
                 let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
-                let catalog = object.value(forKey: "catalogFilename") as? String
-                let dtwMap = object.value(forKey: "dtwMapFilename") as? String
                 let activeID = object.value(forKey: "activeTrackID") as? UUID
                 let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
                 let trackSnaps: [TrackSnap] = raw.compactMap { obj in
@@ -306,28 +265,12 @@ final class PlaybackCoordinator {
                     return TrackSnap(trackID: id, filename: fn, label: label, sortOrder: order, isDefault: isDefault)
                 }
                 .sorted { $0.sortOrder < $1.sortOrder }
-                return Snap(name: name, srtFilename: srt, catalogFilename: catalog, dtwMapFilename: dtwMap, activeTrackID: activeID, tracks: trackSnaps)
+                return Snap(name: name, srtFilename: srt, activeTrackID: activeID, tracks: trackSnaps)
             }
         } catch {
             return
         }
 
-        guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
-            return
-        }
-
-        let newDTWMapURL = snap.dtwMapFilename.map { storage.dtwMapURL(sessionID: sessionUUID, filename: $0) }
-        let newDTWMapping: DTWMapping?
-        if newDTWMapURL == dtwMapURL {
-            newDTWMapping = dtwMapping
-        } else {
-            newDTWMapping = await Self.loadDTWMapping(url: newDTWMapURL)
-            guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
-                return
-            }
-        }
-
-        let newCatalogURL = snap.catalogFilename.map { storage.catalogURL(sessionID: sessionUUID, filename: $0) }
         guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
             return
         }
@@ -345,10 +288,6 @@ final class PlaybackCoordinator {
         let previousActiveTrackID = self.activeTrackID
         let previousTracks = self.tracks
         sessionTitle = snap.name
-        catalogURL = newCatalogURL
-        diagnostics.setHasCatalog(snap.catalogFilename != nil)
-        dtwMapURL = newDTWMapURL
-        dtwMapping = newDTWMapping
         tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         activeTrackID = selectedTrack?.trackID
         let tracksChanged = previousTracks.map(\.id) != tracks.map(\.id) || previousActiveTrackID != activeTrackID
@@ -498,14 +437,13 @@ final class PlaybackCoordinator {
         WatchSessionHost.shared.forceBroadcastSnapshot()
         // Refresh the latest-wins application context so a watch waking after a
         // stretch of being unreachable re-anchors from a fresh serverDate. State
-        // changes only (play/pause/seek/skip/track/sync) - not per tick.
+        // changes only (play/pause/seek/skip/track) - not per tick.
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
     }
 
     func endSession() {
         loadGeneration += 1
-        cinemaAnchor = nil
         diagnostics.end()
         guard let controller else { return }
         controller.onTick = nil
@@ -521,9 +459,6 @@ final class PlaybackCoordinator {
         self.sessionTitle = ""
         self.tracks = []
         self.activeTrackID = nil
-        self.catalogURL = nil
-        self.dtwMapURL = nil
-        self.dtwMapping = nil
         self.repository = nil
         self.isSwitching = false
         #if os(iOS)
@@ -531,38 +466,16 @@ final class PlaybackCoordinator {
         #endif
     }
 
-    // How far the dub has drifted from the cinema: project the cinema's EN
-    // position from the anchor + elapsed wall time, DTW-map to the expected RU
-    // position, then subtract it from where the dub actually is. Positive =
-    // dub plays AHEAD of the cinema, negative = BEHIND. nil when no anchor
-    // exists (drift is only meaningful relative to an anchor).
-    //
-    // No latency term: every anchor stores the EN coordinate of the dub's
-    // playhead at anchor.at (the sync paths anchor the latency-compensated
-    // enOffset they seeked to, a cue tap anchors the EN of the tapped RU, a
-    // dead-reckon re-anchors at the EN it seeked to), so right after any anchor
-    // the dub already sits on the projected RU and drift reads ~0. Latency
-    // compensation belongs to an active seek (the dub turns
-    // audible ~latency after seeking, so applyDeadReckonSeek projects ahead by
-    // it), not to this passive readout - adding it here would double-count and
-    // show ~-latency BEHIND the instant a sync succeeds.
-    static func cinemaDrift(
-        currentRU: Double,
-        anchor: (enTime: Double, at: Date)?,
-        now: Date,
-        mapping: DTWMapping?
-    ) -> Double? {
-        guard let anchor else { return nil }
-        let enNow = anchor.enTime + now.timeIntervalSince(anchor.at)
-        let expectedRU = mapping?.ruTime(forEnTime: enNow) ?? enNow
-        return currentRU - expectedRU
-    }
-
     func currentSnapshot() -> PlaybackSnapshot {
         guard let controller, let sessionUUID else {
             return PlaybackSnapshot.empty
         }
-        let now = Date()
+        // The snapshot stamps a fresh serverDate, and the watch anchors its
+        // progress readout on the newest one. Pair it with the real playhead:
+        // currentTime rides the CADisplayLink, which pauses while backgrounded,
+        // so commands that refresh nothing (setVolume) would otherwise anchor
+        // the watch to a stale position and rewind the bar.
+        controller.syncCurrentTime()
         return PlaybackSnapshot(
             sessionID: sessionUUID,
             revision: revision,
@@ -570,15 +483,9 @@ final class PlaybackCoordinator {
             duration: controller.duration,
             currentIndex: controller.currentIndex,
             isPlaying: controller.isPlaying,
-            serverDate: now,
+            serverDate: Date(),
             activeTrackID: activeTrackID,
-            volume: systemVolumeReader(),
-            drift: Self.cinemaDrift(
-                currentRU: controller.currentTime,
-                anchor: cinemaAnchor.map { (enTime: $0.enTime, at: $0.at) },
-                now: now,
-                mapping: dtwMapping
-            )
+            volume: systemVolumeReader()
         )
     }
 
@@ -603,40 +510,39 @@ final class PlaybackCoordinator {
         return CueBundle(sessionID: sessionUUID, revision: revision, cues: controller.subtitles)
     }
 
-    func applySyncOffset(
-        _ offset: TimeInterval,
-        enTime: Double? = nil,
-        latencyComp: Double? = nil,
-        absStart: Double? = nil,
-        listenSeconds: Double? = nil
-    ) {
-        guard let controller else { return }
-        let playerBefore = controller.livePosition
-        // Anchor BEFORE the seek (controller.seek broadcasts synchronously).
-        if let enTime {
-            cinemaAnchor = (enTime, Date(), appliedLatency: latencyComp ?? 0)
-        }
-        controller.seek(to: offset)
-        diagnostics.log(.sync(
-            source: .phone,
-            result: .matched,
-            enTime: enTime,
-            ruTime: offset,
-            playerBefore: playerBefore,
-            delta: offset - playerBefore,
-            latencyComp: latencyComp,
-            absStart: absStart,
-            listenSeconds: listenSeconds,
-            error: nil
-        ))
+    // Lock Screen, Dynamic Island, Control Center and AirPods transport all
+    // arrive through these handlers. They are registered once per session (the
+    // closures resolve the live controller on each call, so track switches need
+    // no re-registration) and torn down by endSession's NowPlayingCenter.clear.
+    private func configureRemoteCommands() {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        NowPlayingCenter.shared.configureRemoteCommands(
+            play: { [weak self] in
+                Task { @MainActor in self?.play() }
+            },
+            pause: { [weak self] in
+                Task { @MainActor in self?.pause() }
+            },
+            togglePlayPause: { [weak self] in
+                Task { @MainActor in self?.togglePlayPause() }
+            },
+            skip: { [weak self] seconds in
+                Task { @MainActor in self?.skip(by: seconds) }
+            },
+            seek: { [weak self] time in
+                Task { @MainActor in self?.seek(to: time) }
+            }
+        )
+        #endif
     }
 
-    // User-initiated transport convergence point. The phone player screen and
-    // the watch both route play/pause/skip/seek here so each action is logged
-    // exactly once with its source - the low-level AudioController methods stay
-    // log-free because skip() calls seek() internally and the coordinator's own
-    // restore seeks (startSession, switchTrack, refreshIfActive, sync) would
-    // otherwise emit spurious events.
+    // User-initiated transport convergence point. The phone player screen, the
+    // native remote commands (lock screen / AirPods) and the watch all route
+    // play/pause/skip/seek here so each action is logged exactly once with its
+    // source - the low-level AudioController methods stay log-free because
+    // skip() calls seek() internally and the coordinator's own restore seeks
+    // (startSession, switchTrack, refreshIfActive) would otherwise emit
+    // spurious events.
     func play() {
         guard let controller else { return }
         controller.play()
@@ -660,91 +566,14 @@ final class PlaybackCoordinator {
 
     func skip(by seconds: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
-        // Re-anchor BEFORE the seek: controller.skip() broadcasts a snapshot
-        // synchronously (via onStateChange), so the anchor must already reflect
-        // the new playhead or the watch ships a bogus drift. A manual ±Ns nudge
-        // is a by-ear alignment (like a cue tap), not navigation - re-anchor so
-        // the readout tracks divergence since this correction, not the nudge
-        // itself. Only when an anchor exists: a relative nudge cannot establish an
-        // absolute cinema position on its own.
-        if cinemaAnchor != nil {
-            let targetRU = min(max(controller.currentTime + seconds, 0), controller.duration)
-            cinemaAnchor = (dtwMapping?.enTime(forRuTime: targetRU) ?? targetRU, Date(), appliedLatency: 0)
-        }
         controller.skip(by: seconds)
         diagnostics.log(.skip(seconds: seconds, source: source))
     }
 
     func seek(to time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
-        // Drop the anchor BEFORE the seek (controller.seek broadcasts a snapshot
-        // synchronously). Scrubbing is navigation, not alignment - it breaks
-        // tracking with the hall, so the readout reads NO SYNC until the next sync
-        // / cue tap / dead-reckon re-establishes the reference. Clearing after the
-        // seek would let a stale-anchor snapshot ship first (e.g. -5972s after
-        // scrubbing to the start).
-        cinemaAnchor = nil
         controller.seek(to: time)
         diagnostics.log(.seek(time: time, source: source))
-    }
-
-    // Subtitle-cue taps are alignment gestures: Pavel taps the line that is
-    // sounding in the hall right now, so at that instant the RU position is
-    // trusted and the cinema's EN position follows from the inverse mapping.
-    // Plain scrubbing must NOT anchor - it is navigation, not alignment.
-    func seekToCue(_ time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
-        guard let controller else { return }
-        // Anchor BEFORE the seek (controller.seek broadcasts synchronously, so a
-        // seek-then-anchor order ships a stale-drift snapshot first).
-        if let dtwMapping {
-            cinemaAnchor = (dtwMapping.enTime(forRuTime: time), Date(), appliedLatency: 0)
-        }
-        controller.seek(to: time)
-        diagnostics.log(.seek(time: time, source: source))
-    }
-
-    // Mic-free resync: project the dub playhead's current EN position from the
-    // anchor plus elapsed wall time, DTW-map to RU, seek. The DTW map encodes
-    // the full drift (slope + zigzag), so this corrects exactly what has
-    // accumulated since the anchor.
-    //
-    // The anchor's enTime already carries the latency that was applied when it
-    // was set (0 for a cue tap, the Sync delay for a sync or a prior dead-reckon).
-    // Strip that old offset and re-add the current Sync delay, so the seek lands
-    // the playhead exactly one current-latency ahead of the projected cinema
-    // position - never an accumulating stack of past latencies, and never pinned
-    // to a stale value after the user changes the setting. When the delay is
-    // unchanged this is a no-op on a compensated anchor (strip L, add L); a
-    // cue-tap anchor (applied 0) gets the full current latency added.
-    //
-    // Re-anchor at the seeked-to EN, carrying the latency just applied, exactly
-    // as the sync paths re-anchor at the enOffset they seeked to. This keeps the
-    // invariant that the anchor stores the dub's playhead EN, so the passive
-    // drift readout reads ~0 right after a resync.
-    @discardableResult
-    func applyDeadReckonSeek(
-        sessionID: UUID,
-        now: Date = Date(),
-        defaults: UserDefaults = .standard
-    ) -> Bool {
-        guard let controller, sessionUUID == sessionID, let anchor = cinemaAnchor else { return false }
-        let elapsed = now.timeIntervalSince(anchor.at)
-        guard elapsed >= 0 else { return false }
-        let projectedEN = anchor.enTime + elapsed
-        let currentLatency = CinemaSyncService.storedLatencyCompensation(defaults)
-        let enNow = projectedEN - anchor.appliedLatency + currentLatency
-        let ruTarget = dtwMapping?.ruTime(forEnTime: enNow) ?? enNow
-        let playerBefore = controller.livePosition
-        // Re-anchor BEFORE the seek (controller.seek broadcasts synchronously).
-        cinemaAnchor = (enNow, now, appliedLatency: currentLatency)
-        controller.seek(to: ruTarget)
-        diagnostics.log(.deadReckon(
-            enTime: enNow,
-            ruTime: ruTarget,
-            playerBefore: playerBefore,
-            delta: ruTarget - playerBefore
-        ))
-        return true
     }
 
     func apply(_ command: WatchCommand) {
@@ -759,14 +588,14 @@ final class PlaybackCoordinator {
         case .skip(let seconds):
             skip(by: seconds, source: .watch)
         case .seek(let time):
-            seekToCue(time, source: .watch)
+            seek(to: time, source: .watch)
         case .switchTrack(let id):
             Task { [weak self] in
                 try? await self?.switchTrack(to: id)
             }
         case .setVolume(let value):
             controller.setVolume(value)
-        case .requestCueChunk, .deadReckonSeek:
+        case .requestCueChunk:
             break
         }
     }

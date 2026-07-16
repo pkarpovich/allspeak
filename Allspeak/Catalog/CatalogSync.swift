@@ -151,6 +151,12 @@ struct CatalogSyncApplier: Sendable {
             )
         }
 
+        // addTrackImporting appends at maxOrder + 1, so a replaced track would otherwise land
+        // last; re-assert the manifest order over every surviving track.
+        try await repository.setSortOrders(
+            sessionID: sessionID, orderedTrackIDs: sidecarTracks.map(\.trackID)
+        )
+
         let defaultTrack = orderedTracks.first(where: \.isDefault) ?? orderedTracks.first
         guard let defaultTrack,
               let defaultTrackID = keyToTrackID[TrackKey(sha256: defaultTrack.sha256, label: defaultTrack.label)] else {

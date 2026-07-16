@@ -124,6 +124,42 @@ struct CatalogSyncPlannerTests {
         #expect(plan.hasChanges)
     }
 
+    @Test("a sidecar track deleted locally is re-added rather than resolved to its dead trackID")
+    func locallyDeletedTrackIsReAdded() {
+        let liveID = UUID()
+        let deadID = UUID()
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [
+            sidecarTrack(sha256: SHA.a, label: "original", trackID: liveID),
+            sidecarTrack(sha256: SHA.b, label: "ft.vocals", trackID: deadID)
+        ])
+        let vocals = manifestTrack(filename: "b.m4a", sha256: SHA.b, label: "ft.vocals", sortOrder: 1, isDefault: false)
+        let m = manifest(revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true),
+            vocals
+        ], subtitle: subtitle(sha256: SHA.sub))
+
+        let plan = SyncPlan(
+            sidecar: sc.reconciled(liveTrackIDs: [liveID]), manifest: m, currentTitle: Self.title
+        )
+
+        #expect(plan.addTracks == [vocals])
+        #expect(plan.removeTrackIDs.isEmpty)
+        #expect(plan.downloadRequests == [CatalogFileRequest(track: vocals)])
+        #expect(plan.hasChanges)
+    }
+
+    @Test("reconciling against intact live tracks leaves the sidecar unchanged")
+    func reconcileKeepsLiveTracks() {
+        let liveA = UUID()
+        let liveB = UUID()
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [
+            sidecarTrack(sha256: SHA.a, label: "original", trackID: liveA),
+            sidecarTrack(sha256: SHA.b, label: "ft.vocals", trackID: liveB)
+        ])
+
+        #expect(sc.reconciled(liveTrackIDs: [liveA, liveB]) == sc)
+    }
+
     @Test("a label change on an unchanged sha plans a remove and an add")
     func labelChangeIsRemoveAndAdd() {
         let oldID = UUID()
@@ -337,6 +373,44 @@ struct CatalogSyncApplierTests {
         let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
         #expect(updated.revision == 2)
         #expect(Set(updated.tracks.map(\.sha256)) == [SHA.c, SHA.e])
+    }
+
+    @Test("replacing a middle track restores the manifest sortOrder instead of appending it last")
+    func replacedTrackKeepsManifestOrder() async throws {
+        let f = makeFixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let serverID = UUID()
+
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.a, filename: "a.m4a", contents: "a")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.b, filename: "b.m4a", contents: "b")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.c, filename: "c.m4a", contents: "c")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.sub, filename: "movie.srt", contents: Self.sampleSRT)
+        let rev1 = manifest(serverID: serverID, revision: 1, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true),
+            manifestTrack(filename: "b.m4a", sha256: SHA.b, label: "ft.vocals", sortOrder: 1, isDefault: false),
+            manifestTrack(filename: "c.m4a", sha256: SHA.c, label: "ft.sidon", sortOrder: 2, isDefault: false)
+        ], subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub))
+        let sessionID = try await f.importer.run(detail: rev1)
+        let uuid = try await f.repo.sessionUUID(id: sessionID)
+        let sc = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+
+        // rev2 re-cuts the middle track only: same label, new sha, still sortOrder 1.
+        let rev2 = manifest(serverID: serverID, revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true),
+            manifestTrack(filename: "b2.m4a", sha256: SHA.e, label: "ft.vocals", sortOrder: 1, isDefault: false),
+            manifestTrack(filename: "c.m4a", sha256: SHA.c, label: "ft.sidon", sortOrder: 2, isDefault: false)
+        ], subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub))
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.e, filename: "b2.m4a", contents: "b2")
+        let plan = SyncPlan(sidecar: sc, manifest: rev2, currentTitle: Self.title)
+
+        try await f.applier.apply(plan: plan, detail: rev2, sessionID: sessionID, sidecar: sc)
+
+        let snaps = try await f.repo.tracks(for: sessionID)
+        #expect(snaps.map(\.label) == ["original", "ft.vocals", "ft.sidon"])
+        #expect(snaps.map(\.sortOrder) == [0, 1, 2])
+
+        let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        #expect(updated.tracks.map(\.trackID) == snaps.map(\.trackID))
     }
 
     @Test("adding a track and renaming keeps surviving trackIDs and updates the title")
