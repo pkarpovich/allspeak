@@ -470,6 +470,12 @@ final class PlaybackCoordinator {
         guard let controller, let sessionUUID else {
             return PlaybackSnapshot.empty
         }
+        // The snapshot stamps a fresh serverDate, and the watch anchors its
+        // progress readout on the newest one. Pair it with the real playhead:
+        // currentTime rides the CADisplayLink, which pauses while backgrounded,
+        // so commands that refresh nothing (setVolume) would otherwise anchor
+        // the watch to a stale position and rewind the bar.
+        controller.syncCurrentTime()
         return PlaybackSnapshot(
             sessionID: sessionUUID,
             revision: revision,

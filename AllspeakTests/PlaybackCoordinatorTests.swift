@@ -159,6 +159,34 @@ struct PlaybackCoordinatorTests {
         #expect(abs(metadata.currentTime - 1.5) < 0.05)
     }
 
+    @Test("currentSnapshot anchors on the live player position, not the display-link clock")
+    func currentSnapshotCarriesLiveAnchor() throws {
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        defer { coordinator.endSession() }
+
+        let audio = try Self.makeSilenceFile(seconds: 30)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Live", audio: audio, subtitles: Self.cues)
+        let controller = try #require(coordinator.controller)
+        controller.play()
+
+        // Blocking the main runloop starves the CADisplayLink, which is how
+        // currentTime goes stale while the phone is pocketed and the player
+        // keeps advancing.
+        Thread.sleep(forTimeInterval: 0.4)
+
+        let before = Date()
+        let snapshot = coordinator.currentSnapshot()
+        let after = Date()
+
+        #expect(snapshot.serverDate >= before)
+        #expect(snapshot.serverDate <= after)
+        #expect(snapshot.currentTime > 0.2)
+        #expect(abs(snapshot.currentTime - controller.livePosition) < 0.05)
+    }
+
     @Test("currentMetadata returns nil when there is no active session")
     func currentMetadataWithoutSessionIsNil() {
         let coordinator = PlaybackCoordinator.shared
