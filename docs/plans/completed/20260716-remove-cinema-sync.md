@@ -270,9 +270,15 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 
 ### Task 9: Update documentation
 
-- [ ] README: remove cinema-sync section and watch dead-reckon/drift/Settings mentions; update the watch transport description (two symmetric skip rows) and the commands list; note diagnostics is always-on with 30-day retention
-- [ ] delete `docs/cinema-sync.md`
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README: remove cinema-sync section and watch dead-reckon/drift/Settings mentions; update the watch transport description (two symmetric skip rows) and the commands list; note diagnostics is always-on with 30-day retention
+- [x] delete `docs/cinema-sync.md`
+- [x] move this plan to `docs/plans/completed/`
+
+➕ Discovered in Task 9: the README's `Cinema sync (ShazamKit)` section is replaced by a short `Resyncing in the cinema` section (tap the showing subtitle line; ±3s/±1s skips for fine adjustment) rather than deleted outright - the intro promises an in-cinema experience, so the resync interaction needs *some* home. The catalog/mapping paragraph under `Preparing files` and the dormant-watch-mic paragraph are gone whole. Diagnostics got its own `Session diagnostics` section stating always-on + 30-day retention, since its old text lived inside the deleted cinema-sync section and pointed at `docs/cinema-sync.md`.
+
+➕ Discovered in Task 9: two README statements outside this plan's inventory were stale and are corrected while rewriting their sentences. The commands list named `requestCueBundle(sessionID:revision:)`, but the real surviving command is `requestCueChunk(sessionID:revision:index:)` (`WireProtocol.swift:100`) - the list had to be retyped to drop the three cinema commands anyway. The Architecture persistence bullet described `Allspeak v4` as current and its two cinema fields as live schema; it now reads v5 with those fields named only as migration history. The `.cinemaSync` entry is also dropped from the tags list (`Tags.swift` no longer defines it, per Task 8).
+
+➕ Discovered in Task 9: no dangling links resulted - `grep -rn "cinema-sync.md"` across the repo (excluding `docs/plans/`) returns nothing after the delete, so the README's three former links were the only referents. The intro's existing "no offset arithmetic, no calibration, ... no settings" claim needed no edit: it was written for v1 and is true again now.
 
 ## Post-Completion
 

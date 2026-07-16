@@ -80,13 +80,6 @@ subdir), so the script resolves the vocals path with `find`. Sidon stays on CPU
 (~25 min for a 2h film): its checkpoints are CUDA-traced TorchScript with float64,
 which Apple's MPS backend does not support.
 
-Each session can also carry an optional `.shazamcatalog` file (the
-`Cinema sync catalog` row in the create / edit form). It is opt-in: sessions
-without one behave exactly as before. When attached, the catalog is copied
-alongside the audio and subtitles and enables the cinema sync button in the
-player — see [Cinema sync](#cinema-sync-shazamkit) below and
-[`docs/cinema-sync.md`](docs/cinema-sync.md) for the full workflow.
-
 ### Switching tracks at runtime
 
 In `PlayerView`, a toolbar `Menu` appears when a session has more than one
@@ -95,39 +88,21 @@ selecting another switches the playing audio while preserving the current
 position (~100-300ms gap during reload, no crossfade). The same list lives
 on the Apple Watch as a third TabView page — see below.
 
-### Cinema sync (ShazamKit)
+### Resyncing in the cinema
 
-When a session has a `.shazamcatalog` attached, the player top bar shows a sync
-button (a waveform-with-magnifier glyph) between the back button and the title.
-Tapping it opens a modal that listens through the iPhone mic for a few seconds,
-matches the room's cinema audio against the catalog via ShazamKit, and seeks the
-prepared dub track to the matched on-screen position — replacing the manual
-subtitle-tap resync. The ShazamKit match is an *English* timecode; when the
-session also carries an optional `.dtwmap.json` mapping (the
-`Cinema sync mapping` row in the create / edit form), that English time is
-converted to the corresponding Russian-dub timecode before the seek, correcting
-playback drift between the two masters. Without a mapping the English offset is
-used as-is (identity). On a match the modal shows the dub timecode it jumped to
-and auto-dismisses; with no match within ~6 seconds it offers Try Again / Close.
-The first tap prompts for microphone access (`NSMicrophoneUsageDescription`).
-Playback is not interrupted during the listen — the audio session swaps to
-`.playAndRecord` with `.mixWithOthers` for the sync window and restores
-afterward. The button is hidden for sessions without a catalog.
+There is no mic matching, no offset arithmetic, and no calibration. When the dub
+drifts from the screen, tap the subtitle line currently showing — on the phone's
+scrolling subtitle window or in the watch's cue list — and the audio seeks to
+that line's timestamp. The ±3s / ±1s skips (phone remote commands or the watch
+transport) cover the fine adjustment from there.
 
-The watch transport screen no longer carries a mic-sync button. Resync from the
-wrist now goes through the always-available mic-free dead-reckon button (it
-re-projects the dub from the last sync anchor), and a passive drift readout
-shows how far the dub has drifted from the cinema. The watch's own ShazamKit
-mic-match plumbing (catalog transfer, local matching) remains in the codebase
-but is currently dormant; generating the catalog and mapping files is a separate
-Mac-side step; see [`docs/cinema-sync.md`](docs/cinema-sync.md).
+### Session diagnostics
 
-For cinema sessions, the app also writes a per-screening JSONL diagnostics log
-(`Documents/diagnostics/`, pulled via the Files app) capturing every sync,
-manual skip, and transport action for after-the-fact drift analysis on the Mac.
-It is gated to sessions with a catalog — ordinary listening writes nothing — and
-has no UI. See
-[`docs/cinema-sync.md`](docs/cinema-sync.md#session-diagnostics).
+Playing any session writes a per-screening JSONL log to
+`Documents/diagnostics/` (pulled via the Files app) capturing every play, pause,
+skip, and seek with its source (phone or watch) for after-the-fact analysis on
+the Mac. It is always on, has no UI, and no setting. Logs older than 30 days are
+deleted when the next session starts.
 
 ## Catalog (online session distribution)
 
@@ -200,8 +175,7 @@ from the `ALLSPEAK_CATALOG_URL` / `ALLSPEAK_CATALOG_READ_TOKEN` GitHub secrets.
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
 resync subtitles in a cinema without taking the iPhone out of your pocket.
 The watch is a thin remote: it sends commands (play/pause, skip ±1s / ±3s,
-seek-to-cue, set volume, mic-free dead-reckon resync) to the iPhone, which
-remains the audio host.
+seek-to-cue, set volume) to the iPhone, which remains the audio host.
 
 ### Pairing
 
@@ -220,18 +194,13 @@ remains the audio host.
 ### Usage
 
 - **Page 1** (default, transport): a stacked transport layout — a centered
-  pair of ±3s coarse skips on top (with a mic-free dead-reckon resync button
-  between them), a full-width Play/Pause, a non-interactive film progress bar
-  (gold fill with the elapsed time on the left and a remaining countdown on the
-  right, self-advancing while playing - 1 Hz with the wrist raised, stepping
-  once per minute in the Always-On Display so it never freezes mid-film with the
-  wrist down), and a centered pair of ±1s fine skips
-  beneath. Between the ±1s skips sits the **sync drift readout**: big signed
-  seconds plus a direction caption showing how far the dub has drifted from the
-  cinema since the last sync anchor — gold `+0.8s AHEAD` / `-1.4s BEHIND`, gray
-  `±0.0s IN SYNC` within a 0.3s band, and a muted `-- / NO SYNC` before any
-  anchor exists (drift rides the existing playback snapshots — no extra mic
-  listen or timer). The skip controls are circular glass buttons whose icon is a
+  pair of ±3s coarse skips on top, a full-width Play/Pause, a non-interactive
+  film progress bar (gold fill with the elapsed time on the left and a remaining
+  countdown on the right, self-advancing while playing - 1 Hz with the wrist
+  raised, stepping once per minute in the Always-On Display so it never freezes
+  mid-film with the wrist down), and a centered pair of ±1s fine skips
+  beneath. Both skip rows are bare two-button pairs — no center element. The
+  skip controls are circular glass buttons whose icon is a
   curved arrow with the interval inside it (`3`, `1`); every skip tap plays a
   click haptic. Play/Pause is a warm-tinted glowing pill. The Digital Crown
   drives the phone's real system output volume (re-synced from the phone's
@@ -261,9 +230,7 @@ remains the audio host.
 
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
-`setVolume(_:)`, `requestCueBundle(sessionID:revision:)`,
-`requestCatalog(sessionID:stamp:)`, `cinemaMatch(sessionID:stamp:enTime:)`, and
-`deadReckonSeek(sessionID:)`. Session
+`setVolume(_:)`, and `requestCueChunk(sessionID:revision:index:)`. Session
 metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
 the current `activeTrackID`, and an optional `serverDate` playback anchor
 (decoded with `decodeIfPresent`, so an older phone build still decodes). The
@@ -280,13 +247,13 @@ the protocol summary.
   (one-to-many, cascade delete). Persistent history tracking is enabled;
   lightweight migration carries pre-multitrack sessions forward by
   back-filling a single `AudioTrack(label: "Original", isDefault: true)`
-  from the legacy `Session.audioFilename` field. The current model version,
-  `Allspeak v4`, adds two optional `Session` fields for cinema sync:
-  `catalogFilename` (the ShazamKit catalog, added in v3) and `dtwMapFilename`
-  (the DTW English-to-Russian timecode mapping, added in v4). Both the v2 to v3
-  and v3 to v4 migrations are lightweight (existing sessions carry forward with
-  no catalog and no mapping). File payloads (audio + srt) are not stored in
-  Core Data — only filenames.
+  from the legacy `Session.audioFilename` field. The current model version is
+  `Allspeak v5`, which drops the two optional `Session` fields that carried the
+  removed cinema-sync files (`catalogFilename`, added in v3, and
+  `dtwMapFilename`, added in v4). Every migration in the chain is lightweight
+  and inferred, so a store written by any earlier build opens in place with its
+  sessions intact. File payloads (audio + srt) are not stored in Core Data —
+  only filenames.
 - **Audio**: Single `AVAudioPlayer` per player session, `.playback` category,
   `.spokenAudio` mode. Background audio is permitted via the `audio` entry in
   `UIBackgroundModes`.
@@ -311,8 +278,8 @@ xcodebuild test -scheme Allspeak \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`,
-`.cinemaSync`, `.catalog`) so subsets can be run with the `--filter` flag.
+Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`, `.catalog`)
+so subsets can be run with the `--filter` flag.
 
 ## Project-local agent skills
 
