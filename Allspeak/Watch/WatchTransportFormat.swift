@@ -33,29 +33,4 @@ enum WatchTransportFormat {
         }
         return String(format: "%d:%02d", m, s)
     }
-
-    // How the sync-drift readout renders. Drives both color and arrow in the
-    // view; kept here so the mapping is unit-tested.
-    enum DriftKind {
-        case behind, ahead, inSync, noSync
-    }
-
-    // Drift within this many seconds reads as "in sync" rather than a signed
-    // value - a display-only deadband, not a corrector threshold (the
-    // dead-reckon seek has no tolerance and always seeks to the projected target).
-    static let inSyncBand = 0.3
-
-    // Maps the snapshot's drift seconds to the fine-row center readout.
-    // Positive drift = dub AHEAD of the cinema, negative = BEHIND. nil drift
-    // (no anchor yet) reads as a muted "-- / NO SYNC".
-    static func driftDisplay(_ drift: Double?) -> (value: String, caption: String, kind: DriftKind) {
-        guard let drift, drift.isFinite else {
-            return ("--", "NO SYNC", .noSync)
-        }
-        if abs(drift) < inSyncBand {
-            return ("±0.0s", "IN SYNC", .inSync)
-        }
-        let value = String(format: "%+.1fs", drift)
-        return drift < 0 ? (value, "BEHIND", .behind) : (value, "AHEAD", .ahead)
-    }
 }

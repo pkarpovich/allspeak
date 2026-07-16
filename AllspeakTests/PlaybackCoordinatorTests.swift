@@ -303,26 +303,6 @@ struct PlaybackCoordinatorTests {
         }
     }
 
-    @Test("currentSnapshot never carries a drift now that the cinema anchor is gone")
-    func currentSnapshotReportsNoDrift() throws {
-        let coordinator = PlaybackCoordinator.shared
-        coordinator.endSession()
-        defer { coordinator.endSession() }
-
-        let audio = try Self.makeSilenceFile(seconds: 5)
-        defer { try? FileManager.default.removeItem(at: audio) }
-
-        try coordinator.startSession(sessionUUID: UUID(), title: "Drift", audio: audio, subtitles: Self.cues)
-
-        #expect(coordinator.currentSnapshot().drift == nil)
-
-        coordinator.seek(to: 2.0)
-        #expect(coordinator.currentSnapshot().drift == nil)
-
-        coordinator.skip(by: 1.0)
-        #expect(coordinator.currentSnapshot().drift == nil)
-    }
-
     @Test("a superseded startSession resuming from its loads cannot clobber the newer session")
     func rapidStartSessionNewerCallWins() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())

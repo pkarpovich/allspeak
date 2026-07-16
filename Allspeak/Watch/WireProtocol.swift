@@ -29,15 +29,6 @@ import Foundation
 //                                     PlaybackSnapshot. A cache miss on the
 //                                     watch (app reset / Application Support
 //                                     cleanup) or a revision bump re-pulls.
-//   .deadReckonSeek(sessionID:)       mic-free resync from the stored anchor:
-//                                     the phone projects the cinema's current
-//                                     EN position from the last alignment
-//                                     anchor (subtitle tap or ShazamKit sync)
-//                                     plus elapsed wall time, DTW-maps it to
-//                                     RU, and seeks. Replies with the empty
-//                                     snapshot when it cannot seek (no anchor
-//                                     yet, no session, or another session) so
-//                                     the wrist feels failure.
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -55,7 +46,7 @@ import Foundation
 //       small, latest-state-wins; replaces any previously delivered context.
 //       Rebroadcast on every switchTrack so the watch checkmark stays in
 //       sync with the iPhone-side selection, and on playback state changes
-//       (play/pause/seek/skip/sync) so the latest-wins serverDate anchor is
+//       (play/pause/seek/skip) so the latest-wins serverDate anchor is
 //       fresh on the watch's next wake.
 //
 //   Watch  <--sendMessage (reply)------- iPhone  CueBundle (gzipped, chunked)
@@ -107,7 +98,6 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case switchTrack(id: UUID)
     case setVolume(Float)
     case requestCueChunk(sessionID: UUID, revision: Int, index: Int)
-    case deadReckonSeek(sessionID: UUID)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -129,7 +119,6 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case switchTrack
         case setVolume
         case requestCueChunk
-        case deadReckonSeek
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -158,9 +147,6 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(sessionID, forKey: .sessionID)
             try container.encode(revision, forKey: .revision)
             try container.encode(index, forKey: .index)
-        case .deadReckonSeek(let sessionID):
-            try container.encode(Kind.deadReckonSeek, forKey: .kind)
-            try container.encode(sessionID, forKey: .sessionID)
         }
     }
 
@@ -187,10 +173,6 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 sessionID: try container.decode(UUID.self, forKey: .sessionID),
                 revision: try container.decode(Int.self, forKey: .revision),
                 index: try container.decode(Int.self, forKey: .index)
-            )
-        case .deadReckonSeek:
-            self = .deadReckonSeek(
-                sessionID: try container.decode(UUID.self, forKey: .sessionID)
             )
         }
     }

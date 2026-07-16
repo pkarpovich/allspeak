@@ -482,8 +482,7 @@ final class PlaybackCoordinator {
             isPlaying: controller.isPlaying,
             serverDate: Date(),
             activeTrackID: activeTrackID,
-            volume: systemVolumeReader(),
-            drift: nil
+            volume: systemVolumeReader()
         )
     }
 
@@ -566,7 +565,7 @@ final class PlaybackCoordinator {
             }
         case .setVolume(let value):
             controller.setVolume(value)
-        case .requestCueChunk, .deadReckonSeek:
+        case .requestCueChunk:
             break
         }
     }

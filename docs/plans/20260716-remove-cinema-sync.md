@@ -164,11 +164,19 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 - Modify: `Allspeak/Watch/WireProtocol.swift`, `Allspeak/Watch/PlaybackSnapshot.swift`, `Allspeak/Watch/WatchSessionHost.swift`, `Allspeak/Watch/WatchTransportFormat.swift`, `AllspeakTests/WireProtocolTests.swift`, `AllspeakTests/WatchSessionHostTests.swift`, `AllspeakTests/WatchTransportFormatTests.swift`
 - Delete: `Allspeak/Watch/WatchDeadReckon.swift`, `AllspeakTests/WatchDeadReckonTests.swift`
 
-- [ ] remove `requestCatalog`, `cinemaMatch`, `deadReckonSeek` from `WatchCommand` (cases, Kind, coding); remove `drift` from `PlaybackSnapshot`; rewrite the header contract comment to the exact surviving surface per Technical Details
-- [ ] `WatchSessionHost`: remove routing/special-casing for the removed commands and any catalog file-transfer remnants
-- [ ] `WatchTransportFormat`: remove drift formatting helpers
-- [ ] delete `WatchDeadReckon` + its tests; update the three survivor suites (round-trip tests for removed kinds/fields deleted, remaining cases green)
-- [ ] run Validation Commands - green before task 4
+- [x] remove `requestCatalog`, `cinemaMatch`, `deadReckonSeek` from `WatchCommand` (cases, Kind, coding); remove `drift` from `PlaybackSnapshot`; rewrite the header contract comment to the exact surviving surface per Technical Details
+- [x] `WatchSessionHost`: remove routing/special-casing for the removed commands and any catalog file-transfer remnants
+- [x] `WatchTransportFormat`: remove drift formatting helpers
+- [x] delete `WatchDeadReckon` + its tests; update the three survivor suites (round-trip tests for removed kinds/fields deleted, remaining cases green)
+- [x] run Validation Commands - green before task 4
+
+➕ Discovered in Task 3: the inventory's `requestCatalog` and `cinemaMatch` commands do not exist at this base state - `deadReckonSeek` was the only cinema command left in `WatchCommand`, and `WatchSessionHost` had no catalog file-transfer remnants. Nothing to remove for those two; the header contract comment never documented them either.
+
+➕ Discovered in Task 3: `AllspeakWatch/Views/TransportView.swift` (Task 4's file) referenced `WatchDeadReckon`, `WatchTransportFormat.driftDisplay`, and `PlaybackSnapshot.drift`, so deleting them here broke the watch build. **Task 4's first two checkboxes are therefore already done**: the dead-reckon button, drift readout, `driftArrow`/`driftColor`, and the reset-task glue are gone, and both rows are now centered two-button pairs (`coarseRowContent` lost its `centerWidth` param; existing button sizes and spacings kept). Task 4 is reduced to the orphaned-token sweep and verification.
+
+➕ Discovered in Task 3: `PlaybackCoordinator.swift` (not in Task 3's Files block) had to drop `drift: nil` from `currentSnapshot()` and the `.deadReckonSeek` case from `apply(_:)`; `PlaybackCoordinatorTests`'s `currentSnapshotReportsNoDrift` case (added in Task 2) asserted a field that no longer exists and was deleted with it.
+
+➕ Discovered in Task 3: `project.yml` lists the watch target's shared sources file-by-file (not globbed) and named `Allspeak/Watch/WatchDeadReckon.swift` - `xcodegen generate` fails on the missing path until that line is removed.
 
 ### Task 4: Watch transport UI - symmetric skip rows
 

@@ -98,11 +98,6 @@ final class WatchSessionHost: NSObject {
         switch command {
         case .switchTrack(let id):
             try? await coordinator.switchTrack(to: id)
-        case .deadReckonSeek:
-            // The anchor layer is gone, so the resync can never succeed. The
-            // command itself is removed with the rest of the wire protocol; until
-            // then the empty-snapshot contract makes the wrist feel the failure.
-            return .empty
         case .requestCueChunk:
             // Served directly in didReceiveMessage with a CueChunkReply; never
             // routed here.
