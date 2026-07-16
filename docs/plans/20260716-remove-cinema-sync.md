@@ -183,11 +183,15 @@ Removal proceeds bottom-up so every task leaves the tree compiling: first the ph
 **Files:**
 - Modify: `AllspeakWatch/Views/TransportView.swift`, `AllspeakWatch/Tokens.swift` (only if orphaned entries remain)
 
-- [ ] remove the dead-reckon button, drift readout, and dormant `WatchCinemaSync` glue (`onChange` cancel handlers, state) from `TransportView`
-- [ ] coarse and fine rows become centered two-button pairs per Technical Details; play pill, progress bar, Crown untouched
-- [ ] delete watch token/icon entries now unused (grep proves orphanhood before deleting)
-- [ ] tests: `WatchTransportFormatTests` already updated in Task 3; verify no watch test references removed UI helpers
-- [ ] run Validation Commands - green before task 5
+- [x] remove the dead-reckon button, drift readout, and dormant `WatchCinemaSync` glue (`onChange` cancel handlers, state) from `TransportView` (done in Task 3 - deleting `WatchDeadReckon`/`driftDisplay`/`PlaybackSnapshot.drift` forced it; verified here)
+- [x] coarse and fine rows become centered two-button pairs per Technical Details; play pill, progress bar, Crown untouched (done in Task 3; verified here)
+- [x] delete watch token/icon entries now unused (grep proves orphanhood before deleting) - nothing to delete, see note below
+- [x] tests: `WatchTransportFormatTests` already updated in Task 3; verify no watch test references removed UI helpers - grep for `driftDisplay|driftArrow|driftColor|WatchDeadReckon|centerWidth|WatchCinemaSync` across `AllspeakTests`/`AllspeakWatch` returns nothing
+- [x] run Validation Commands - green before task 5 (446 tests / 42 suites pass; zero warnings on `TransportView.swift`/`Tokens.swift`)
+
+➕ Discovered in Task 4: the orphaned-token sweep deletes nothing. Every `Tokens`/`Tokens.Icon` entry `TransportView` still uses stays; the removed UI only ever referenced `Tokens.accent` and `Tokens.text` (`git diff main -- AllspeakWatch/Views/TransportView.swift | grep '^-'`), both still used heavily elsewhere. The only zero-reference entries in `Tokens.swift` are `surfaceTop` and `Font.subtitleCurrent`, and `git grep` on `main` proves both were already unused before this plan - pre-existing dead code, out of scope per the Surgical-deletion rule.
+
+⚠️ For Task 8: `AllspeakTests/WireProtocolTests.swift:68` contains the string literal `"deadReckonSeek"` inside the `WatchCommand rejects a retired command kind` regression test. That is a deliberate survivor (it pins the retired kind's rejection), not a stale reference, but it WILL trip Task 8's case-insensitive `deadReckon` grep gate. Task 8 should exclude that test's literal from the gate rather than delete the test.
 
 ### Task 5: Forms, repository, and storage cleanup
 
