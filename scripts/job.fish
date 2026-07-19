@@ -32,8 +32,13 @@ function job_start
     end
     mkdir -p $dir
 
+    if test (count $argv) -ne 1
+        rm -rf $dir
+        echo "pass the command as ONE quoted argument after --, e.g.: job.fish start --id x -- \"sleep 60; echo ok\"" >&2
+        exit 2
+    end
     set -l workdir (set -q _flag_cwd; and echo $_flag_cwd; or echo $HOME)
-    string join ' ' -- $argv >$dir/cmd
+    echo -- $argv[1] >$dir/cmd
     date +%s >$dir/started
 
     fish $SELF _run $_flag_id $workdir </dev/null >/dev/null 2>&1 &
@@ -50,6 +55,7 @@ function job_run
     cd $workdir
     caffeinate -i fish -lc $cmd >$dir/log 2>&1
     echo $status >$dir/exit
+    date +%s >$dir/finished
     job_publish $id
 end
 
@@ -58,7 +64,8 @@ function job_publish
     set -l dir $JOBS_DIR/$id
     set -l code (cat $dir/exit)
     set -l started (cat $dir/started)
-    set -l duration (math (date +%s) - $started)
+    set -l finished (cat $dir/finished 2>/dev/null; or date +%s)
+    set -l duration (math $finished - $started)
 
     tail -c $LOG_TAIL_BYTES $dir/log >$dir/log_tail 2>/dev/null
     python3 -c "
