@@ -281,20 +281,6 @@ xcodebuild test -scheme Allspeak \
 Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`, `.catalog`)
 so subsets can be run with the `--filter` flag.
 
-## Project-local agent skills
-
-The repo ships with three Claude Code skills under `.claude/skills/`:
-
-- `swiftui-expert-skill` — SwiftUI state, view composition, Liquid Glass,
-  performance, Instruments traces.
-- `swift-testing-expert` — Swift Testing macros, traits, parameterized tests.
-- `core-data-expert` — stack setup, context discipline, `NSManagedObjectID`
-  handoff, persistent history, migrations.
-
-Future contributions touching the corresponding domain should consult these
-skills before writing code — they exist to prevent predictable mistakes
-(deprecated APIs, threading bugs, anti-patterns).
-
 ## Commit messages
 
 [Conventional Commits](https://www.conventionalcommits.org/) — `feat:`,
