@@ -11,6 +11,25 @@ The in-cinema experience is fully offline; the only online path is the optional
 Catalog for pulling prepared sessions onto the phone (see below). No offset
 arithmetic, no calibration, no accounts, no onboarding, no settings.
 
+<p align="center">
+  <img src="docs/screenshots/phones.png" width="100%" alt="Catalog, player, and session detail" />
+</p>
+<p align="center">
+  <em>Browse the catalog&nbsp;&nbsp;·&nbsp;&nbsp;Watch with the subtitle river&nbsp;&nbsp;·&nbsp;&nbsp;See what's inside</em>
+</p>
+
+## Try it
+
+Allspeak is in private TestFlight beta. Want a build? Reach out and I'll add you
+as a tester - direct invite, no App Store review.
+
+- **Ping me:** [Telegram @pkarpovich](https://t.me/pkarpovich) or [pavel.karpovich@outlook.com](mailto:pavel.karpovich@outlook.com)
+- I'll need the **Apple ID email** for your TestFlight invite - send it privately,
+  not in a public issue.
+
+Requires an iPhone on iOS 26+ (Apple Watch on watchOS 26+ optional, for the
+remote). Everything below is for building from source.
+
 ## Requirements
 
 - macOS with Xcode 26+
@@ -176,6 +195,13 @@ Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
 resync subtitles in a cinema without taking the iPhone out of your pocket.
 The watch is a thin remote: it sends commands (play/pause, skip ±1s / ±3s,
 seek-to-cue, set volume) to the iPhone, which remains the audio host.
+
+<p align="center">
+  <img src="docs/screenshots/watch.png" width="100%" alt="Apple Watch remote and subtitle river" />
+</p>
+<p align="center">
+  <em>Transport controls&nbsp;&nbsp;·&nbsp;&nbsp;Tap a line to seek</em>
+</p>
 
 ### Pairing
 
