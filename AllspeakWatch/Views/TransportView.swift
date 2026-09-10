@@ -91,6 +91,8 @@ struct TransportView: View {
     private var content: some View {
         if client.metadata == nil {
             placeholder
+        } else if isLuminanceReduced {
+            ambientView
         } else {
             VStack(spacing: 8) {
                 coarseRow
@@ -101,6 +103,44 @@ struct TransportView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
         }
+    }
+
+    private var ambientView: some View {
+        TimelineView(.everyMinute) { context in
+            ambientBody(at: context.date)
+        }
+    }
+
+    private func ambientBody(at date: Date) -> some View {
+        let elapsed = progressElapsed(at: date)
+        let duration = progressDuration
+        return VStack(spacing: 6) {
+            Text(client.metadata?.title ?? "")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Tokens.text3)
+                .lineLimit(1)
+            Text(WatchTransportFormat.ambientRemainingLabel(elapsed: elapsed, duration: duration))
+                .font(.system(size: 46, weight: .semibold, design: .rounded))
+                .foregroundStyle(Tokens.warm)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text("left")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Tokens.text2)
+            ProgressView(value: WatchTransportFormat.progressFraction(elapsed: elapsed, duration: duration))
+                .progressViewStyle(.linear)
+                .tint(Tokens.accent)
+                .padding(.top, 6)
+            if !isPlaying {
+                Label("Paused", systemImage: Tokens.Icon.pause)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Tokens.text2)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
     }
 
     private var placeholder: some View {

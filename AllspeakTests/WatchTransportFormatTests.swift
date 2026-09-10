@@ -60,4 +60,32 @@ struct WatchTransportFormatTests {
         #expect(WatchTransportFormat.progressFraction(elapsed: 120, duration: 120) == 1)
         #expect(WatchTransportFormat.progressFraction(elapsed: 130, duration: 120) == 1)
     }
+
+    @Test("ambient remaining: hours with zero-padded minutes")
+    func ambientRemainingHours() {
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 0, duration: 5460) == "1h 31m")
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 0, duration: 3900) == "1h 05m")
+    }
+
+    @Test("ambient remaining: minutes only under an hour")
+    func ambientRemainingMinutes() {
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 600, duration: 3420) == "47m")
+    }
+
+    @Test("ambient remaining: a partial minute rounds up")
+    func ambientRemainingRoundsUp() {
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 0, duration: 90) == "2m")
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 0, duration: 3601) == "1h 01m")
+    }
+
+    @Test("ambient remaining: zero at and past the end")
+    func ambientRemainingAtEnd() {
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 120, duration: 120) == "0m")
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 130, duration: 120) == "0m")
+    }
+
+    @Test("ambient remaining: a non-finite duration reads as zero")
+    func ambientRemainingNonFinite() {
+        #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 0, duration: .nan) == "0m")
+    }
 }
