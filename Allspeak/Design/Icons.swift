@@ -18,6 +18,8 @@ enum Icons {
     static let caption        = "captions.bubble"
     static let catalog        = "waveform.badge.magnifyingglass"
     static let library        = "film.stack"
+    static let settings       = "gearshape"
+    static let popcorn        = "popcorn.fill"
     static let check          = "checkmark"
     static let checkCircle    = "checkmark.circle.fill"
     static let filmReel       = "film"

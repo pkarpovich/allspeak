@@ -13,6 +13,10 @@ struct RootView: View {
             Tab("Catalog", systemImage: Icons.catalog) {
                 CatalogListView(store: catalogStore)
             }
+
+            Tab("Settings", systemImage: Icons.settings) {
+                SettingsView()
+            }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .tint(Tokens.accent)
