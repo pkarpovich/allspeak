@@ -49,7 +49,6 @@ struct CatalogSyncSheet: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Tokens.bg.ignoresSafeArea())
             .safeAreaInset(edge: .bottom) { ctaBar }
             .task { await load() }
             .task(id: rowState == .downloading) { await pollProgress() }
@@ -174,7 +173,6 @@ struct CatalogSyncSheet: View {
             }
         }
         .padding(16)
-        .background(Tokens.bg)
     }
 
     private func ctaLabel(_ title: String, background: Color, foreground: Color) -> some View {

@@ -117,10 +117,6 @@ final class CatalogStore {
         MineCatalogAffordances.updateCount(sidecars: sidecars, summaries: summaries)
     }
 
-    var updateBannerText: String? {
-        MineCatalogAffordances.bannerText(updateCount: updateCount)
-    }
-
     func startImport(_ summary: CatalogSessionSummary) async {
         guard activeDownloadID == nil else { return }
         activeDownloadID = summary.id

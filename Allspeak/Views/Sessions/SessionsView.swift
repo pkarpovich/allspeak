@@ -103,75 +103,56 @@ struct SessionsView: View {
     }
 
     private var populatedList: some View {
-        VStack(spacing: 0) {
-            if let banner = catalogStore.updateBannerText {
-                updateBanner(banner)
-            }
-            List {
-                ForEach(sessions, id: \.objectID) { session in
-                    let id = session.objectID
-                    let currentName = session.name ?? ""
-                    let badge = session.id.flatMap { catalogStore.mineBadge(localID: $0) }
-                    Section {
-                        MineRow(
-                            id: id,
-                            name: currentName,
-                            duration: session.durationSeconds?.doubleValue,
-                            createdAt: session.createdAt ?? Date(),
-                            badge: badge,
-                            onUpdate: updateAction(objectID: id, localID: session.id, title: currentName)
-                        )
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                deleteSession(id)
-                            } label: {
-                                Label("Delete", systemImage: Icons.trash)
-                            }
-                            .tint(Tokens.danger)
+        List {
+            ForEach(sessions, id: \.objectID) { session in
+                let id = session.objectID
+                let currentName = session.name ?? ""
+                let badge = session.id.flatMap { catalogStore.mineBadge(localID: $0) }
+                Section {
+                    MineRow(
+                        id: id,
+                        name: currentName,
+                        duration: session.durationSeconds?.doubleValue,
+                        createdAt: session.createdAt ?? Date(),
+                        badge: badge,
+                        onUpdate: updateAction(objectID: id, localID: session.id, title: currentName)
+                    )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            deleteSession(id)
+                        } label: {
+                            Label("Delete", systemImage: Icons.trash)
                         }
-                        .contextMenu {
-                            Button {
-                                editTarget = EditTarget(id: id)
-                            } label: {
-                                Label("Edit", systemImage: Icons.pencil)
-                            }
-                            Button {
-                                tracksTarget = TracksTarget(id: id)
-                            } label: {
-                                Label("Tracks", systemImage: Icons.trackPicker)
-                            }
-                            Button {
-                                renameTarget = RenameTarget(id: id, draft: currentName)
-                            } label: {
-                                Label("Rename", systemImage: Icons.pencil)
-                            }
-                            Button(role: .destructive) {
-                                deleteSession(id)
-                            } label: {
-                                Label("Delete", systemImage: Icons.trash)
-                            }
+                        .tint(Tokens.danger)
+                    }
+                    .contextMenu {
+                        Button {
+                            editTarget = EditTarget(id: id)
+                        } label: {
+                            Label("Edit", systemImage: Icons.pencil)
+                        }
+                        Button {
+                            tracksTarget = TracksTarget(id: id)
+                        } label: {
+                            Label("Tracks", systemImage: Icons.trackPicker)
+                        }
+                        Button {
+                            renameTarget = RenameTarget(id: id, draft: currentName)
+                        } label: {
+                            Label("Rename", systemImage: Icons.pencil)
+                        }
+                        Button(role: .destructive) {
+                            deleteSession(id)
+                        } label: {
+                            Label("Delete", systemImage: Icons.trash)
                         }
                     }
-                    .listSectionMargins(.top, id == sessions.first?.objectID ? 8 : nil)
                 }
+                .listSectionMargins(.top, id == sessions.first?.objectID ? 8 : nil)
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
         }
-    }
-
-    private func updateBanner(_ text: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: Icons.catalog)
-            Text(text)
-            Spacer(minLength: 0)
-        }
-        .font(.system(size: 13, weight: .medium))
-        .foregroundStyle(Tokens.accent)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(Tokens.accentDim)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
     }
 
     private func deleteSession(_ id: NSManagedObjectID) {
