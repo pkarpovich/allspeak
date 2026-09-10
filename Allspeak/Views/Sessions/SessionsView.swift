@@ -152,6 +152,7 @@ struct SessionsView: View {
                             }
                         }
                     }
+                    .listSectionMargins(.top, id == sessions.first?.objectID ? 8 : nil)
                 }
             }
             .listStyle(.insetGrouped)

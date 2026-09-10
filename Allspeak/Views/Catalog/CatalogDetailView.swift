@@ -37,8 +37,6 @@ struct CatalogDetailView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Tokens.bg.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) { ctaBar }
             .task { await loadDetail() }
             .task(id: rowState == .downloading) { await pollProgress() }
@@ -153,7 +151,7 @@ struct CatalogDetailView: View {
                     Label("Imported", systemImage: Icons.checkCircle)
                         .font(Tokens.Font.bodyEmphasized)
                         .foregroundStyle(Tokens.text)
-                    Text("Added to Mine")
+                    Text("Added to Library")
                         .font(.system(size: 13))
                         .foregroundStyle(Tokens.text3)
                 }
@@ -163,7 +161,7 @@ struct CatalogDetailView: View {
                     Label("Update available", systemImage: Icons.catalog)
                         .font(Tokens.Font.bodyEmphasized)
                         .foregroundStyle(Tokens.text)
-                    Text("Update from Mine")
+                    Text("Update from Library")
                         .font(.system(size: 13))
                         .foregroundStyle(Tokens.text3)
                 }
@@ -171,7 +169,6 @@ struct CatalogDetailView: View {
             }
         }
         .padding(16)
-        .background(Tokens.bg)
     }
 
     private func ctaLabel(_ title: String, background: Color, foreground: Color) -> some View {
