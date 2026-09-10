@@ -17,6 +17,7 @@ enum Icons {
     static let trackPicker    = "speaker.wave.2.bubble"
     static let caption        = "captions.bubble"
     static let catalog        = "waveform.badge.magnifyingglass"
+    static let library        = "film.stack"
     static let check          = "checkmark"
     static let checkCircle    = "checkmark.circle.fill"
     static let filmReel       = "film"

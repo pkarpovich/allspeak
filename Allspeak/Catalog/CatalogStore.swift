@@ -113,10 +113,12 @@ final class CatalogStore {
         MineCatalogAffordances.badge(sidecar: sidecarsByLocalID[localID], summaries: summaries)
     }
 
+    var updateCount: Int {
+        MineCatalogAffordances.updateCount(sidecars: sidecars, summaries: summaries)
+    }
+
     var updateBannerText: String? {
-        MineCatalogAffordances.bannerText(
-            updateCount: MineCatalogAffordances.updateCount(sidecars: sidecars, summaries: summaries)
-        )
+        MineCatalogAffordances.bannerText(updateCount: updateCount)
     }
 
     func startImport(_ summary: CatalogSessionSummary) async {

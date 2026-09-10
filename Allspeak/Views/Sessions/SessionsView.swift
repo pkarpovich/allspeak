@@ -9,7 +9,6 @@ struct SessionsView: View {
 
     @State private var repository = SessionRepository()
     @State private var catalogStore: CatalogStore
-    @State private var segment: SessionsSegment = .mine
     @State private var renameTarget: RenameTarget?
     @State private var isPresentingCreate = false
     @State private var editTarget: EditTarget?
@@ -25,13 +24,10 @@ struct SessionsView: View {
             ZStack {
                 Tokens.bg.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    segmentPicker
-                    segmentContent
-                }
+                content
             }
             .task { await catalogStore.loadCatalogIfNeeded() }
-            .navigationTitle("Sessions")
+            .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -43,9 +39,6 @@ struct SessionsView: View {
             }
             .navigationDestination(for: NSManagedObjectID.self) { id in
                 PlayerView(sessionID: id)
-            }
-            .navigationDestination(for: CatalogSessionSummary.self) { summary in
-                CatalogDetailView(session: summary, store: catalogStore)
             }
             .sheet(isPresented: $isPresentingCreate) {
                 CreateSessionView(mode: .new, repository: repository)
@@ -87,27 +80,11 @@ struct SessionsView: View {
         .tint(Tokens.accent)
     }
 
-    private var segmentPicker: some View {
-        Picker("Section", selection: $segment) {
-            Text("Mine").tag(SessionsSegment.mine)
-            Text("Catalog").tag(SessionsSegment.catalog)
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-    }
-
-    @ViewBuilder private var segmentContent: some View {
-        switch segment {
-        case .mine:
-            if sessions.isEmpty {
-                emptyState
-            } else {
-                populatedList
-            }
-        case .catalog:
-            CatalogListView(store: catalogStore)
+    @ViewBuilder private var content: some View {
+        if sessions.isEmpty {
+            emptyState
+        } else {
+            populatedList
         }
     }
 
@@ -258,11 +235,6 @@ private struct MineRow: View {
             }
         }
     }
-}
-
-private enum SessionsSegment: Hashable {
-    case mine
-    case catalog
 }
 
 private struct SyncTarget: Identifiable {

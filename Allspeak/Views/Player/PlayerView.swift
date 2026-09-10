@@ -104,7 +104,7 @@ struct PlayerView: View {
                 .transition(.opacity)
             }
         }
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .navigationBar, .tabBar)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .task {

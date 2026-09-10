@@ -4,8 +4,18 @@ struct CatalogListView: View {
     let store: CatalogStore
 
     var body: some View {
-        content
+        NavigationStack {
+            ZStack {
+                Tokens.bg.ignoresSafeArea()
+                content
+            }
             .task { await store.loadCatalogIfNeeded() }
+            .navigationTitle("Catalog")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: CatalogSessionSummary.self) { summary in
+                CatalogDetailView(session: summary, store: store)
+            }
+        }
     }
 
     @ViewBuilder private var content: some View {
