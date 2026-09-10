@@ -1,9 +1,25 @@
 import SwiftUI
 
 struct RootView: View {
+    @State private var catalogStore = CatalogStore.live()
+
     var body: some View {
-        SessionsView()
-            .tint(Tokens.accent)
-            .preferredColorScheme(.dark)
+        TabView {
+            Tab("Library", systemImage: Icons.library) {
+                SessionsView(catalogStore: catalogStore)
+            }
+            .badge(catalogStore.updateCount)
+
+            Tab("Catalog", systemImage: Icons.catalog) {
+                CatalogListView(store: catalogStore)
+            }
+
+            Tab("Settings", systemImage: Icons.settings) {
+                SettingsView()
+            }
+        }
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .tint(Tokens.accent)
+        .preferredColorScheme(.dark)
     }
 }

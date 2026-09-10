@@ -22,6 +22,18 @@ enum WatchTransportFormat {
         return min(max(elapsed / duration, 0), 1)
     }
 
+    static func ambientRemainingLabel(elapsed: Double, duration: Double) -> String {
+        let remaining = duration - elapsed
+        guard remaining.isFinite, remaining > 0 else { return "0m" }
+        let minutes = Int((remaining / 60).rounded(.up))
+        let h = minutes / 60
+        let m = minutes % 60
+        if h > 0 {
+            return String(format: "%dh %02dm", h, m)
+        }
+        return "\(m)m"
+    }
+
     private static func clockLabel(_ seconds: Double) -> String {
         guard seconds.isFinite else { return "0:00" }
         let total = max(0, Int(seconds.rounded(.down)))

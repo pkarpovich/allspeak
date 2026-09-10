@@ -166,24 +166,6 @@ struct MineCatalogAffordanceTests {
         #expect(MineCatalogAffordances.updateCount(sidecars: sidecars, summaries: summaries) == 1)
     }
 
-    struct BannerCase: Sendable {
-        let count: Int
-        let expected: String?
-    }
-
-    @Test(
-        "pluralizes the update banner and hides it at zero",
-        arguments: [
-            BannerCase(count: 0, expected: nil),
-            BannerCase(count: 1, expected: "1 update available"),
-            BannerCase(count: 2, expected: "2 updates available"),
-            BannerCase(count: 5, expected: "5 updates available"),
-        ]
-    )
-    func bannerText(bannerCase: BannerCase) {
-        #expect(MineCatalogAffordances.bannerText(updateCount: bannerCase.count) == bannerCase.expected)
-    }
-
     @Test("formats the badge text with the local revision")
     func badgeTextFormatting() {
         #expect(MineCatalogAffordances.badgeText(revision: 3) == "Catalog · v3")

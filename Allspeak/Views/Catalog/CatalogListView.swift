@@ -3,9 +3,23 @@ import SwiftUI
 struct CatalogListView: View {
     let store: CatalogStore
 
+    @State private var selected: CatalogSessionSummary?
+
     var body: some View {
-        content
+        NavigationStack {
+            ZStack {
+                Tokens.bg.ignoresSafeArea()
+                content
+            }
             .task { await store.loadCatalogIfNeeded() }
+            .navigationTitle("Catalog")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $selected) { summary in
+                CatalogDetailView(session: summary, store: store)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -40,16 +54,24 @@ struct CatalogListView: View {
 
     private var list: some View {
         List {
-            ForEach(store.summaries) { summary in
-                CatalogRow(
-                    summary: summary,
-                    state: store.rowState(for: summary),
-                    onImport: importAction(summary)
-                )
+            Section {
+                ForEach(store.summaries) { summary in
+                    CatalogRow(
+                        summary: summary,
+                        state: store.rowState(for: summary),
+                        onSelect: selectAction(summary),
+                        onImport: importAction(summary)
+                    )
+                }
             }
+            .listSectionMargins(.top, 8)
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+    }
+
+    private func selectAction(_ summary: CatalogSessionSummary) -> () -> Void {
+        { selected = summary }
     }
 
     private func importAction(_ summary: CatalogSessionSummary) -> () -> Void {
@@ -60,17 +82,20 @@ struct CatalogListView: View {
 private struct CatalogRow: View {
     let summary: CatalogSessionSummary
     let state: CatalogRowState
+    let onSelect: () -> Void
     let onImport: () -> Void
 
     var body: some View {
-        ZStack {
-            NavigationLink(value: summary) { EmptyView() }
-                .opacity(0)
-            HStack(spacing: 12) {
-                infoColumn
-                Spacer(minLength: 12)
-                trailingControl
+        HStack(spacing: 12) {
+            Button(action: onSelect) {
+                HStack(spacing: 12) {
+                    infoColumn
+                    Spacer(minLength: 12)
+                }
+                .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            trailingControl
         }
     }
 

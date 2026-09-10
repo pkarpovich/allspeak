@@ -9,7 +9,6 @@ struct SessionsView: View {
 
     @State private var repository = SessionRepository()
     @State private var catalogStore: CatalogStore
-    @State private var segment: SessionsSegment = .mine
     @State private var renameTarget: RenameTarget?
     @State private var isPresentingCreate = false
     @State private var editTarget: EditTarget?
@@ -25,13 +24,10 @@ struct SessionsView: View {
             ZStack {
                 Tokens.bg.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    segmentPicker
-                    segmentContent
-                }
+                content
             }
             .task { await catalogStore.loadCatalogIfNeeded() }
-            .navigationTitle("Sessions")
+            .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -43,9 +39,6 @@ struct SessionsView: View {
             }
             .navigationDestination(for: NSManagedObjectID.self) { id in
                 PlayerView(sessionID: id)
-            }
-            .navigationDestination(for: CatalogSessionSummary.self) { summary in
-                CatalogDetailView(session: summary, store: catalogStore)
             }
             .sheet(isPresented: $isPresentingCreate) {
                 CreateSessionView(mode: .new, repository: repository)
@@ -87,27 +80,11 @@ struct SessionsView: View {
         .tint(Tokens.accent)
     }
 
-    private var segmentPicker: some View {
-        Picker("Section", selection: $segment) {
-            Text("Mine").tag(SessionsSegment.mine)
-            Text("Catalog").tag(SessionsSegment.catalog)
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-    }
-
-    @ViewBuilder private var segmentContent: some View {
-        switch segment {
-        case .mine:
-            if sessions.isEmpty {
-                emptyState
-            } else {
-                populatedList
-            }
-        case .catalog:
-            CatalogListView(store: catalogStore)
+    @ViewBuilder private var content: some View {
+        if sessions.isEmpty {
+            emptyState
+        } else {
+            populatedList
         }
     }
 
@@ -126,74 +103,56 @@ struct SessionsView: View {
     }
 
     private var populatedList: some View {
-        VStack(spacing: 0) {
-            if let banner = catalogStore.updateBannerText {
-                updateBanner(banner)
-            }
-            List {
-                ForEach(sessions, id: \.objectID) { session in
-                    let id = session.objectID
-                    let currentName = session.name ?? ""
-                    let badge = session.id.flatMap { catalogStore.mineBadge(localID: $0) }
-                    Section {
-                        MineRow(
-                            id: id,
-                            name: currentName,
-                            duration: session.durationSeconds?.doubleValue,
-                            createdAt: session.createdAt ?? Date(),
-                            badge: badge,
-                            onUpdate: updateAction(objectID: id, localID: session.id, title: currentName)
-                        )
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                deleteSession(id)
-                            } label: {
-                                Label("Delete", systemImage: Icons.trash)
-                            }
-                            .tint(Tokens.danger)
+        List {
+            ForEach(sessions, id: \.objectID) { session in
+                let id = session.objectID
+                let currentName = session.name ?? ""
+                let badge = session.id.flatMap { catalogStore.mineBadge(localID: $0) }
+                Section {
+                    MineRow(
+                        id: id,
+                        name: currentName,
+                        duration: session.durationSeconds?.doubleValue,
+                        createdAt: session.createdAt ?? Date(),
+                        badge: badge,
+                        onUpdate: updateAction(objectID: id, localID: session.id, title: currentName)
+                    )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            deleteSession(id)
+                        } label: {
+                            Label("Delete", systemImage: Icons.trash)
                         }
-                        .contextMenu {
-                            Button {
-                                editTarget = EditTarget(id: id)
-                            } label: {
-                                Label("Edit", systemImage: Icons.pencil)
-                            }
-                            Button {
-                                tracksTarget = TracksTarget(id: id)
-                            } label: {
-                                Label("Tracks", systemImage: Icons.trackPicker)
-                            }
-                            Button {
-                                renameTarget = RenameTarget(id: id, draft: currentName)
-                            } label: {
-                                Label("Rename", systemImage: Icons.pencil)
-                            }
-                            Button(role: .destructive) {
-                                deleteSession(id)
-                            } label: {
-                                Label("Delete", systemImage: Icons.trash)
-                            }
+                        .tint(Tokens.danger)
+                    }
+                    .contextMenu {
+                        Button {
+                            editTarget = EditTarget(id: id)
+                        } label: {
+                            Label("Edit", systemImage: Icons.pencil)
+                        }
+                        Button {
+                            tracksTarget = TracksTarget(id: id)
+                        } label: {
+                            Label("Tracks", systemImage: Icons.trackPicker)
+                        }
+                        Button {
+                            renameTarget = RenameTarget(id: id, draft: currentName)
+                        } label: {
+                            Label("Rename", systemImage: Icons.pencil)
+                        }
+                        Button(role: .destructive) {
+                            deleteSession(id)
+                        } label: {
+                            Label("Delete", systemImage: Icons.trash)
                         }
                     }
                 }
+                .listSectionMargins(.top, id == sessions.first?.objectID ? 8 : nil)
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
         }
-    }
-
-    private func updateBanner(_ text: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: Icons.catalog)
-            Text(text)
-            Spacer(minLength: 0)
-        }
-        .font(.system(size: 13, weight: .medium))
-        .foregroundStyle(Tokens.accent)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(Tokens.accentDim)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
     }
 
     private func deleteSession(_ id: NSManagedObjectID) {
@@ -258,11 +217,6 @@ private struct MineRow: View {
             }
         }
     }
-}
-
-private enum SessionsSegment: Hashable {
-    case mine
-    case catalog
 }
 
 private struct SyncTarget: Identifiable {

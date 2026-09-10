@@ -115,11 +115,6 @@ enum MineCatalogAffordances {
         }.count
     }
 
-    static func bannerText(updateCount: Int) -> String? {
-        guard updateCount > 0 else { return nil }
-        return updateCount == 1 ? "1 update available" : "\(updateCount) updates available"
-    }
-
     static func badgeText(revision: Int) -> String {
         "Catalog · v\(revision)"
     }
