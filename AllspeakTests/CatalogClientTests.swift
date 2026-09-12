@@ -158,6 +158,36 @@ struct CatalogClientTests {
         #expect(defaultTrack.url == URL(string: "https://r2.example.com/ft.sidon.m4a?sig=2"))
         #expect(detail.subtitle.filename == "the-invite.srt")
         #expect(detail.subtitle.size == 41234)
+        #expect(detail.clip == nil)
+    }
+
+    @Test("decodes an optional clip in the session detail and lists it for import last")
+    func decodesSessionDetailClip() async throws {
+        let json = sessionDetailJSON.replacingOccurrences(
+            of: "\"urlsExpireAt\"",
+            with: """
+            "clip": {
+              "filename": "the-invite.first-line.mp4",
+              "size": 6200000,
+              "sha256": "dddd0000000000000000000000000000000000000000000000000000000000dd",
+              "url": "https://r2.example.com/the-invite.first-line.mp4?sig=4"
+            },
+            "urlsExpireAt"
+            """
+        )
+        let transport = MockCatalogTransport(data: Data(json.utf8), statusCode: 200)
+        let client = makeClient(transport: transport)
+        let id = try #require(UUID(uuidString: "1B4E28BA-2FA1-11D2-883F-0016D3CCA427"))
+
+        let detail = try await client.fetchSession(id: id)
+
+        let clip = try #require(detail.clip)
+        #expect(clip.filename == "the-invite.first-line.mp4")
+        #expect(clip.size == 6200000)
+        #expect(clip.url == URL(string: "https://r2.example.com/the-invite.first-line.mp4?sig=4"))
+        #expect(detail.importFileRequests.map(\.filename) == [
+            "original.m4a", "ft.sidon.m4a", "the-invite.srt", "the-invite.first-line.mp4"
+        ])
     }
 
     @Test("sends a Bearer authorization header on every request")

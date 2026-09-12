@@ -17,6 +17,8 @@ struct PlayerView: View {
     @State private var activeTrackID: UUID?
     @State private var loadError: String?
     @State private var cinema: CinemaMode = .off
+    @State private var clipURL: URL?
+    @State private var isPresentingClip = false
 
     private let repository: SessionRepository
 
@@ -66,8 +68,10 @@ struct PlayerView: View {
                         cinemaActive: cinema.isCinema,
                         tracks: tracks,
                         activeTrackID: activeTrackID,
+                        clipAvailable: clipURL != nil,
                         onBack: { dismiss() },
                         onCinema: { applyCinema(.pill) },
+                        onClip: presentClip,
                         onSwitchTrack: switchTrack
                     )
                     .padding(.top, 18)
@@ -105,6 +109,11 @@ struct PlayerView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar, .tabBar)
+        .sheet(isPresented: $isPresentingClip) {
+            if let clipURL {
+                ClipSheet(url: clipURL, openingCues: Array((controller?.subtitles ?? []).prefix(ClipSheet.openingCueCount)))
+            }
+        }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .task {
@@ -149,6 +158,18 @@ struct PlayerView: View {
         }
     }
 
+    private func presentClip() {
+        PlaybackCoordinator.shared.pause()
+        isPresentingClip = true
+    }
+
+    private func locateClip() -> URL? {
+        guard let sessionUUID = PlaybackCoordinator.shared.sessionUUID else { return nil }
+        let storage = DocumentsStorage.default
+        guard let sidecar = try? CatalogSidecar.load(from: storage.sessionDir(for: sessionUUID)) else { return nil }
+        return sidecar.clipURL(sessionID: sessionUUID, storage: storage)
+    }
+
     private func applyCinema(_ input: CinemaInput) {
         withAnimation(.easeInOut(duration: 0.25)) {
             cinema.apply(input)
@@ -162,6 +183,7 @@ struct PlayerView: View {
             sessionName = PlaybackCoordinator.shared.sessionTitle
             tracks = PlaybackCoordinator.shared.tracks
             activeTrackID = PlaybackCoordinator.shared.activeTrackID
+            clipURL = locateClip()
         } catch PlaybackCoordinator.StartError.sessionNotFound {
             loadError = "Couldn't load session."
         } catch PlaybackCoordinator.StartError.noCues {

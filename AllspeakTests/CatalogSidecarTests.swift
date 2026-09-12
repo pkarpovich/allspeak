@@ -52,6 +52,65 @@ struct CatalogSidecarTests {
         #expect(loaded == sidecar)
     }
 
+    @Test("round-trips a sidecar carrying a clip")
+    func roundTripWithClip() throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionDir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let base = makeSidecar()
+        let sidecar = CatalogSidecar(
+            serverID: base.serverID, revision: base.revision, subtitle: base.subtitle, tracks: base.tracks,
+            clip: .init(filename: "first-line.mp4", sha256: "ee00ee")
+        )
+
+        try sidecar.save(to: sessionDir)
+        let loaded = try CatalogSidecar.load(from: sessionDir)
+
+        #expect(loaded == sidecar)
+        #expect(loaded.clip?.filename == "first-line.mp4")
+    }
+
+    @Test("a sidecar written before clips existed loads with no clip")
+    func loadsLegacySidecarWithoutClip() throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionDir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let legacy = """
+        {"serverID":"1B4E28BA-2FA1-11D2-883F-0016D3CCA427","revision":3,
+         "subtitle":{"filename":"movie.srt","sha256":"cc00cc"},
+         "tracks":[{"filename":"a.m4a","sha256":"aa00aa","label":"original","trackID":"2B4E28BA-2FA1-11D2-883F-0016D3CCA427"}]}
+        """
+        try legacy.write(to: sessionDir.appendingPathComponent("server.json"), atomically: true, encoding: .utf8)
+
+        let loaded = try CatalogSidecar.load(from: sessionDir)
+
+        #expect(loaded.revision == 3)
+        #expect(loaded.clip == nil)
+    }
+
+    @Test("clipURL resolves only when the clip file is on disk")
+    func clipURLRequiresFile() throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = DocumentsStorage(documentsURL: root)
+        let sessionID = UUID()
+        let base = makeSidecar()
+        let sidecar = CatalogSidecar(
+            serverID: base.serverID, revision: base.revision, subtitle: base.subtitle, tracks: base.tracks,
+            clip: .init(filename: "first-line.mp4", sha256: "EE00EE")
+        )
+        let expected = storage.sessionDir(for: sessionID).appendingPathComponent("clip-ee00ee-first-line.mp4")
+
+        #expect(sidecar.clipURL(sessionID: sessionID, storage: storage) == nil)
+        #expect(base.clipURL(sessionID: sessionID, storage: storage) == nil)
+
+        try FileManager.default.createDirectory(at: expected.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("v".utf8).write(to: expected)
+
+        #expect(sidecar.clipURL(sessionID: sessionID, storage: storage) == expected)
+    }
+
     @Test("writes the sidecar as server.json inside the session dir")
     func writesServerJSON() throws {
         let root = makeTempRoot()

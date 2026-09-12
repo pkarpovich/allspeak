@@ -35,6 +35,22 @@ struct DocumentsStorage: Sendable {
             .appendingPathComponent(Self.trackFilename(trackID: trackID, originalFilename: originalFilename))
     }
 
+    static func clipFilename(sha256: String, originalFilename: String) -> String {
+        "clip-\(sha256.lowercased())-\(originalFilename)"
+    }
+
+    func clipURL(sessionID: UUID, sha256: String, filename: String) -> URL {
+        sessionDir(for: sessionID)
+            .appendingPathComponent(Self.clipFilename(sha256: sha256, originalFilename: filename))
+    }
+
+    func removeClipFile(sessionID: UUID, sha256: String, filename: String) throws {
+        let url = clipURL(sessionID: sessionID, sha256: sha256, filename: filename)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     func removeTrackFile(sessionID: UUID, trackID: UUID, originalFilename: String) throws {
         let url = trackURL(sessionID: sessionID, trackID: trackID, originalFilename: originalFilename)
         if FileManager.default.fileExists(atPath: url.path) {

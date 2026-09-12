@@ -86,6 +86,9 @@ struct CatalogDetailView: View {
                     fileRow(icon: Icons.audio, title: track.label, size: track.size)
                 }
                 fileRow(icon: Icons.caption, title: detail.subtitle.filename, size: detail.subtitle.size)
+                if let clip = detail.clip {
+                    fileRow(icon: Icons.filmReel, title: clip.filename, size: clip.size)
+                }
             }
             .background(Tokens.surface, in: .rect(cornerRadius: 14))
         }

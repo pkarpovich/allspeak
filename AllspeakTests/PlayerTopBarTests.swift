@@ -12,8 +12,10 @@ struct PlayerTopBarTests {
             cinemaActive: false,
             tracks: tracks,
             activeTrackID: activeTrackID,
+            clipAvailable: false,
             onBack: {},
             onCinema: {},
+            onClip: {},
             onSwitchTrack: { _ in }
         )
     }

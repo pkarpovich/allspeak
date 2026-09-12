@@ -13,10 +13,24 @@ struct CatalogSidecar: Codable, Equatable, Sendable {
         let sha256: String
     }
 
+    struct Clip: Codable, Equatable, Sendable {
+        let filename: String
+        let sha256: String
+    }
+
     let serverID: UUID
     let revision: Int
     let subtitle: Subtitle
     let tracks: [Track]
+    let clip: Clip?
+
+    init(serverID: UUID, revision: Int, subtitle: Subtitle, tracks: [Track], clip: Clip? = nil) {
+        self.serverID = serverID
+        self.revision = revision
+        self.subtitle = subtitle
+        self.tracks = tracks
+        self.clip = clip
+    }
 
     static let filename = "server.json"
     static let sessionsDirName = "sessions"
@@ -31,8 +45,15 @@ struct CatalogSidecar: Codable, Equatable, Sendable {
             serverID: serverID,
             revision: revision,
             subtitle: subtitle,
-            tracks: tracks.filter { liveTrackIDs.contains($0.trackID) }
+            tracks: tracks.filter { liveTrackIDs.contains($0.trackID) },
+            clip: clip
         )
+    }
+
+    func clipURL(sessionID: UUID, storage: DocumentsStorage) -> URL? {
+        guard let clip else { return nil }
+        let url = storage.clipURL(sessionID: sessionID, sha256: clip.sha256, filename: clip.filename)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     func save(to sessionDir: URL) throws {

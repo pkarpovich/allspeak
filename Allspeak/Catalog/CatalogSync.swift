@@ -20,6 +20,8 @@ struct SyncFileRow: Equatable, Sendable {
 struct SyncPlan: Equatable, Sendable {
     let newTitle: String?
     let replaceSubtitle: CatalogSubtitle?
+    let replaceClip: CatalogClip?
+    let removeClip: Bool
     let addTracks: [CatalogTrack]
     let removeTrackIDs: [UUID]
     let downloadRequests: [CatalogFileRequest]
@@ -36,6 +38,8 @@ struct SyncPlan: Equatable, Sendable {
     var hasChanges: Bool {
         newTitle != nil
             || replaceSubtitle != nil
+            || replaceClip != nil
+            || removeClip
             || !addTracks.isEmpty
             || !removeTrackIDs.isEmpty
             || revisionChanged
@@ -54,9 +58,15 @@ struct SyncPlan: Equatable, Sendable {
         let subtitleChanged = manifest.subtitle.sha256.lowercased() != sidecar.subtitle.sha256.lowercased()
         let subtitle = subtitleChanged ? manifest.subtitle : nil
 
+        let clipChanged = manifest.clip?.sha256.lowercased() != sidecar.clip?.sha256.lowercased()
+        let clip = clipChanged ? manifest.clip : nil
+
         var requests = added.map { CatalogFileRequest(track: $0) }
         if let subtitle {
             requests.append(CatalogFileRequest(subtitle: subtitle))
+        }
+        if let clip {
+            requests.append(CatalogFileRequest(clip: clip))
         }
 
         var rows = orderedTracks.map { track in
@@ -69,9 +79,14 @@ struct SyncPlan: Equatable, Sendable {
         rows.append(
             SyncFileRow(filename: manifest.subtitle.filename, size: manifest.subtitle.size, changed: subtitleChanged)
         )
+        if let manifestClip = manifest.clip {
+            rows.append(SyncFileRow(filename: manifestClip.filename, size: manifestClip.size, changed: clipChanged))
+        }
 
         self.newTitle = manifest.title == currentTitle ? nil : manifest.title
         self.replaceSubtitle = subtitle
+        self.replaceClip = clip
+        self.removeClip = clipChanged && manifest.clip == nil
         self.addTracks = added
         self.removeTrackIDs = removed
         self.downloadRequests = requests
@@ -128,6 +143,18 @@ struct CatalogSyncApplier: Sendable {
             try await repository.rename(id: sessionID, to: newTitle)
         }
 
+        let sessionUUID = try await repository.sessionUUID(id: sessionID)
+        if let clip = plan.replaceClip {
+            try storage.copyIntoSession(
+                srcURL: staging.stagedURL(serverID: serverID, sha256: clip.sha256, filename: clip.filename),
+                sessionID: sessionUUID,
+                as: DocumentsStorage.clipFilename(sha256: clip.sha256, originalFilename: clip.filename)
+            )
+        }
+        if plan.replaceClip != nil || plan.removeClip, let old = sidecar.clip {
+            try storage.removeClipFile(sessionID: sessionUUID, sha256: old.sha256, filename: old.filename)
+        }
+
         for old in sidecar.tracks {
             let key = TrackKey(sha256: old.sha256, label: old.label)
             if keyToTrackID[key] == nil {
@@ -171,9 +198,9 @@ struct CatalogSyncApplier: Sendable {
                 filename: detail.subtitle.filename,
                 sha256: detail.subtitle.sha256.lowercased()
             ),
-            tracks: sidecarTracks
+            tracks: sidecarTracks,
+            clip: detail.clip.map { CatalogSidecar.Clip(filename: $0.filename, sha256: $0.sha256.lowercased()) }
         )
-        let sessionUUID = try await repository.sessionUUID(id: sessionID)
         try newSidecar.save(to: storage.sessionDir(for: sessionUUID))
 
         try staging.clear(serverID: serverID)

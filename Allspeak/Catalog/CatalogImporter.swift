@@ -39,6 +39,14 @@ struct CatalogImporter: Sendable {
                 trackID: snapshot.trackID
             )
         }
+        let sessionUUID = try await repository.sessionUUID(id: sessionID)
+        if let clip = detail.clip {
+            try storage.copyIntoSession(
+                srcURL: staging.stagedURL(serverID: serverID, sha256: clip.sha256, filename: clip.filename),
+                sessionID: sessionUUID,
+                as: DocumentsStorage.clipFilename(sha256: clip.sha256, originalFilename: clip.filename)
+            )
+        }
         let sidecar = CatalogSidecar(
             serverID: serverID,
             revision: detail.revision,
@@ -46,9 +54,9 @@ struct CatalogImporter: Sendable {
                 filename: detail.subtitle.filename,
                 sha256: detail.subtitle.sha256.lowercased()
             ),
-            tracks: sidecarTracks
+            tracks: sidecarTracks,
+            clip: detail.clip.map { CatalogSidecar.Clip(filename: $0.filename, sha256: $0.sha256.lowercased()) }
         )
-        let sessionUUID = try await repository.sessionUUID(id: sessionID)
         try sidecar.save(to: storage.sessionDir(for: sessionUUID))
 
         try staging.clear(serverID: serverID)
