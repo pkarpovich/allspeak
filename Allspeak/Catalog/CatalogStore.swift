@@ -158,6 +158,7 @@ extension CatalogSessionDetail {
         let trackRequests = tracks
             .sorted { $0.sortOrder < $1.sortOrder }
             .map(CatalogFileRequest.init(track:))
-        return trackRequests + [CatalogFileRequest(subtitle: subtitle)]
+        let clipRequests = clip.map { [CatalogFileRequest(clip: $0)] } ?? []
+        return trackRequests + [CatalogFileRequest(subtitle: subtitle)] + clipRequests
     }
 }

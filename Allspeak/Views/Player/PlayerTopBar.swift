@@ -5,8 +5,10 @@ struct PlayerTopBar: View {
     let cinemaActive: Bool
     let tracks: [TrackInfo]
     let activeTrackID: UUID?
+    let clipAvailable: Bool
     let onBack: () -> Void
     let onCinema: () -> Void
+    let onClip: () -> Void
     let onSwitchTrack: (UUID) -> Void
 
     var showsTrackMenu: Bool { tracks.count > 1 }
@@ -34,6 +36,17 @@ struct PlayerTopBar: View {
             .padding(.horizontal, 18)
             .frame(height: 44)
             .glassEffect(.regular, in: .capsule)
+
+            if clipAvailable {
+                Button(action: onClip) {
+                    Image(systemName: Icons.filmReel)
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Tokens.accent)
+                        .frame(width: 44, height: 44)
+                }
+                .glassEffect(.regular, in: .circle)
+                .accessibilityLabel("Watch first-line clip")
+            }
 
             if showsTrackMenu {
                 trackMenu

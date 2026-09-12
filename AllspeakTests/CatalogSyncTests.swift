@@ -11,6 +11,8 @@ private enum SHA {
     static let f = String(repeating: "f", count: 64)
     static let sub = String(repeating: "d", count: 64)
     static let sub2 = String(repeating: "2", count: 64)
+    static let clip = String(repeating: "5", count: 64)
+    static let clip2 = String(repeating: "6", count: 64)
 }
 
 private func manifestTrack(
@@ -27,25 +29,30 @@ private func subtitle(filename: String = "movie.srt", sha256: String, size: Int6
     CatalogSubtitle(filename: filename, size: size, sha256: sha256, url: URL(string: "https://example.com/\(filename)")!)
 }
 
+private func clip(filename: String = "first-line.mp4", sha256: String, size: Int64 = 9) -> CatalogClip {
+    CatalogClip(filename: filename, size: size, sha256: sha256, url: URL(string: "https://example.com/\(filename)")!)
+}
+
 private func manifest(
     serverID: UUID = UUID(), title: String = "The Invite · RU dub", revision: Int,
-    tracks: [CatalogTrack], subtitle sub: CatalogSubtitle
+    tracks: [CatalogTrack], subtitle sub: CatalogSubtitle, clip: CatalogClip? = nil
 ) -> CatalogSessionDetail {
     CatalogSessionDetail(
         id: serverID, title: title, revision: revision,
         createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 100),
-        tracks: tracks, subtitle: sub, urlsExpireAt: Date(timeIntervalSince1970: 3600)
+        tracks: tracks, subtitle: sub, clip: clip, urlsExpireAt: Date(timeIntervalSince1970: 3600)
     )
 }
 
 private func sidecar(
     serverID: UUID = UUID(), revision: Int, subtitleSHA: String,
-    tracks: [CatalogSidecar.Track]
+    tracks: [CatalogSidecar.Track], clipSHA: String? = nil
 ) -> CatalogSidecar {
     CatalogSidecar(
         serverID: serverID, revision: revision,
         subtitle: CatalogSidecar.Subtitle(filename: "movie.srt", sha256: subtitleSHA),
-        tracks: tracks
+        tracks: tracks,
+        clip: clipSHA.map { CatalogSidecar.Clip(filename: "first-line.mp4", sha256: $0) }
     )
 }
 
@@ -217,6 +224,63 @@ struct CatalogSyncPlannerTests {
         #expect(plan.newTitle == nil)
         #expect(plan.downloadRequests.isEmpty)
         #expect(plan.fileRows.allSatisfy { !$0.changed })
+    }
+
+    @Test("a clip appearing in the manifest plans a replaceClip and downloads only the clip")
+    func clipAddedPlansReplaceClip() {
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [sidecarTrack(sha256: SHA.a, label: "original")])
+        let m = manifest(revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(sha256: SHA.sub), clip: clip(sha256: SHA.clip))
+
+        let plan = SyncPlan(sidecar: sc, manifest: m, currentTitle: Self.title)
+
+        #expect(plan.replaceClip == clip(sha256: SHA.clip))
+        #expect(!plan.removeClip)
+        #expect(plan.downloadRequests == [CatalogFileRequest(clip: clip(sha256: SHA.clip))])
+        #expect(plan.fileRows.last == SyncFileRow(filename: "first-line.mp4", size: 9, changed: true))
+        #expect(plan.hasChanges)
+    }
+
+    @Test("a clip with a new sha plans a replaceClip; the same sha plans nothing for it")
+    func clipReplacedOrUnchanged() {
+        let tracks = [manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)]
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [sidecarTrack(sha256: SHA.a, label: "original")], clipSHA: SHA.clip)
+
+        let replaced = SyncPlan(
+            sidecar: sc,
+            manifest: manifest(revision: 2, tracks: tracks, subtitle: subtitle(sha256: SHA.sub), clip: clip(sha256: SHA.clip2)),
+            currentTitle: Self.title
+        )
+        #expect(replaced.replaceClip == clip(sha256: SHA.clip2))
+        #expect(replaced.downloadRequests == [CatalogFileRequest(clip: clip(sha256: SHA.clip2))])
+
+        let unchanged = SyncPlan(
+            sidecar: sc,
+            manifest: manifest(revision: 1, tracks: tracks, subtitle: subtitle(sha256: SHA.sub), clip: clip(sha256: SHA.clip)),
+            currentTitle: Self.title
+        )
+        #expect(unchanged.replaceClip == nil)
+        #expect(!unchanged.removeClip)
+        #expect(unchanged.downloadRequests.isEmpty)
+        #expect(unchanged.fileRows.last == SyncFileRow(filename: "first-line.mp4", size: 9, changed: false))
+        #expect(!unchanged.hasChanges)
+    }
+
+    @Test("a clip dropped from the manifest plans a removeClip with no downloads and no clip row")
+    func clipRemovedPlansRemoveClip() {
+        let sc = sidecar(revision: 1, subtitleSHA: SHA.sub, tracks: [sidecarTrack(sha256: SHA.a, label: "original")], clipSHA: SHA.clip)
+        let m = manifest(revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(sha256: SHA.sub))
+
+        let plan = SyncPlan(sidecar: sc, manifest: m, currentTitle: Self.title)
+
+        #expect(plan.removeClip)
+        #expect(plan.replaceClip == nil)
+        #expect(plan.downloadRequests.isEmpty)
+        #expect(plan.fileRows.map(\.filename) == ["a.m4a", "movie.srt"])
+        #expect(plan.hasChanges)
     }
 
     @Test("a revision bump that only moves the default track still plans a sync with no downloads")
@@ -411,6 +475,68 @@ struct CatalogSyncApplierTests {
 
         let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
         #expect(updated.tracks.map(\.trackID) == snaps.map(\.trackID))
+    }
+
+    @Test("replacing the clip copies the new file, removes the old one, and records it in the sidecar")
+    func clipReplacedOnDisk() async throws {
+        let f = makeFixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let serverID = UUID()
+
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.a, filename: "a.m4a", contents: "a")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.sub, filename: "movie.srt", contents: Self.sampleSRT)
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.clip, filename: "first-line.mp4", contents: "v1")
+        let rev1 = manifest(serverID: serverID, revision: 1, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub), clip: clip(sha256: SHA.clip))
+        let sessionID = try await f.importer.run(detail: rev1)
+        let uuid = try await f.repo.sessionUUID(id: sessionID)
+        let sc = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        let oldURL = f.storage.clipURL(sessionID: uuid, sha256: SHA.clip, filename: "first-line.mp4")
+        #expect(FileManager.default.fileExists(atPath: oldURL.path))
+
+        let rev2 = manifest(serverID: serverID, revision: 2, tracks: rev1.tracks,
+                            subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub), clip: clip(sha256: SHA.clip2))
+        let plan = SyncPlan(sidecar: sc, manifest: rev2, currentTitle: Self.title)
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.clip2, filename: "first-line.mp4", contents: "v2")
+
+        try await f.applier.apply(plan: plan, detail: rev2, sessionID: sessionID, sidecar: sc)
+
+        let newURL = f.storage.clipURL(sessionID: uuid, sha256: SHA.clip2, filename: "first-line.mp4")
+        #expect(try String(contentsOf: newURL, encoding: .utf8) == "v2")
+        #expect(!FileManager.default.fileExists(atPath: oldURL.path))
+        let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        #expect(updated.clip == CatalogSidecar.Clip(filename: "first-line.mp4", sha256: SHA.clip2))
+        #expect(updated.clipURL(sessionID: uuid, storage: f.storage) == newURL)
+    }
+
+    @Test("dropping the clip removes its file and clears it from the sidecar")
+    func clipRemovedOnDisk() async throws {
+        let f = makeFixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let serverID = UUID()
+
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.a, filename: "a.m4a", contents: "a")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.sub, filename: "movie.srt", contents: Self.sampleSRT)
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.clip, filename: "first-line.mp4", contents: "v1")
+        let rev1 = manifest(serverID: serverID, revision: 1, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub), clip: clip(sha256: SHA.clip))
+        let sessionID = try await f.importer.run(detail: rev1)
+        let uuid = try await f.repo.sessionUUID(id: sessionID)
+        let sc = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+
+        let rev2 = manifest(serverID: serverID, revision: 2, tracks: rev1.tracks,
+                            subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub))
+        let plan = SyncPlan(sidecar: sc, manifest: rev2, currentTitle: Self.title)
+
+        try await f.applier.apply(plan: plan, detail: rev2, sessionID: sessionID, sidecar: sc)
+
+        let oldURL = f.storage.clipURL(sessionID: uuid, sha256: SHA.clip, filename: "first-line.mp4")
+        #expect(!FileManager.default.fileExists(atPath: oldURL.path))
+        let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        #expect(updated.clip == nil)
+        #expect(updated.clipURL(sessionID: uuid, storage: f.storage) == nil)
     }
 
     @Test("adding a track and renaming keeps surviving trackIDs and updates the title")

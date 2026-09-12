@@ -16,6 +16,10 @@ extension CatalogFileRequest {
     init(subtitle: CatalogSubtitle) {
         self.init(filename: subtitle.filename, size: subtitle.size, sha256: subtitle.sha256, url: subtitle.url)
     }
+
+    init(clip: CatalogClip) {
+        self.init(filename: clip.filename, size: clip.size, sha256: clip.sha256, url: clip.url)
+    }
 }
 
 enum DownloadTransportError: Error, Equatable {
@@ -169,6 +173,9 @@ final class SessionDownloader {
             urlBySHA[track.sha256.lowercased()] = track.url
         }
         urlBySHA[detail.subtitle.sha256.lowercased()] = detail.subtitle.url
+        if let clip = detail.clip {
+            urlBySHA[clip.sha256.lowercased()] = clip.url
+        }
 
         return try remaining.map { file in
             guard let fresh = urlBySHA[file.sha256.lowercased()] else {

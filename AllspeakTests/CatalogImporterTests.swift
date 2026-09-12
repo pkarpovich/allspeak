@@ -137,6 +137,34 @@ struct CatalogImporterTests {
         #expect(sidecar.tracks.map(\.trackID) == snaps.map(\.trackID))
     }
 
+    @Test("copies a manifest clip into the session dir and records it in the sidecar")
+    func importsClip() async throws {
+        let (importer, repo, _, storage, staging, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let serverID = UUID()
+        let shaClip = String(repeating: "5", count: 64)
+        try stageFile(staging, serverID: serverID, sha256: Self.shaA, filename: "original.m4a", contents: "a")
+        try stageFile(staging, serverID: serverID, sha256: Self.shaSub, filename: "movie.srt", contents: Self.sampleSRT)
+        try stageFile(staging, serverID: serverID, sha256: shaClip, filename: "first-line.mp4", contents: "clip")
+        let manifest = CatalogSessionDetail(
+            id: serverID, title: "The Invite · RU dub", revision: 1,
+            createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 100),
+            tracks: [track(filename: "original.m4a", sha256: Self.shaA, label: "original", sortOrder: 0, isDefault: true)],
+            subtitle: CatalogSubtitle(filename: "movie.srt", size: 5, sha256: Self.shaSub, url: URL(string: "https://example.com/s")!),
+            clip: CatalogClip(filename: "first-line.mp4", size: 4, sha256: shaClip, url: URL(string: "https://example.com/c")!),
+            urlsExpireAt: Date(timeIntervalSince1970: 3600)
+        )
+
+        let sessionID = try await importer.run(detail: manifest)
+        let uuid = try await repo.sessionUUID(id: sessionID)
+
+        let clipURL = storage.clipURL(sessionID: uuid, sha256: shaClip, filename: "first-line.mp4")
+        #expect(try String(contentsOf: clipURL, encoding: .utf8) == "clip")
+        let sidecar = try CatalogSidecar.load(from: storage.sessionDir(for: uuid))
+        #expect(sidecar.clip == CatalogSidecar.Clip(filename: "first-line.mp4", sha256: shaClip))
+        #expect(sidecar.clipURL(sessionID: uuid, storage: storage) == clipURL)
+    }
+
     @Test("clears the staging directory on a successful import")
     func clearsStagingOnSuccess() async throws {
         let (importer, _, _, _, staging, root) = makeFixture()
