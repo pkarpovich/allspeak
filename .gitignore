@@ -10,6 +10,7 @@ build/
 # Local signing config (CI generates its own with manual signing + pinned profile)
 Allspeak/Signing.xcconfig
 AllspeakWatch/Signing.xcconfig
+AllspeakWatchWidget/Signing.xcconfig
 
 # Local catalog backend config (real read token installed out-of-band)
 Allspeak/CatalogConfig.xcconfig

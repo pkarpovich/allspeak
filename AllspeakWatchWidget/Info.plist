@@ -20,15 +20,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<key>WKApplication</key>
-	<true/>
-	<key>WKCompanionAppBundleIdentifier</key>
-	<string>dev.karpovich.allspeak</string>
-	<key>WKWatchOnly</key>
-	<false/>
-	<key>UIUserInterfaceStyle</key>
-	<string>Dark</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.widgetkit-extension</string>
+	</dict>
 </dict>
 </plist>

@@ -10,7 +10,9 @@ import WatchKit
 final class WatchSessionClient: NSObject {
     static let shared = WatchSessionClient()
 
-    var metadata: SessionMetadata?
+    var metadata: SessionMetadata? {
+        didSet { onMetadataChange?(metadata) }
+    }
     var cues: [Subtitle] = []
     var lastSnapshot: PlaybackSnapshot?
     var isConnected: Bool = false
@@ -29,6 +31,7 @@ final class WatchSessionClient: NSObject {
         var chunks: [Int: Data]
     }
 
+    @ObservationIgnored var onMetadataChange: (@MainActor (SessionMetadata?) -> Void)?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?

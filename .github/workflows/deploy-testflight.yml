@@ -29,6 +29,7 @@ jobs:
           CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
           PROFILE_IOS: ${{ secrets.PROVISIONING_PROFILE_IOS }}
           PROFILE_WATCHOS: ${{ secrets.PROVISIONING_PROFILE_WATCHOS }}
+          PROFILE_WATCHOS_WIDGET: ${{ secrets.PROVISIONING_PROFILE_WATCHOS_WIDGET }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -62,6 +63,13 @@ jobs:
             ~/Library/MobileDevice/Provisioning\ Profiles/$UUID_WATCHOS.mobileprovision
           echo "UUID_WATCHOS=$UUID_WATCHOS" >> $GITHUB_ENV
 
+          echo "$PROFILE_WATCHOS_WIDGET" | base64 --decode > $RUNNER_TEMP/watchos-widget.mobileprovision
+          UUID_WATCHOS_WIDGET=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin \
+            <<< "$(security cms -D -i $RUNNER_TEMP/watchos-widget.mobileprovision)")
+          cp $RUNNER_TEMP/watchos-widget.mobileprovision \
+            ~/Library/MobileDevice/Provisioning\ Profiles/$UUID_WATCHOS_WIDGET.mobileprovision
+          echo "UUID_WATCHOS_WIDGET=$UUID_WATCHOS_WIDGET" >> $GITHUB_ENV
+
       - name: Write manual-signing xcconfigs
         run: |
           cat > Allspeak/Signing.xcconfig << EOF
@@ -75,6 +83,12 @@ jobs:
           CODE_SIGN_STYLE = Manual
           CODE_SIGN_IDENTITY = Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER = $UUID_WATCHOS
+          EOF
+
+          cat > AllspeakWatchWidget/Signing.xcconfig << EOF
+          CODE_SIGN_STYLE = Manual
+          CODE_SIGN_IDENTITY = Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER = $UUID_WATCHOS_WIDGET
           EOF
 
       - name: Write catalog config xcconfig
@@ -131,6 +145,8 @@ jobs:
               <string>$UUID_IOS</string>
               <key>$BUNDLE_ID.watchkitapp</key>
               <string>$UUID_WATCHOS</string>
+              <key>$BUNDLE_ID.watchkitapp.widget</key>
+              <string>$UUID_WATCHOS_WIDGET</string>
             </dict>
           </dict>
           </plist>

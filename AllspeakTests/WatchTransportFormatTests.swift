@@ -88,4 +88,21 @@ struct WatchTransportFormatTests {
     func ambientRemainingNonFinite() {
         #expect(WatchTransportFormat.ambientRemainingLabel(elapsed: 0, duration: .nan) == "0m")
     }
+
+    @Test("complication remaining: compact hours with zero-padded minutes")
+    func complicationRemainingHours() {
+        #expect(WatchTransportFormat.complicationRemainingLabel(elapsed: 0, duration: 5460) == "1h31")
+        #expect(WatchTransportFormat.complicationRemainingLabel(elapsed: 0, duration: 3900) == "1h05")
+    }
+
+    @Test("complication remaining: minutes only under an hour, rounded up")
+    func complicationRemainingMinutes() {
+        #expect(WatchTransportFormat.complicationRemainingLabel(elapsed: 600, duration: 3420) == "47m")
+        #expect(WatchTransportFormat.complicationRemainingLabel(elapsed: 0, duration: 90) == "2m")
+    }
+
+    @Test("complication remaining: zero at the end")
+    func complicationRemainingAtEnd() {
+        #expect(WatchTransportFormat.complicationRemainingLabel(elapsed: 120, duration: 120) == "0m")
+    }
 }
