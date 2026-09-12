@@ -76,6 +76,15 @@ targets:
       - path: Allspeak/Watch/SkipCoalescer.swift
       - path: Allspeak/Watch/VolumeThrottler.swift
       - path: Allspeak/Watch/WatchTransportFormat.swift
+      - path: Allspeak/Watch/ComplicationState.swift
+      - path: Allspeak/Watch/ComplicationState+Metadata.swift
+    dependencies:
+      - target: AllspeakWatchWidget
+    entitlements:
+      path: AllspeakWatch/AllspeakWatch.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.dev.karpovich.allspeak
     configFiles:
       Debug: AllspeakWatch/Signing.xcconfig
       Release: AllspeakWatch/Signing.xcconfig
@@ -91,3 +100,29 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
         SDKROOT: watchos
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+  AllspeakWatchWidget:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: AllspeakWatchWidget
+      - path: AllspeakWatch/Tokens.swift
+      - path: Allspeak/Watch/WatchTransportFormat.swift
+      - path: Allspeak/Watch/ComplicationState.swift
+    entitlements:
+      path: AllspeakWatchWidget/AllspeakWatchWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.dev.karpovich.allspeak
+    configFiles:
+      Debug: AllspeakWatchWidget/Signing.xcconfig
+      Release: AllspeakWatchWidget/Signing.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.karpovich.allspeak.watchkitapp.widget
+        TARGETED_DEVICE_FAMILY: "4"
+        INFOPLIST_FILE: AllspeakWatchWidget/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        WATCHOS_DEPLOYMENT_TARGET: "26.0"
+        SDKROOT: watchos
+        APPLICATION_EXTENSION_API_ONLY: YES

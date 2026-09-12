@@ -23,15 +23,25 @@ enum WatchTransportFormat {
     }
 
     static func ambientRemainingLabel(elapsed: Double, duration: Double) -> String {
-        let remaining = duration - elapsed
-        guard remaining.isFinite, remaining > 0 else { return "0m" }
-        let minutes = Int((remaining / 60).rounded(.up))
-        let h = minutes / 60
-        let m = minutes % 60
-        if h > 0 {
-            return String(format: "%dh %02dm", h, m)
+        let minutes = remainingMinutes(elapsed: elapsed, duration: duration)
+        if minutes >= 60 {
+            return String(format: "%dh %02dm", minutes / 60, minutes % 60)
         }
-        return "\(m)m"
+        return "\(minutes)m"
+    }
+
+    static func complicationRemainingLabel(elapsed: Double, duration: Double) -> String {
+        let minutes = remainingMinutes(elapsed: elapsed, duration: duration)
+        if minutes >= 60 {
+            return String(format: "%dh%02d", minutes / 60, minutes % 60)
+        }
+        return "\(minutes)m"
+    }
+
+    private static func remainingMinutes(elapsed: Double, duration: Double) -> Int {
+        let remaining = duration - elapsed
+        guard remaining.isFinite, remaining > 0 else { return 0 }
+        return Int((remaining / 60).rounded(.up))
     }
 
     private static func clockLabel(_ seconds: Double) -> String {

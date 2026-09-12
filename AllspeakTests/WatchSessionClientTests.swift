@@ -48,6 +48,22 @@ struct WatchSessionClientTests {
         Subtitle(index: 3, start: 2, end: 3, text: "third"),
     ]
 
+    @Test("metadata changes are reported to the complication hook")
+    func metadataChangeHook() async throws {
+        let (client, _, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var reported: [SessionMetadata?] = []
+        client.onMetadataChange = { reported.append($0) }
+        let meta = SessionMetadata(
+            sessionID: UUID(), revision: 1, title: "Pressure",
+            duration: 3600, cueCount: 0, isPlaying: true, currentTime: 10
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+        #expect(reported == [meta, nil])
+    }
+
     @Test("send(.togglePlayPause) writes encoded command to sender")
     func sendCommandEncodesToSender() async throws {
         let (client, sender, dir) = try makeClient()

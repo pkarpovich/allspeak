@@ -24,6 +24,7 @@ enum Tokens {
         static let pause             = "pause.fill"
         static let skipBack          = "gobackward"
         static let skipForward       = "goforward"
+        static let popcorn           = "popcorn.fill"
     }
 }
 

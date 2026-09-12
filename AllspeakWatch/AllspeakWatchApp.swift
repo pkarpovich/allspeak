@@ -12,6 +12,7 @@ struct AllspeakWatchApp: App {
 
     init() {
         let shared = WatchSessionClient.shared
+        shared.onMetadataChange = ComplicationPublisher.publish
         shared.activate()
         shared.loadCachedCues()
         shared.startInterpolationTimer()
