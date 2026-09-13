@@ -25,6 +25,7 @@ struct ClipSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(.regularMaterial)
         .onAppear {
             let player = AVPlayer(url: url)
             self.player = player
