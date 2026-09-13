@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @State private var catalogStore = CatalogStore.live()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView {
@@ -19,6 +20,10 @@ struct RootView: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await catalogStore.refreshIfStale() }
+        }
         .tint(Tokens.accent)
         .preferredColorScheme(.dark)
     }

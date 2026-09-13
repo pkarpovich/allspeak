@@ -16,7 +16,10 @@ final class CatalogStore {
     private(set) var sidecars: [CatalogSidecar] = []
     private(set) var sidecarsByLocalID: [UUID: CatalogSidecar] = [:]
     private(set) var fetchState: FetchState = .idle
+    private(set) var lastLoadedAt: Date?
     private(set) var activeDownloadID: UUID?
+
+    nonisolated static let staleInterval: TimeInterval = 5 * 60
 
     let downloader: SessionDownloader
 
@@ -80,14 +83,28 @@ final class CatalogStore {
         }
     }
 
-    func loadCatalog() async {
-        fetchState = .loading
+    func refreshIfStale(now: Date = Date()) async {
+        guard fetchState != .loading, Self.isStale(lastLoadedAt: lastLoadedAt, now: now) else { return }
+        await loadCatalog(now: now)
+    }
+
+    nonisolated static func isStale(lastLoadedAt: Date?, now: Date) -> Bool {
+        guard let lastLoadedAt else { return true }
+        return now.timeIntervalSince(lastLoadedAt) >= staleInterval
+    }
+
+    func loadCatalog(now: Date = Date()) async {
+        let hadCatalog = fetchState == .loaded
+        if !hadCatalog {
+            fetchState = .loading
+        }
         reloadSidecars()
         do {
             summaries = try await client.fetchCatalog()
             fetchState = .loaded
+            lastLoadedAt = now
         } catch {
-            fetchState = .failed
+            fetchState = hadCatalog ? .loaded : .failed
         }
     }
 

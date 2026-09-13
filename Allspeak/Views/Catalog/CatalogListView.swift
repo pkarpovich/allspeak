@@ -68,6 +68,7 @@ struct CatalogListView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .refreshable { await store.loadCatalog() }
     }
 
     private func selectAction(_ summary: CatalogSessionSummary) -> () -> Void {

@@ -42,6 +42,14 @@ struct CatalogListStateTests {
         #expect(CatalogListFormatters.labels([]) == "")
     }
 
+    @Test("the catalog is stale before the first load and again five minutes after one")
+    func catalogStaleness() {
+        let loadedAt = Date(timeIntervalSince1970: 1_000_000)
+        #expect(CatalogStore.isStale(lastLoadedAt: nil, now: loadedAt))
+        #expect(!CatalogStore.isStale(lastLoadedAt: loadedAt, now: loadedAt.addingTimeInterval(299)))
+        #expect(CatalogStore.isStale(lastLoadedAt: loadedAt, now: loadedAt.addingTimeInterval(300)))
+    }
+
     @Test("builds a file request per track ordered by sortOrder plus a trailing subtitle request")
     func importFileRequestsOrderedWithSubtitle() {
         let detail = CatalogSessionDetail(
