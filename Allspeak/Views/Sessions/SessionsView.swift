@@ -153,6 +153,7 @@ struct SessionsView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .refreshable { await catalogStore.loadCatalog() }
     }
 
     private func deleteSession(_ id: NSManagedObjectID) {
