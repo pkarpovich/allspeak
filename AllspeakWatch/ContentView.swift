@@ -7,7 +7,10 @@ struct ContentView: View {
         case trackList
     }
 
+    @Environment(WatchSessionClient.self) private var client
     @State private var selection: Page = .currentLine
+
+    private var showsTrackList: Bool { client.tracks.count > 1 }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -15,9 +18,15 @@ struct ContentView: View {
                 .tag(Page.currentLine)
             SubtitleListView()
                 .tag(Page.subtitleList)
-            TrackListView()
-                .tag(Page.trackList)
+            if showsTrackList {
+                TrackListView()
+                    .tag(Page.trackList)
+            }
         }
         .tabViewStyle(.page)
+        .onChange(of: showsTrackList) { _, shows in
+            guard !shows, selection == .trackList else { return }
+            selection = .currentLine
+        }
     }
 }

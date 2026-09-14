@@ -264,8 +264,8 @@ struct TransportView: View {
                 Spacer(minLength: 4)
                 Text(WatchTransportFormat.remainingLabel(elapsed: elapsed, duration: duration))
             }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Tokens.text2)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Tokens.text)
             .monospacedDigit()
         }
     }
