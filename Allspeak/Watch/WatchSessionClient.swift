@@ -17,9 +17,11 @@ final class WatchSessionClient: NSObject {
     var lastSnapshot: PlaybackSnapshot?
     var isConnected: Bool = false
     var interpolationTick: UInt64 = 0
+    var fingerprintURL: URL?
 
     var tracks: [TrackInfo] { metadata?.tracks ?? [] }
     var activeTrackID: UUID? { metadata?.activeTrackID }
+    var hasFingerprint: Bool { fingerprintURL != nil }
 
     // An in-flight chunked cue-bundle pull. The watch requests slices 0..<total
     // over sendMessage (each a request/reply, so a dropped chunk is retried),
@@ -31,17 +33,24 @@ final class WatchSessionClient: NSObject {
         var chunks: [Int: Data]
     }
 
+    private struct FingerprintDownload {
+        let sha256: String
+        var chunks: [Int: Data]
+    }
+
     @ObservationIgnored var onMetadataChange: (@MainActor (SessionMetadata?) -> Void)?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var interpolationTimer: Timer?
     @ObservationIgnored private var cueDownload: CueDownload?
+    @ObservationIgnored private let fingerprintCache: FingerprintCache?
+    @ObservationIgnored private var fingerprintDownload: FingerprintDownload?
     #if os(watchOS)
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
 
-    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil) {
+    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil, fingerprintCache: FingerprintCache? = nil) {
         self.sender = sender ?? DefaultWatchMessageSender.shared
         if let cache {
             self.cache = cache
@@ -49,6 +58,13 @@ final class WatchSessionClient: NSObject {
             self.cache = try? CueCache(baseURL: baseURL)
         } else {
             self.cache = nil
+        }
+        if let fingerprintCache {
+            self.fingerprintCache = fingerprintCache
+        } else if let baseURL = try? FingerprintCache.defaultBaseURL() {
+            self.fingerprintCache = try? FingerprintCache(baseURL: baseURL)
+        } else {
+            self.fingerprintCache = nil
         }
         super.init()
     }
@@ -196,6 +212,8 @@ final class WatchSessionClient: NSObject {
             self.cues = []
             self.lastSnapshot = nil
             self.cueDownload = nil
+            self.fingerprintURL = nil
+            self.fingerprintDownload = nil
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
@@ -215,6 +233,7 @@ final class WatchSessionClient: NSObject {
         if cues.isEmpty && meta.cueCount > 0 {
             startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
         }
+        refreshFingerprint()
     }
 
     // MARK: - Chunked cue-bundle pull
@@ -314,6 +333,90 @@ final class WatchSessionClient: NSObject {
         startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
     }
 
+    // MARK: - Chunked fingerprint pull
+
+    private func refreshFingerprint() {
+        guard let sha256 = metadata?.fingerprintSHA else {
+            fingerprintURL = nil
+            fingerprintDownload = nil
+            return
+        }
+        if let url = fingerprintCache?.url(sha256: sha256) {
+            if fingerprintURL != url {
+                fingerprintURL = url
+            }
+            fingerprintDownload = nil
+            return
+        }
+        fingerprintURL = nil
+        startFingerprintDownloadIfNeeded(sha256: sha256)
+    }
+
+    private func startFingerprintDownloadIfNeeded(sha256: String) {
+        guard fingerprintCache != nil else { return }
+        if fingerprintDownload?.sha256 == sha256 { return }
+        fingerprintDownload = FingerprintDownload(sha256: sha256, chunks: [:])
+        requestFingerprintChunk(sha256: sha256, index: 0)
+    }
+
+    private func requestFingerprintChunk(sha256: String, index: Int) {
+        guard let payload = try? WatchCommand.requestFingerprintChunk(sha256: sha256, index: index).toPropertyList() else {
+            return
+        }
+        let replyHandler: @Sendable ([String: Any]) -> Void = { [weak self] reply in
+            let bridge = SendableDictionary(value: reply)
+            Task { @MainActor in
+                self?.handleFingerprintChunkReply(bridge.value, requestedSHA: sha256)
+            }
+        }
+        let errorHandler: @Sendable (Error) -> Void = { [weak self] _ in
+            Task { @MainActor in
+                self?.failFingerprintDownload(sha256: sha256)
+            }
+        }
+        sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
+    }
+
+    private func handleFingerprintChunkReply(_ payload: [String: Any], requestedSHA: String) {
+        guard var download = fingerprintDownload, download.sha256 == requestedSHA else { return }
+        guard let reply = try? FingerprintChunkReply(propertyList: payload), reply.sha256 == download.sha256 else {
+            failFingerprintDownload(sha256: requestedSHA)
+            return
+        }
+        guard metadata?.fingerprintSHA == download.sha256 else {
+            fingerprintDownload = nil
+            return
+        }
+        download.chunks[reply.index] = reply.data
+        fingerprintDownload = download
+        if let next = (0..<reply.totalChunks).first(where: { download.chunks[$0] == nil }) {
+            requestFingerprintChunk(sha256: download.sha256, index: next)
+            return
+        }
+        assembleFingerprintDownload(download, totalChunks: reply.totalChunks)
+    }
+
+    private func assembleFingerprintDownload(_ download: FingerprintDownload, totalChunks: Int) {
+        fingerprintDownload = nil
+        let data = (0..<totalChunks).reduce(into: Data()) { result, index in
+            result.append(download.chunks[index] ?? Data())
+        }
+        guard let url = try? fingerprintCache?.save(data, sha256: download.sha256) else { return }
+        guard metadata?.fingerprintSHA == download.sha256 else { return }
+        fingerprintURL = url
+    }
+
+    private func failFingerprintDownload(sha256: String) {
+        guard fingerprintDownload?.sha256 == sha256 else { return }
+        fingerprintDownload = nil
+    }
+
+    private func retryFingerprintDownloadIfNeeded() {
+        guard fingerprintURL == nil, let sha256 = metadata?.fingerprintSHA else { return }
+        fingerprintDownload = nil
+        startFingerprintDownloadIfNeeded(sha256: sha256)
+    }
+
     #if os(watchOS)
     func register(backgroundTask: WKWatchConnectivityRefreshBackgroundTask) {
         pendingBackgroundTasks.append(backgroundTask)
@@ -357,7 +460,9 @@ final class WatchSessionClient: NSObject {
             currentTime: snapshot.currentTime,
             tracks: current.tracks,
             activeTrackID: snapshot.activeTrackID ?? current.activeTrackID,
-            serverDate: snapshot.serverDate
+            serverDate: snapshot.serverDate,
+            fingerprintSHA: current.fingerprintSHA,
+            fingerprintSize: current.fingerprintSize
         )
     }
 }
@@ -373,6 +478,7 @@ extension WatchSessionClient: WCSessionDelegate {
             self.isConnected = reachable
             if reachable {
                 self.retryCueDownloadIfNeeded()
+                self.retryFingerprintDownloadIfNeeded()
             }
         }
     }
@@ -383,6 +489,7 @@ extension WatchSessionClient: WCSessionDelegate {
             self.isConnected = reachable
             if reachable {
                 self.retryCueDownloadIfNeeded()
+                self.retryFingerprintDownloadIfNeeded()
             }
         }
     }

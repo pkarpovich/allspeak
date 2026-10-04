@@ -1044,4 +1044,199 @@ struct WatchSessionClientTests {
         #expect(sender.sentMessages.count == 2)
     }
 
+    // MARK: - Fingerprint pull
+
+    private func makeFingerprintClient() throws -> (WatchSessionClient, MockSender, FingerprintCache, URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("client-fingerprint-\(UUID().uuidString)", isDirectory: true)
+        let cueCache = try CueCache(baseURL: dir.appendingPathComponent("cues", isDirectory: true))
+        let fingerprintCache = try FingerprintCache(baseURL: dir.appendingPathComponent("fingerprint", isDirectory: true))
+        let sender = MockSender()
+        let client = WatchSessionClient(sender: sender, cache: cueCache, fingerprintCache: fingerprintCache)
+        return (client, sender, fingerprintCache, dir)
+    }
+
+    private static let fingerprintData = Data((0..<70_000).map { UInt8(truncatingIfNeeded: $0 * 13) })
+
+    private static func fingerprintMeta(sessionID: UUID = UUID(), sha256: String?, size: Int? = nil) -> SessionMetadata {
+        SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Digger",
+            duration: 7200,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0,
+            fingerprintSHA: sha256,
+            fingerprintSize: size
+        )
+    }
+
+    private static func fingerprintChunkRequests(_ messages: [[String: Any]]) -> [Int] {
+        messages.compactMap { message in
+            guard let command = try? WatchCommand(propertyList: message),
+                  case .requestFingerprintChunk(_, let index) = command else { return nil }
+            return index
+        }
+    }
+
+    private static func serveFingerprint(_ data: Data, sha256: String) -> @Sendable ([String: Any]) -> [String: Any]? {
+        let size = 30_000
+        let total = (data.count + size - 1) / size
+        return { message in
+            guard let command = try? WatchCommand(propertyList: message),
+                  case .requestFingerprintChunk(let requested, let index) = command,
+                  requested == sha256,
+                  index < total else { return [:] }
+            let end = min((index + 1) * size, data.count)
+            return FingerprintChunkReply(
+                sha256: sha256,
+                index: index,
+                totalChunks: total,
+                data: data.subdata(in: (index * size)..<end)
+            ).toPropertyList()
+        }
+    }
+
+    @Test("a new fingerprint sha pulls every chunk and stores a file whose sha256 matches")
+    func fingerprintPullAssemblesFile() async throws {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha, size: Self.fingerprintData.count).toPropertyList())
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0, 1, 2])
+        let url = try #require(client.fingerprintURL)
+        #expect(client.hasFingerprint)
+        #expect(cache.url(sha256: sha) == url)
+        let stored = try Data(contentsOf: url)
+        #expect(FingerprintCache.sha256Hex(of: stored) == sha)
+    }
+
+    @Test("a cached fingerprint is used without any chunk request")
+    func fingerprintCacheHitSkipsPull() async throws {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        let url = try cache.save(Self.fingerprintData, sha256: sha)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+
+        #expect(client.fingerprintURL == url)
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages).isEmpty)
+    }
+
+    @Test("metadata without a fingerprint requests nothing and reports none")
+    func noFingerprintNoPull() async throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+
+        #expect(!client.hasFingerprint)
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("assembled data whose sha256 does not match is not stored")
+    func fingerprintShaMismatchIsDropped() async throws {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let claimedSHA = FingerprintCache.sha256Hex(of: Data("other".utf8))
+        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: claimedSHA)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: claimedSHA).toPropertyList())
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(!client.hasFingerprint)
+        #expect(cache.url(sha256: claimedSHA) == nil)
+    }
+
+    @Test("an error reply re-arms the fingerprint pull so a later context retries")
+    func fingerprintErrorReplyReArms() async throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        let meta = Self.fingerprintMeta(sha256: sha)
+
+        sender.nextReply = [:]
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!client.hasFingerprint)
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
+
+        sender.nextReply = nil
+        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(client.hasFingerprint)
+    }
+
+    @Test("an in-flight fingerprint pull is not restarted by a repeated context")
+    func fingerprintPullDeduplicates() async throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = Self.fingerprintMeta(sha256: "abc")
+
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
+    }
+
+    @Test("session end clears the fingerprint")
+    func sessionEndClearsFingerprint() async throws {
+        let (client, _, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        try cache.save(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        #expect(client.hasFingerprint)
+
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+
+        #expect(!client.hasFingerprint)
+    }
+
+    @Test("a session switch to one without a fingerprint hides the cached one")
+    func sessionSwitchDropsFingerprint() async throws {
+        let (client, _, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        try cache.save(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        #expect(client.hasFingerprint)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+
+        #expect(!client.hasFingerprint)
+        #expect(cache.url(sha256: sha) != nil)
+    }
+
+    @Test("snapshot updates keep the metadata fingerprint fields")
+    func snapshotKeepsFingerprintFields() async throws {
+        let (client, _, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sessionID = UUID()
+        let meta = Self.fingerprintMeta(sessionID: sessionID, sha256: "abc", size: 1234)
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let snapshot = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 42,
+            duration: 7200,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        client.handleReceivedSnapshot(try snapshot.toPropertyList())
+
+        #expect(client.metadata?.currentTime == 42)
+        #expect(client.metadata?.fingerprintSHA == "abc")
+        #expect(client.metadata?.fingerprintSize == 1234)
+    }
+
 }

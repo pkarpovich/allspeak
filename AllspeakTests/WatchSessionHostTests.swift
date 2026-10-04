@@ -415,13 +415,17 @@ struct WatchSessionHostTests {
     private struct MultiTrackFixture {
         let coordinator: PlaybackCoordinator
         let host: WatchSessionHost
+        let sessionID: NSManagedObjectID
+        let storage: DocumentsStorage
         let sessionUUID: UUID
         let track1UUID: UUID
         let track2UUID: UUID
         let root: URL
     }
 
-    private func makeMultiTrackFixture() async throws -> MultiTrackFixture {
+    private func makeMultiTrackFixture(
+        fingerprint: (sha256: String, data: Data?)? = nil
+    ) async throws -> MultiTrackFixture {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("allspeak-host-multi-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -457,6 +461,9 @@ struct WatchSessionHostTests {
         let silenceB = try Self.makeSilenceFile(seconds: 5)
         try FileManager.default.moveItem(at: silenceA, to: t1URL)
         try FileManager.default.moveItem(at: silenceB, to: t2URL)
+        if let fingerprint {
+            try Self.writeFingerprint(fingerprint, storage: storage, sessionUUID: sessionUUID)
+        }
 
         let coordinator = PlaybackCoordinator()
         coordinator.endSession()
@@ -465,11 +472,122 @@ struct WatchSessionHostTests {
         return MultiTrackFixture(
             coordinator: coordinator,
             host: host,
+            sessionID: sessionID,
+            storage: storage,
             sessionUUID: sessionUUID,
             track1UUID: t1Snap.trackID,
             track2UUID: t2Snap.trackID,
             root: root
         )
+    }
+
+    private static func writeFingerprint(
+        _ fingerprint: (sha256: String, data: Data?),
+        storage: DocumentsStorage,
+        sessionUUID: UUID
+    ) throws {
+        let sidecar = CatalogSidecar(
+            serverID: UUID(),
+            revision: 2,
+            subtitle: .init(filename: "subs.srt", sha256: "srt-sha"),
+            tracks: [],
+            fingerprint: .init(filename: "film.shazamcatalog", sha256: fingerprint.sha256)
+        )
+        try sidecar.save(to: storage.sessionDir(for: sessionUUID))
+        guard let data = fingerprint.data else { return }
+        let url = storage.fingerprintURL(sessionID: sessionUUID, sha256: fingerprint.sha256, filename: "film.shazamcatalog")
+        try data.write(to: url)
+    }
+
+    private static let fingerprintData = Data((0..<75_000).map { UInt8(truncatingIfNeeded: $0 * 7) })
+    private static let fingerprintSHA = "ABCDEF0123"
+
+    @Test("currentMetadata carries the session fingerprint sha (lowercased) and file size")
+    func metadataCarriesFingerprint() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let metadata = try #require(fixture.coordinator.currentMetadata())
+        #expect(metadata.fingerprintSHA == "abcdef0123")
+        #expect(metadata.fingerprintSize == Self.fingerprintData.count)
+    }
+
+    @Test("currentMetadata has no fingerprint without a sidecar or when the file is missing")
+    func metadataWithoutFingerprint() async throws {
+        let plain = try await makeMultiTrackFixture()
+        defer {
+            plain.coordinator.endSession()
+            try? FileManager.default.removeItem(at: plain.root)
+        }
+        let plainMeta = try #require(plain.coordinator.currentMetadata())
+        #expect(plainMeta.fingerprintSHA == nil)
+        #expect(plainMeta.fingerprintSize == nil)
+        #expect(plain.host.fingerprintChunk(sha256: "abcdef0123", index: 0) == nil)
+
+        let missing = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, nil))
+        defer {
+            missing.coordinator.endSession()
+            try? FileManager.default.removeItem(at: missing.root)
+        }
+        let missingMeta = try #require(missing.coordinator.currentMetadata())
+        #expect(missingMeta.fingerprintSHA == nil)
+        #expect(missing.host.fingerprintChunk(sha256: "abcdef0123", index: 0) == nil)
+    }
+
+    @Test("refreshing the active session picks up a fingerprint added by a catalog sync")
+    func refreshPicksUpFingerprint() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        #expect(fixture.coordinator.currentMetadata()?.fingerprintSHA == nil)
+
+        try Self.writeFingerprint((Self.fingerprintSHA, Self.fingerprintData), storage: fixture.storage, sessionUUID: fixture.sessionUUID)
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+
+        let metadata = try #require(fixture.coordinator.currentMetadata())
+        #expect(metadata.fingerprintSHA == "abcdef0123")
+        #expect(metadata.fingerprintSize == Self.fingerprintData.count)
+    }
+
+    @Test("fingerprintChunk slices the first, middle and last chunk and they reassemble")
+    func fingerprintChunkSlices() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let size = WatchSessionHost.fingerprintChunkSize
+        let first = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 0))
+        let middle = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 1))
+        let last = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 2))
+
+        #expect(first.totalChunks == 3)
+        #expect(first.sha256 == "abcdef0123")
+        #expect(first.index == 0)
+        #expect(first.data == Self.fingerprintData.subdata(in: 0..<size))
+        #expect(middle.index == 1)
+        #expect(middle.data == Self.fingerprintData.subdata(in: size..<(2 * size)))
+        #expect(last.index == 2)
+        #expect(last.data == Self.fingerprintData.subdata(in: (2 * size)..<Self.fingerprintData.count))
+        #expect(first.data + middle.data + last.data == Self.fingerprintData)
+    }
+
+    @Test("fingerprintChunk returns nil for a bad index or an unknown sha")
+    func fingerprintChunkRejectsBadRequests() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: -1) == nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 3) == nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "ffff", index: 0) == nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 0) != nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "ffff", index: 0) == nil)
     }
 
     @Test("dispatch(.switchTrack) updates activeTrackID and snapshot reflects it")

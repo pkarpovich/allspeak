@@ -26,6 +26,8 @@ struct WireProtocolTests {
             revision: 7,
             index: 3
         ),
+        WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 0),
+        WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 33),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()
@@ -189,6 +191,44 @@ struct WireProtocolTests {
         let decoded = try SessionMetadata(propertyList: plist)
         #expect(decoded.tracks.isEmpty)
         #expect(decoded.activeTrackID == nil)
+        #expect(decoded.fingerprintSHA == nil)
+        #expect(decoded.fingerprintSize == nil)
+    }
+
+    @Test("SessionMetadata round-trips the fingerprint fields")
+    func sessionMetadataFingerprintRoundTrip() throws {
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 3,
+            title: "Digger",
+            duration: 7200,
+            cueCount: 1500,
+            isPlaying: true,
+            currentTime: 12,
+            fingerprintSHA: "0f1e2d3c",
+            fingerprintSize: 1_048_576
+        )
+        let decoded = try SessionMetadata(propertyList: try meta.toPropertyList())
+        #expect(decoded == meta)
+        #expect(decoded.fingerprintSHA == "0f1e2d3c")
+        #expect(decoded.fingerprintSize == 1_048_576)
+    }
+
+    @Test("SessionMetadata without a fingerprint round-trips with nil fields")
+    func sessionMetadataWithoutFingerprintRoundTrip() throws {
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "Plain",
+            duration: 100,
+            cueCount: 5,
+            isPlaying: false,
+            currentTime: 0
+        )
+        let decoded = try SessionMetadata(propertyList: try meta.toPropertyList())
+        #expect(decoded == meta)
+        #expect(decoded.fingerprintSHA == nil)
+        #expect(decoded.fingerprintSize == nil)
     }
 
     @Test("SessionMetadata round-trips the serverDate anchor")
@@ -304,6 +344,56 @@ struct WireProtocolTests {
         ]
         #expect(throws: WireCodingError.self) {
             _ = try CueChunkReply(propertyList: plist)
+        }
+    }
+
+    @Test("requestFingerprintChunk payload without sha256 fails to decode")
+    func requestFingerprintChunkMissingSHA() throws {
+        let payload = #"{"kind": "requestFingerprintChunk", "index": 0}"#
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.command.rawValue,
+            WirePayloadKey.payload: Data(payload.utf8),
+        ]
+        #expect(throws: DecodingError.self) {
+            _ = try WatchCommand(propertyList: plist)
+        }
+    }
+
+    @Test("FingerprintChunkReply round-trips via property list with raw Data")
+    func fingerprintChunkReplyRoundTrip() throws {
+        let reply = FingerprintChunkReply(
+            sha256: "deadbeef",
+            index: 4,
+            totalChunks: 35,
+            data: Data((0..<30_000).map { UInt8($0 % 256) })
+        )
+        let plist = reply.toPropertyList()
+        #expect((plist[FingerprintChunkKey.data] as? Data)?.count == 30_000)
+        let decoded = try FingerprintChunkReply(propertyList: plist)
+        #expect(decoded == reply)
+    }
+
+    @Test("FingerprintChunkReply rejects a cue chunk and an empty error reply")
+    func fingerprintChunkReplyRejectsOtherPayloads() throws {
+        let cueChunk = CueChunkReply(sessionID: UUID(), revision: 1, index: 0, totalChunks: 1, data: Data([1]))
+        #expect(throws: WireCodingError.kindMismatch) {
+            _ = try FingerprintChunkReply(propertyList: cueChunk.toPropertyList())
+        }
+        #expect(throws: WireCodingError.kindMismatch) {
+            _ = try FingerprintChunkReply(propertyList: [:])
+        }
+    }
+
+    @Test("FingerprintChunkReply rejects a payload missing the data field")
+    func fingerprintChunkReplyMissingData() throws {
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.fingerprintChunk.rawValue,
+            FingerprintChunkKey.sha256: "deadbeef",
+            FingerprintChunkKey.index: 0,
+            FingerprintChunkKey.totalChunks: 1,
+        ]
+        #expect(throws: WireCodingError.missingPayload) {
+            _ = try FingerprintChunkReply(propertyList: plist)
         }
     }
 

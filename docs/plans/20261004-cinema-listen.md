@@ -259,15 +259,15 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Modify: `AllspeakTests/WireProtocolTests.swift`, `AllspeakTests/WatchSessionHostTests.swift`, `AllspeakTests/WatchSessionClientTests.swift`
 - Create: `AllspeakTests/FingerprintCacheTests.swift`
 
-- [ ] add `fingerprintSHA` / `fingerprintSize` to `SessionMetadata` (`decodeIfPresent`). The coordinator fills them from the session sidecar's fingerprint and the file size on disk. Add `requestFingerprintChunk` and `FingerprintChunkReply`, and update the `WireProtocol.swift` header contract.
-- [ ] phone side: `WatchSessionHost` answers `requestFingerprintChunk` by reading the active session's fingerprint file and replying with the 30 KB slice. An unknown sha or a missing file gets an error reply, never a crash.
-- [ ] watch side: `WatchSessionClient` notices a metadata `fingerprintSHA` that differs from the cached one and pulls chunks 0..<total. It retries on activation or reachability, like cues, and stores the file in `FingerprintCache` (latest only, keyed by sha), exposing `fingerprintURL: URL?` and `hasFingerprint: Bool`.
-- [ ] write tests:
+- [x] add `fingerprintSHA` / `fingerprintSize` to `SessionMetadata` (`decodeIfPresent`). The coordinator fills them from the session sidecar's fingerprint and the file size on disk. Add `requestFingerprintChunk` and `FingerprintChunkReply`, and update the `WireProtocol.swift` header contract.
+- [x] phone side: `WatchSessionHost` answers `requestFingerprintChunk` by reading the active session's fingerprint file and replying with the 30 KB slice. An unknown sha or a missing file gets an error reply, never a crash.
+- [x] watch side: `WatchSessionClient` notices a metadata `fingerprintSHA` that differs from the cached one and pulls chunks 0..<total. It retries on activation or reachability, like cues, and stores the file in `FingerprintCache` (latest only, keyed by sha), exposing `fingerprintURL: URL?` and `hasFingerprint: Bool`.
+- [x] write tests:
   - metadata round-trips with and without the new fields, and old payloads decode;
   - the host chunk reply slices correctly (first, middle and last chunk, bad index);
   - the client assembles the chunks into a file whose sha256 matches;
   - the cache evicts the previous file and survives reload.
-- [ ] run tests - must pass before task 6
+- [x] run tests - must pass before task 6
 
 ### Task 6: Listen orchestration on the phone (start, updates, watch events, apply)
 

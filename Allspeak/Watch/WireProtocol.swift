@@ -29,6 +29,13 @@ import Foundation
 //                                     PlaybackSnapshot. A cache miss on the
 //                                     watch (app reset / Application Support
 //                                     cleanup) or a revision bump re-pulls.
+//   .requestFingerprintChunk(sha256:, watch-initiated pull of one slice of the
+//                            index:)  session's ShazamKit catalog file, keyed
+//                                     by the sha256 announced in metadata. The
+//                                     host replies with a FingerprintChunkReply
+//                                     (or an empty dict for an unknown sha or a
+//                                     missing file); the watch loops
+//                                     0..<totalChunks and caches the file.
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -39,6 +46,10 @@ import Foundation
 //   SessionMetadata.serverDate: Date?     (wall-clock anchor for the watch's
 //                                          progress extrapolation; decodeIfPresent,
 //                                          nil from older builds without an anchor)
+//   SessionMetadata.fingerprintSHA: String?  (sha256 of the session's ShazamKit
+//   SessionMetadata.fingerprintSize: Int?     catalog; decodeIfPresent, nil when
+//                                             the session has none or the build
+//                                             predates cinema listen)
 //
 // Transports (one-way arrows reflect actual reachability semantics):
 //
@@ -60,13 +71,19 @@ import Foundation
 //       Tracks are NOT in the bundle — switching tracks does not invalidate
 //       the cue cache (subtitle timeline is shared across all tracks).
 //
+//   Watch  <--sendMessage (reply)------- iPhone  fingerprint file (chunked)
+//       the same pull as the cue bundle: requestFingerprintChunk(index:) is
+//       answered with a FingerprintChunkReply slice (~30KB raw Data). The watch
+//       concatenates 0..<totalChunks, checks the sha256 and keeps only the
+//       latest file in FingerprintCache (Application Support).
+//
 //   iPhone --sendMessage (no reply)-----> Watch   PlaybackSnapshot
 //       fire-and-forget, 1Hz while reachable + playing; dropped silently
 //       when watch is asleep or out of range
 //
 //   Watch  --sendMessage (with reply)---> iPhone  WatchCommand
 //       reply payload is a PlaybackSnapshot (or a CueChunkReply for
-//       requestCueChunk) so the watch stays fresh after every user action;
+//       requestCueChunk, a FingerprintChunkReply for requestFingerprintChunk) so the watch stays fresh after every user action;
 //       this is the only path that wakes the iOS app from background
 //
 // Wrapper dictionary shape (see WirePayloadKey / WirePayloadKind):
@@ -76,8 +93,9 @@ import Foundation
 // The JSON-inside-Data wrapper exists because WCSession dictionaries are
 // property-list-only (no nested Codable), and a single discriminator key
 // lets the receiver route to the correct decoder without sniffing fields.
-// CueChunkReply does not use this wrapper — it is a flat property-list dict
-// carrying the raw gzipped slice as `Data` (no base64 inflation).
+// CueChunkReply and FingerprintChunkReply do not use this wrapper — they are
+// flat property-list dicts carrying the raw slice as `Data` (no base64
+// inflation).
 //
 // Adding a new command:
 //   1. Add a case to `WatchCommand` + its `Kind` discriminator.
@@ -98,6 +116,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case switchTrack(id: UUID)
     case setVolume(Float)
     case requestCueChunk(sessionID: UUID, revision: Int, index: Int)
+    case requestFingerprintChunk(sha256: String, index: Int)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -108,6 +127,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case sessionID
         case revision
         case index
+        case sha256
     }
 
     private enum Kind: String, Codable {
@@ -119,6 +139,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case switchTrack
         case setVolume
         case requestCueChunk
+        case requestFingerprintChunk
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -147,6 +168,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(sessionID, forKey: .sessionID)
             try container.encode(revision, forKey: .revision)
             try container.encode(index, forKey: .index)
+        case .requestFingerprintChunk(let sha256, let index):
+            try container.encode(Kind.requestFingerprintChunk, forKey: .kind)
+            try container.encode(sha256, forKey: .sha256)
+            try container.encode(index, forKey: .index)
         }
     }
 
@@ -174,6 +199,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 revision: try container.decode(Int.self, forKey: .revision),
                 index: try container.decode(Int.self, forKey: .index)
             )
+        case .requestFingerprintChunk:
+            self = .requestFingerprintChunk(
+                sha256: try container.decode(String.self, forKey: .sha256),
+                index: try container.decode(Int.self, forKey: .index)
+            )
         }
     }
 }
@@ -194,6 +224,8 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let tracks: [TrackInfo]
     let activeTrackID: UUID?
     let serverDate: Date?
+    let fingerprintSHA: String?
+    let fingerprintSize: Int?
 
     init(
         sessionID: UUID,
@@ -205,7 +237,9 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         currentTime: Double,
         tracks: [TrackInfo] = [],
         activeTrackID: UUID? = nil,
-        serverDate: Date? = nil
+        serverDate: Date? = nil,
+        fingerprintSHA: String? = nil,
+        fingerprintSize: Int? = nil
     ) {
         self.sessionID = sessionID
         self.revision = revision
@@ -217,10 +251,13 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.tracks = tracks
         self.activeTrackID = activeTrackID
         self.serverDate = serverDate
+        self.fingerprintSHA = fingerprintSHA
+        self.fingerprintSize = fingerprintSize
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID, serverDate
+        case fingerprintSHA, fingerprintSize
     }
 
     init(from decoder: any Decoder) throws {
@@ -235,6 +272,8 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.tracks = try container.decodeIfPresent([TrackInfo].self, forKey: .tracks) ?? []
         self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
         self.serverDate = try container.decodeIfPresent(Date.self, forKey: .serverDate)
+        self.fingerprintSHA = try container.decodeIfPresent(String.self, forKey: .fingerprintSHA)
+        self.fingerprintSize = try container.decodeIfPresent(Int.self, forKey: .fingerprintSize)
     }
 }
 
@@ -259,6 +298,13 @@ struct CueChunkReply: Equatable, Sendable {
     let data: Data
 }
 
+struct FingerprintChunkReply: Equatable, Sendable {
+    let sha256: String
+    let index: Int
+    let totalChunks: Int
+    let data: Data
+}
+
 enum WirePayloadKey {
     static let payload = "payload"
     static let kind = "kind"
@@ -270,11 +316,19 @@ enum WirePayloadKind: String {
     case metadata
     case sessionEnded
     case cueChunk
+    case fingerprintChunk
 }
 
 enum CueChunkKey {
     static let sessionID = "sessionID"
     static let revision = "revision"
+    static let index = "index"
+    static let totalChunks = "totalChunks"
+    static let data = "data"
+}
+
+enum FingerprintChunkKey {
+    static let sha256 = "sha256"
     static let index = "index"
     static let totalChunks = "totalChunks"
     static let data = "data"
@@ -413,6 +467,32 @@ extension CueChunkReply {
             throw WireCodingError.missingPayload
         }
         self.init(sessionID: sessionID, revision: revision, index: index, totalChunks: totalChunks, data: data)
+    }
+}
+
+extension FingerprintChunkReply {
+    func toPropertyList() -> [String: Any] {
+        [
+            WirePayloadKey.kind: WirePayloadKind.fingerprintChunk.rawValue,
+            FingerprintChunkKey.sha256: sha256,
+            FingerprintChunkKey.index: index,
+            FingerprintChunkKey.totalChunks: totalChunks,
+            FingerprintChunkKey.data: data,
+        ]
+    }
+
+    init(propertyList: [String: Any]) throws {
+        guard (propertyList[WirePayloadKey.kind] as? String) == WirePayloadKind.fingerprintChunk.rawValue else {
+            throw WireCodingError.kindMismatch
+        }
+        guard let sha256 = propertyList[FingerprintChunkKey.sha256] as? String,
+              let index = propertyList[FingerprintChunkKey.index] as? Int,
+              let totalChunks = propertyList[FingerprintChunkKey.totalChunks] as? Int,
+              let data = propertyList[FingerprintChunkKey.data] as? Data
+        else {
+            throw WireCodingError.missingPayload
+        }
+        self.init(sha256: sha256, index: index, totalChunks: totalChunks, data: data)
     }
 }
 
