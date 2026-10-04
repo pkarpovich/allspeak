@@ -284,6 +284,40 @@ struct SessionRepositoryTests {
         #expect(session.value(forKey: "activeTrackID") as? UUID == t2UUID)
     }
 
+    @Test("setHall stores the hall key on the session and hallKey reads it back, nil clears it")
+    func setHallPersists() async throws {
+        let (repo, persistence, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+
+        #expect(try await repo.hallKey(sessionID: id) == nil)
+        try await repo.setHall(sessionID: id, hallKey: "IMAX")
+        persistence.viewContext.refreshAllObjects()
+        #expect(try await repo.hallKey(sessionID: id) == "IMAX")
+
+        try await repo.setHall(sessionID: id, hallKey: nil)
+        persistence.viewContext.refreshAllObjects()
+        #expect(try await repo.hallKey(sessionID: id) == nil)
+    }
+
+    @Test("setHall throws sessionNotFound for a deleted session")
+    func setHallUnknownSession() async throws {
+        let (repo, _, _, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let srcDir = root.appendingPathComponent("inbox", isDirectory: true)
+        let audio = try writeSourceFile(in: srcDir, name: "a.m4a", contents: "a")
+        let srt = try writeSourceFile(in: srcDir, name: "a.srt", contents: "s")
+        let id = try await repo.importSession(name: "S", audioSrc: audio, srtSrc: srt)
+        try await repo.delete(id: id)
+
+        await #expect(throws: SessionRepositoryError.sessionNotFound) {
+            try await repo.setHall(sessionID: id, hallKey: "3")
+        }
+    }
+
     @Test("setActiveTrack throws trackNotFound when UUID is not a track of the session")
     func setActiveTrackUnknown() async throws {
         let (repo, _, _, root) = makeFixture()

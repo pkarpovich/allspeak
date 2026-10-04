@@ -297,16 +297,74 @@ struct PersistenceControllerTests {
         }
     }
 
-    @Test("the current model is v5 and carries no catalog or DTW map attribute")
-    func currentModelIsV5() throws {
+    @Test("the current model is v6: no catalog or DTW map attribute, plus an optional hallKey")
+    func currentModelIsV6() throws {
         let controller = PersistenceController.makeInMemory()
         let entity = try #require(controller.container.managedObjectModel.entitiesByName["Session"])
 
         #expect(entity.attributesByName["catalogFilename"] == nil)
         #expect(entity.attributesByName["dtwMapFilename"] == nil)
+        let hallKey = try #require(entity.attributesByName["hallKey"])
+        #expect(hallKey.isOptional)
+        #expect(hallKey.attributeType == .stringAttributeType)
 
-        let v5 = try versionedModel("Allspeak v5")
-        #expect(controller.container.managedObjectModel.entityVersionHashesByName == v5.entityVersionHashesByName)
+        let v6 = try versionedModel("Allspeak v6")
+        #expect(controller.container.managedObjectModel.entityVersionHashesByName == v6.entityVersionHashesByName)
+    }
+
+    @Test("a v5 SQLite store migrates to the current model with its data intact and hallKey nil")
+    func v5StoreMigratesToCurrentModel() throws {
+        let v5Model = try versionedModel("Allspeak v5")
+        #expect(v5Model.entitiesByName["Session"]?.attributesByName["hallKey"] == nil)
+        let currentModel = PersistenceController.makeInMemory().container.managedObjectModel
+
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("allspeak-migration-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storeURL = dir.appendingPathComponent("Allspeak.sqlite")
+        let sessionID = UUID()
+
+        let v5Coordinator = NSPersistentStoreCoordinator(managedObjectModel: v5Model)
+        try v5Coordinator.addPersistentStore(
+            ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL, options: nil
+        )
+        let v5Context = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        v5Context.persistentStoreCoordinator = v5Coordinator
+        try v5Context.performAndWait {
+            let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: v5Context)
+            session.setValue(sessionID, forKey: "id")
+            session.setValue("Before halls", forKey: "name")
+            session.setValue("a.m4a", forKey: "audioFilename")
+            session.setValue("a.srt", forKey: "srtFilename")
+            session.setValue(42.0, forKey: "lastPositionSeconds")
+            session.setValue(Date(), forKey: "createdAt")
+            try v5Context.save()
+        }
+        for store in v5Coordinator.persistentStores {
+            try v5Coordinator.remove(store)
+        }
+
+        let coordinator = NSPersistentStoreCoordinator(managedObjectModel: currentModel)
+        try coordinator.addPersistentStore(
+            ofType: NSSQLiteStoreType,
+            configurationName: nil,
+            at: storeURL,
+            options: [
+                NSMigratePersistentStoresAutomaticallyOption: true,
+                NSInferMappingModelAutomaticallyOption: true
+            ]
+        )
+        let context = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        context.persistentStoreCoordinator = coordinator
+        try context.performAndWait {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
+            request.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+            let row = try #require(try context.fetch(request).first)
+            #expect(row.value(forKey: "name") as? String == "Before halls")
+            #expect(row.value(forKey: "lastPositionSeconds") as? Double == 42.0)
+            #expect(row.value(forKey: "hallKey") == nil)
+        }
     }
 
     @Test("a v4 SQLite store with catalog and DTW map values migrates to the current model with its data intact")

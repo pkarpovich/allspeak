@@ -25,6 +25,8 @@ enum DiagnosticsEvent: Sendable {
         var trackSHA: String?
         var catalogID: UUID?
         var catalogRev: Int?
+        var hall: String?
+        var hallName: String?
         var app: String
         var build: String
         var device: String
@@ -75,6 +77,8 @@ enum DiagnosticsEvent: Sendable {
             builder.add("trackSHA", header.trackSHA)
             builder.add("catalogID", header.catalogID?.uuidString)
             builder.add("catalogRev", header.catalogRev)
+            builder.add("hall", header.hall)
+            builder.add("hallName", header.hallName)
             builder.add("app", header.app)
             builder.add("build", header.build)
             builder.add("device", header.device)

@@ -492,6 +492,33 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
+    func setHall(sessionID: NSManagedObjectID, hallKey: String?) async throws {
+        let context = persistence.newBackgroundContext()
+        try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            session.setValue(hallKey, forKey: "hallKey")
+            try context.save()
+        }
+    }
+
+    func hallKey(sessionID: NSManagedObjectID) async throws -> String? {
+        let context = persistence.viewContext
+        return try await context.perform {
+            let session: NSManagedObject
+            do {
+                session = try context.existingObject(with: sessionID)
+            } catch {
+                throw SessionRepositoryError.sessionNotFound
+            }
+            return session.value(forKey: "hallKey") as? String
+        }
+    }
+
     func tracks(for sessionID: NSManagedObjectID) async throws -> [TrackSnapshot] {
         let context = persistence.viewContext
         return try await context.perform {

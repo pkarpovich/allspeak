@@ -20,6 +20,8 @@ struct DiagnosticsEventTests {
             trackSHA: "abc123",
             catalogID: catalogID,
             catalogRev: 4,
+            hall: "IMAX",
+            hallName: "IMAX BNP Paribas",
             app: "1.0.0",
             build: "42",
             device: "iPhone17,1",
@@ -87,6 +89,7 @@ struct DiagnosticsEventTests {
             + #""sessionID":"11111111-2222-3333-4444-555555555555","title":"Dune","#
             + #""trackID":"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE","trackLabel":"RU dub","trackFile":"dune-ru.m4a","#
             + #""trackSHA":"abc123","catalogID":"99999999-8888-7777-6666-555555555555","catalogRev":4,"#
+            + #""hall":"IMAX","hallName":"IMAX BNP Paribas","#
             + #""app":"1.0.0","build":"42","device":"iPhone17,1","os":"26.1"}"#
         #expect(DiagnosticsEvent.session(fullHeader()).jsonLine(timestamp: ts) == expected)
     }
@@ -99,6 +102,8 @@ struct DiagnosticsEventTests {
         header.trackSHA = nil
         header.catalogID = nil
         header.catalogRev = nil
+        header.hall = nil
+        header.hallName = nil
         let line = DiagnosticsEvent.session(header).jsonLine(timestamp: ts)
         let object = try decode(line)
         #expect(Set(object.keys) == ["ts", "event", "sessionID", "title", "trackFile", "app", "build", "device", "os"])

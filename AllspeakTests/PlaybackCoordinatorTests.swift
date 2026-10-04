@@ -951,6 +951,86 @@ struct PlaybackCoordinatorTests {
         #expect(header["catalogRev"] as? Int == 7)
     }
 
+    @Test("a hall saved on the session is loaded at start and written into the header")
+    func persistedHallLoadsIntoHeader() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        fixture.coordinator.endSession()
+        try await fixture.repo.setHall(sessionID: fixture.sessionID, hallKey: "IMAX")
+        fixture.persistence.viewContext.refreshAllObjects()
+
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        fixture.coordinator.diagnostics = log
+
+        try await fixture.coordinator.startSession(
+            sessionID: fixture.sessionID,
+            repository: fixture.repo,
+            persistence: fixture.persistence,
+            storage: fixture.storage
+        )
+
+        #expect(fixture.coordinator.selectedHallKey == "IMAX")
+        let headerRecords = try Self.readJSONLines(try #require(log.currentFileURL))
+        let header = try #require(headerRecords.first)
+        #expect(header["event"] as? String == "session")
+        #expect(header["hall"] as? String == "IMAX")
+        #expect(header["hallName"] as? String == "IMAX BNP Paribas")
+    }
+
+    @Test("selectHall saves the hall on the session so the next start picks it up")
+    func selectHallPersistsToSession() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        fixture.coordinator.endSession()
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        fixture.coordinator.diagnostics = log
+
+        try await fixture.coordinator.startSession(
+            sessionID: fixture.sessionID,
+            repository: fixture.repo,
+            persistence: fixture.persistence,
+            storage: fixture.storage
+        )
+        let recordsBefore = try Self.readJSONLines(try #require(log.currentFileURL))
+        let headerBefore = try #require(recordsBefore.first)
+        #expect(headerBefore["hall"] == nil)
+
+        let hall = try #require(Hall.manufaktura.first { $0.key == "4" })
+        fixture.coordinator.selectHall(hall)
+
+        var saved: String?
+        for _ in 0..<50 {
+            fixture.persistence.viewContext.refreshAllObjects()
+            saved = try await fixture.repo.hallKey(sessionID: fixture.sessionID)
+            if saved == "4" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(saved == "4")
+
+        fixture.coordinator.endSession()
+        try await fixture.coordinator.startSession(
+            sessionID: fixture.sessionID,
+            repository: fixture.repo,
+            persistence: fixture.persistence,
+            storage: fixture.storage
+        )
+        #expect(fixture.coordinator.selectedHallKey == "4")
+        let headerRecords = try Self.readJSONLines(try #require(log.currentFileURL))
+        let header = try #require(headerRecords.first)
+        #expect(header["hall"] as? String == "4")
+        #expect(header["hallName"] as? String == "Sala 4 Costa")
+    }
+
     @Test("the session header omits trackSHA but keeps catalog fields when server.json has no entry for the active track")
     func sessionHeaderWithoutSidecarTrackEntry() async throws {
         let fixture = try await Self.makeMultiTrackFixture()
