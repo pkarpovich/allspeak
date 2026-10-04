@@ -171,6 +171,24 @@ final class WatchSessionHost: NSObject {
         send(payload)
         broadcastGate.recordBroadcast(now: now)
     }
+
+    func sendListenUpdate(_ update: ListenUpdate) {
+        let reachable = session?.isReachable ?? false
+        sendListenUpdate(update, isReachable: reachable) { [weak self] payload in
+            guard let session = self?.session, session.activationState == .activated else { return }
+            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+        }
+    }
+
+    func sendListenUpdate(
+        _ update: ListenUpdate,
+        isReachable: Bool,
+        send: ([String: Any]) -> Void
+    ) {
+        guard isReachable else { return }
+        guard let payload = try? update.toPropertyList() else { return }
+        send(payload)
+    }
 }
 
 extension WatchSessionHost: WCSessionDelegate {

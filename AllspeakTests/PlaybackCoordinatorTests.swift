@@ -1454,6 +1454,318 @@ struct PlaybackCoordinatorTests {
         let records = try Self.readAllJSONLines(try #require(log.currentFileURL))
         #expect(records.map { $0["event"] as? String } == ["play"])
     }
+
+    // MARK: - Cinema listen
+
+    private static let listenNow = Date(timeIntervalSince1970: 1_780_000_100)
+    private static let listenLatency = 0.2
+
+    private struct ListenFixture {
+        let coordinator: PlaybackCoordinator
+        let log: DiagnosticsLog
+        let harness: ListenHarness
+        let fingerprintURL: URL?
+        let roots: [URL]
+    }
+
+    private static func makeListenFixture(withFingerprint: Bool) async throws -> ListenFixture {
+        let imported = try await importSession(name: "Listen")
+        let sessionUUID = try #require(
+            imported.persistence.viewContext.existingObject(with: imported.sessionID).value(forKey: "id") as? UUID
+        )
+        var fingerprintURL: URL?
+        if withFingerprint {
+            let sidecar = CatalogSidecar(
+                serverID: UUID(),
+                revision: 2,
+                subtitle: .init(filename: "subs.srt", sha256: "srt-sha"),
+                tracks: [],
+                fingerprint: .init(filename: "film.shazamcatalog", sha256: "abc123")
+            )
+            try sidecar.save(to: imported.storage.sessionDir(for: sessionUUID))
+            let url = imported.storage.fingerprintURL(sessionID: sessionUUID, sha256: "abc123", filename: "film.shazamcatalog")
+            try Data([1, 2, 3]).write(to: url)
+            fingerprintURL = url
+        }
+        let (log, diagRoot) = makeTempDiagnostics()
+        let harness = ListenHarness()
+        let coordinator = PlaybackCoordinator()
+        coordinator.diagnostics = log
+        coordinator.routeReader = { ("BluetoothA2DPOutput", "AirPods", Self.listenLatency) }
+        coordinator.now = { Self.listenNow }
+        coordinator.makeListener = { url in harness.makeListener(url) }
+        coordinator.sendListenUpdate = { update in harness.updates.append(update) }
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+        return ListenFixture(
+            coordinator: coordinator,
+            log: log,
+            harness: harness,
+            fingerprintURL: fingerprintURL,
+            roots: [imported.root, diagRoot]
+        )
+    }
+
+    private static func tearDown(_ fixture: ListenFixture) {
+        fixture.coordinator.endSession()
+        for root in fixture.roots {
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+
+    private static func listenLines(_ log: DiagnosticsLog) throws -> [[String: Any]] {
+        try readJSONLines(try #require(log.currentFileURL)).filter { $0["event"] as? String == "listen" }
+    }
+
+    @Test("startListening logs start, and a phone match logs trackTime, pos, delta and latency")
+    func startListeningLogsStartAndMatch() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.controller?.seek(to: 2.0)
+
+        fixture.coordinator.startListening()
+        let listener = try #require(fixture.harness.listeners.first)
+        let fingerprintURL = try #require(fixture.fingerprintURL)
+        #expect(fixture.harness.catalogURLs == [fingerprintURL])
+
+        let matchDate = Self.listenNow.addingTimeInterval(-0.5)
+        listener.emit(.matched(FingerprintMatch(trackTime: 3.0, matchDate: matchDate, chunkStart: 0)), listenSeconds: 12.5)
+
+        let lines = try Self.listenLines(fixture.log)
+        #expect(lines.count == 2)
+        #expect(lines[0]["source"] as? String == "phone")
+        #expect(lines[0]["phase"] as? String == "start")
+        #expect(lines[0]["trackTime"] == nil)
+        #expect(lines[0]["delta"] == nil)
+
+        #expect(lines[1]["source"] as? String == "phone")
+        #expect(lines[1]["phase"] as? String == "match")
+        #expect(lines[1]["trackTime"] as? Double == 3.0)
+        #expect(lines[1]["pos"] as? Double == 2.0)
+        #expect(lines[1]["delta"] as? Double == 1.5)
+        #expect(lines[1]["latency"] as? Double == Self.listenLatency)
+        #expect(lines[1]["listenSec"] as? Double == 12.5)
+        #expect(lines[1]["chunk"] as? Double == 0)
+    }
+
+    @Test("every phone listener event is pushed to the watch as a ListenUpdate")
+    func phoneEventsProduceListenUpdates() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+
+        fixture.coordinator.startListening()
+        let listener = try #require(fixture.harness.listeners.first)
+        let matchDate = Self.listenNow.addingTimeInterval(-1)
+        listener.emit(.matched(FingerprintMatch(trackTime: 612.5, matchDate: matchDate, chunkStart: 600)), listenSeconds: 20)
+
+        #expect(fixture.harness.updates == [
+            ListenUpdate(source: .phone, phase: .start, listenSeconds: 0),
+            ListenUpdate(source: .phone, phase: .match, trackTime: 612.5, matchDate: matchDate, chunkStart: 600, listenSeconds: 20),
+        ])
+        let payload = try #require(fixture.harness.updates.last).toPropertyList()
+        #expect(payload[WirePayloadKey.kind] as? String == WirePayloadKind.listenUpdate.rawValue)
+    }
+
+    @Test("a terminal phone event frees the listener so the next start creates a new one")
+    func terminalEventAllowsRestart() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+
+        fixture.coordinator.startListening()
+        fixture.coordinator.startListening()
+        #expect(fixture.harness.listeners.count == 1)
+
+        try #require(fixture.harness.listeners.first).emit(.timedOut, listenSeconds: 120)
+        fixture.coordinator.startListening()
+        #expect(fixture.harness.listeners.count == 2)
+
+        let phases = try Self.listenLines(fixture.log).map { $0["phase"] as? String }
+        #expect(phases == ["start", "timeout", "start"])
+    }
+
+    @Test("cancelListening cancels the phone listener and logs cancel")
+    func cancelStopsListener() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+
+        fixture.coordinator.startListening()
+        fixture.coordinator.apply(.cancelListening)
+        let listener = try #require(fixture.harness.listeners.first)
+        #expect(listener.cancelCount == 1)
+
+        let phases = try Self.listenLines(fixture.log).map { $0["phase"] as? String }
+        #expect(phases == ["start", "cancel"])
+        #expect(fixture.harness.updates.map(\.phase) == [.start, .cancel])
+
+        fixture.coordinator.cancelListening()
+        #expect(listener.cancelCount == 1)
+    }
+
+    @Test("endSession cancels an active phone listener")
+    func endSessionCancelsListener() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+
+        fixture.coordinator.apply(.startListening)
+        let listener = try #require(fixture.harness.listeners.first)
+        fixture.coordinator.endSession()
+
+        #expect(listener.cancelCount == 1)
+        #expect(fixture.harness.updates.map(\.phase) == [.start, .cancel])
+    }
+
+    @Test("startListening without a fingerprint logs failed and tells the watch")
+    func startWithoutFingerprintFails() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: false)
+        defer { Self.tearDown(fixture) }
+
+        fixture.coordinator.startListening()
+
+        #expect(fixture.harness.listeners.isEmpty)
+        let lines = try Self.listenLines(fixture.log)
+        #expect(lines.count == 1)
+        #expect(lines.first?["source"] as? String == "phone")
+        #expect(lines.first?["phase"] as? String == "failed")
+        #expect(lines.first?["error"] as? String == "no fingerprint")
+        #expect(fixture.harness.updates == [
+            ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no fingerprint"),
+        ])
+    }
+
+    @Test("startListening without a session does nothing")
+    func startWithoutSessionIsNoOp() {
+        let harness = ListenHarness()
+        let coordinator = PlaybackCoordinator()
+        coordinator.makeListener = { url in harness.makeListener(url) }
+        coordinator.sendListenUpdate = { update in harness.updates.append(update) }
+
+        coordinator.startListening()
+
+        #expect(harness.listeners.isEmpty)
+        #expect(harness.updates.isEmpty)
+    }
+
+    @Test("applySync seeks to trackTime + elapsed + latency and logs apply then a sync seek")
+    func applySyncSeeksToTarget() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+
+        let matchDate = Self.listenNow.addingTimeInterval(-0.5)
+        fixture.coordinator.apply(.applySync(trackTime: 1.0, matchDate: matchDate, source: .watch))
+
+        let controller = try #require(fixture.coordinator.controller)
+        #expect(abs(controller.livePosition - 1.7) < 0.01)
+
+        let records = try Self.readTransportLines(try #require(fixture.log.currentFileURL))
+        #expect(records.count == 2)
+        let apply = try #require(records.first)
+        #expect(apply["event"] as? String == "listen")
+        #expect(apply["phase"] as? String == "apply")
+        #expect(apply["source"] as? String == "watch")
+        #expect(apply["trackTime"] as? Double == 1.0)
+        #expect(apply["pos"] as? Double == 0)
+        #expect(apply["elapsed"] as? Double == 0.5)
+        #expect(apply["latency"] as? Double == Self.listenLatency)
+        #expect(apply["target"] as? Double == 1.7)
+        #expect(apply["delta"] as? Double == 1.5)
+
+        let seek = try #require(records.last)
+        #expect(seek["event"] as? String == "seek")
+        #expect(seek["source"] as? String == "sync")
+        #expect(seek["time"] as? Double == 1.7)
+        #expect(seek["from"] as? Double == 0)
+    }
+
+    @Test("applySync with zero latency targets trackTime + elapsed")
+    func applySyncZeroLatency() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.routeReader = { ("Speaker", "Speaker", 0) }
+
+        fixture.coordinator.applySync(trackTime: 2.0, matchDate: Self.listenNow.addingTimeInterval(-1), source: .phone)
+
+        let logURL = try #require(fixture.log.currentFileURL)
+        let seek = try #require(try Self.readTransportLines(logURL).last)
+        #expect(seek["time"] as? Double == 3.0)
+        #expect(seek["source"] as? String == "sync")
+    }
+
+    @Test("watch listen events are logged with the watch source and not echoed back")
+    func watchListenEventsLogged() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.controller?.seek(to: 1.0)
+
+        let matchDate = Self.listenNow.addingTimeInterval(-2)
+        fixture.coordinator.apply(.listenEvent(ListenUpdate(source: .watch, phase: .start, listenSeconds: 0)))
+        fixture.coordinator.apply(.listenEvent(ListenUpdate(
+            source: .watch,
+            phase: .match,
+            trackTime: 1.5,
+            matchDate: matchDate,
+            chunkStart: 600,
+            listenSeconds: 8
+        )))
+        fixture.coordinator.apply(.listenEvent(ListenUpdate(source: .watch, phase: .interrupted, listenSeconds: 9)))
+        fixture.coordinator.noteWatchListenEvent(ListenUpdate(source: .watch, phase: .failed, listenSeconds: 1, error: "mic permission"))
+
+        let lines = try Self.listenLines(fixture.log)
+        #expect(lines.map { $0["source"] as? String } == ["watch", "watch", "watch", "watch"])
+        #expect(lines.map { $0["phase"] as? String } == ["start", "match", "interrupted", "failed"])
+        #expect(lines[1]["trackTime"] as? Double == 1.5)
+        #expect(lines[1]["pos"] as? Double == 1.0)
+        #expect(lines[1]["delta"] as? Double == 2.5)
+        #expect(lines[1]["chunk"] as? Double == 600)
+        #expect(lines[1]["listenSec"] as? Double == 8)
+        #expect(lines[3]["error"] as? String == "mic permission")
+        #expect(fixture.harness.listeners.isEmpty)
+        #expect(fixture.harness.updates.isEmpty)
+    }
+}
+
+@MainActor
+private final class FakeCinemaListener: CinemaListening {
+    private(set) var cancelCount = 0
+    private var onEvent: (@MainActor (ListenEvent) -> Void)?
+
+    func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
+        self.onEvent = onEvent
+        onEvent(ListenEvent(phase: .started, listenSeconds: 0))
+    }
+
+    func cancel() {
+        cancelCount += 1
+        emit(.cancelled, listenSeconds: 4)
+    }
+
+    func emit(_ phase: ListenEvent.Phase, listenSeconds: Double) {
+        let onEvent = onEvent
+        switch phase {
+        case .started, .noMatch:
+            break
+        case .matched, .timedOut, .cancelled, .interrupted, .failed:
+            self.onEvent = nil
+        }
+        onEvent?(ListenEvent(phase: phase, listenSeconds: listenSeconds))
+    }
+}
+
+@MainActor
+private final class ListenHarness {
+    private(set) var listeners: [FakeCinemaListener] = []
+    private(set) var catalogURLs: [URL] = []
+    var updates: [ListenUpdate] = []
+
+    func makeListener(_ url: URL) -> any CinemaListening {
+        let listener = FakeCinemaListener()
+        listeners.append(listener)
+        catalogURLs.append(url)
+        return listener
+    }
 }
 
 #endif

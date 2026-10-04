@@ -28,6 +28,20 @@ struct WireProtocolTests {
         ),
         WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 0),
         WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 33),
+        WatchCommand.startListening,
+        WatchCommand.cancelListening,
+        WatchCommand.listenEvent(ListenUpdate(source: .watch, phase: .start, listenSeconds: 0)),
+        WatchCommand.listenEvent(ListenUpdate(
+            source: .watch,
+            phase: .match,
+            trackTime: 612.5,
+            matchDate: Date(timeIntervalSince1970: 1_700_000_000.25),
+            chunkStart: 600,
+            listenSeconds: 14.5
+        )),
+        WatchCommand.listenEvent(ListenUpdate(source: .watch, phase: .failed, listenSeconds: 2, error: "mic permission")),
+        WatchCommand.applySync(trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000.25), source: .phone),
+        WatchCommand.applySync(trackTime: 30, matchDate: Date(timeIntervalSince1970: 1_700_000_000), source: .watch),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()
@@ -421,5 +435,69 @@ struct WireProtocolTests {
         ) as? [String: Any]
         let restoredSnapshot = try PlaybackSnapshot(propertyList: try #require(restored))
         #expect(restoredSnapshot == snapshot)
+    }
+
+    private static let listenDate = Date(timeIntervalSince1970: 1_700_000_000.5)
+
+    @Test("ListenUpdate round-trips via property list with and without optional fields", arguments: [
+        ListenUpdate(source: .phone, phase: .start, listenSeconds: 0),
+        ListenUpdate(source: .phone, phase: .match, trackTime: 612.5, matchDate: listenDate, chunkStart: 600, listenSeconds: 23.25),
+        ListenUpdate(source: .phone, phase: .timeout, listenSeconds: 120),
+        ListenUpdate(source: .watch, phase: .failed, listenSeconds: 1, error: "no built-in mic"),
+    ])
+    func listenUpdateRoundTrip(update: ListenUpdate) throws {
+        let plist = try update.toPropertyList()
+        #expect(plist[WirePayloadKey.kind] as? String == WirePayloadKind.listenUpdate.rawValue)
+        #expect(try ListenUpdate(propertyList: plist) == update)
+    }
+
+    @Test("ListenUpdate omits nil optional fields from the JSON payload")
+    func listenUpdateOmitsNilFields() throws {
+        let plist = try ListenUpdate(source: .phone, phase: .cancel, listenSeconds: 3).toPropertyList()
+        let data = try #require(plist[WirePayloadKey.payload] as? Data)
+        let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(json.keys) == ["source", "phase", "listenSeconds"])
+        #expect(json["phase"] as? String == "cancel")
+        #expect(json["source"] as? String == "phone")
+    }
+
+    @Test("ListenUpdate rejects a snapshot payload")
+    func listenUpdateRejectsWrongKind() throws {
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.snapshot.rawValue,
+            WirePayloadKey.payload: Data(),
+        ]
+        #expect(throws: WireCodingError.kindMismatch) {
+            _ = try ListenUpdate(propertyList: plist)
+        }
+    }
+
+    @Test("ListenUpdate maps every listener event to a phase and back", arguments: [
+        ListenEvent(phase: .started, listenSeconds: 0),
+        ListenEvent(phase: .matched(FingerprintMatch(trackTime: 612.5, matchDate: listenDate, chunkStart: 600)), listenSeconds: 12),
+        ListenEvent(phase: .noMatch, listenSeconds: 5),
+        ListenEvent(phase: .timedOut, listenSeconds: 120),
+        ListenEvent(phase: .cancelled, listenSeconds: 7),
+        ListenEvent(phase: .interrupted, listenSeconds: 9),
+        ListenEvent(phase: .failed("mic permission"), listenSeconds: 0),
+    ])
+    func listenUpdateEventMapping(event: ListenEvent) throws {
+        let update = ListenUpdate(source: .watch, event: event)
+        #expect(update.source == .watch)
+        #expect(update.event == event)
+        let decoded = try ListenUpdate(propertyList: try update.toPropertyList())
+        #expect(decoded.event == event)
+    }
+
+    @Test("a match update without trackTime or matchDate has no event")
+    func listenUpdateMatchWithoutFields() {
+        #expect(ListenUpdate(source: .phone, phase: .match, trackTime: 10, listenSeconds: 1).event == nil)
+        #expect(ListenUpdate(source: .phone, phase: .match, matchDate: Self.listenDate, listenSeconds: 1).event == nil)
+    }
+
+    @Test("ListenUpdate phase raw values are the wire strings")
+    func listenUpdatePhaseStrings() {
+        let phases: [ListenUpdate.Phase] = [.start, .match, .nomatch, .timeout, .cancel, .interrupted, .failed]
+        #expect(phases.map(\.rawValue) == ["start", "match", "nomatch", "timeout", "cancel", "interrupted", "failed"])
     }
 }

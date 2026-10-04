@@ -159,11 +159,12 @@ Test command:
 - `WatchCommand`:
   - `.startListening`, `.cancelListening`;
   - `.requestFingerprintChunk(sha256: String, index: Int)`;
-  - `.listenEvent(source: ListenSource, phase: String, trackTime: Double?, matchDate: Date?, listenSeconds: Double)`;
+  - `.listenEvent(ListenUpdate)` (the watch's own phases, source watch);
   - `.applySync(trackTime: Double, matchDate: Date, source: ListenSource)`.
   - `ListenSource` is `phone` / `watch`.
 - `SessionMetadata`: `fingerprintSHA: String?` and `fingerprintSize: Int?`, both `decodeIfPresent`.
-- `WirePayloadKind.listenUpdate` with a JSON `ListenUpdate { source: phone, phase, trackTime?, matchDate?, listenSeconds }` (phone to watch).
+- `WirePayloadKind.listenUpdate` with a JSON `ListenUpdate { source, phase, trackTime?, matchDate?, chunkStart?, listenSeconds, error? }` (phone to watch, source phone). `phase` is a string enum `start|match|nomatch|timeout|cancel|interrupted|failed`. `ListenUpdate(source:event:)` and `ListenUpdate.event` map to and from `ListenEvent`; the watch uses them in task 7.
+- ⚠️ Scope change in task 6: `ListenUpdate` also carries `chunkStart` (so the watch can rebuild a `FingerprintMatch`) and `error` (so a watch `failed` reason reaches the log), and `.listenEvent` carries a `ListenUpdate` instead of separate fields.
 - `FingerprintChunkReply`: a flat property list like `CueChunkReply`, with a 30 KB slice size.
 
 ### Diagnostics
@@ -275,21 +276,22 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Modify: `Allspeak/Watch/WireProtocol.swift`, `Allspeak/Watch/WatchSessionHost.swift`, `Allspeak/Audio/PlaybackCoordinator.swift`
 - Modify: `AllspeakTests/WireProtocolTests.swift`, `AllspeakTests/PlaybackCoordinatorTests.swift`, `AllspeakTests/WatchSessionHostTests.swift`
 
-- [ ] add the commands `.startListening`, `.cancelListening`, `.listenEvent(...)` and `.applySync(...)`, plus the `listenUpdate` kind and the `ListenUpdate` struct. Update the protocol header.
-- [ ] `PlaybackCoordinator`:
+- [x] add the commands `.startListening`, `.cancelListening`, `.listenEvent(...)` and `.applySync(...)`, plus the `listenUpdate` kind and the `ListenUpdate` struct. Update the protocol header.
+- [x] `PlaybackCoordinator`:
   - `startListening()`: no-op without a session or fingerprint (logs `listen failed` with error `no fingerprint`). Otherwise it creates a `PhoneCinemaListener` via an injectable factory, logs `listen start` (source phone), and forwards every phone `ListenEvent` to the log (with `pos` and `delta` computed from `livePosition`) and to the watch as a `ListenUpdate`.
   - `cancelListening()` cancels it.
   - `noteWatchListenEvent(...)` logs the watch phases with source watch.
   - `applySync(trackTime:matchDate:source:)` computes the target with `FingerprintMatch.target` and the current `outputLatency` read through the existing route closure. It logs `listen apply` (target, elapsed, latency, delta, pos), then calls `seek(to: target, source: .sync)`.
-- [ ] route the new commands in `WatchSessionHost.didReceiveMessage` to these methods, and push `ListenUpdate` via `sendMessage` without reply when reachable.
-- [ ] write tests with a fake listener factory:
+- [x] route the new commands in `WatchSessionHost.didReceiveMessage` to these methods, and push `ListenUpdate` via `sendMessage` without reply when reachable.
+- [x] ➕ `endSession()` cancels an active phone listener before the log ends, so the mic and `.playAndRecord` never outlive the session.
+- [x] write tests with a fake listener factory:
   - start logs `start`, and a fake match logs `match` with trackTime, pos and delta;
   - `ListenUpdate` payloads are produced;
   - cancel stops the listener;
   - start without a fingerprint logs `failed`;
   - `applySync` seeks to `trackTime + elapsed + latency` (inject `now` and latency) and the seek line has `source: "sync"`;
   - watch `listenEvent`s are logged with source watch.
-- [ ] run tests - must pass before task 7
+- [x] run tests - must pass before task 7
 
 ### Task 7: Watch listener and listen page state
 

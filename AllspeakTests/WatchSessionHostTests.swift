@@ -590,6 +590,71 @@ struct WatchSessionHostTests {
         #expect(fixture.host.fingerprintChunk(sha256: "ffff", index: 0) == nil)
     }
 
+    @Test("sendListenUpdate pushes a listenUpdate payload only when reachable")
+    func sendListenUpdateRespectsReachability() throws {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let update = ListenUpdate(source: .phone, phase: .match, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000), chunkStart: 600, listenSeconds: 9)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(update, isReachable: false) { sends.append($0) }
+        #expect(sends.isEmpty)
+
+        host.sendListenUpdate(update, isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        let payload = try #require(sends.first)
+        #expect(try ListenUpdate(propertyList: payload) == update)
+    }
+
+    @Test("dispatch routes startListening, cancelListening and applySync to the coordinator")
+    func dispatchRoutesListenCommands() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let listener = HostFakeListener()
+        var catalogURLs: [URL] = []
+        var updates: [ListenUpdate] = []
+        fixture.coordinator.makeListener = { url in
+            catalogURLs.append(url)
+            return listener
+        }
+        fixture.coordinator.sendListenUpdate = { updates.append($0) }
+        fixture.coordinator.routeReader = { ("Speaker", "Speaker", 0) }
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        fixture.coordinator.now = { now }
+
+        _ = await fixture.host.dispatch(.startListening)
+        #expect(listener.startCount == 1)
+        #expect(catalogURLs.map(\.lastPathComponent) == ["fingerprint-abcdef0123-film.shazamcatalog"])
+        #expect(updates.map(\.phase) == [.start])
+
+        _ = await fixture.host.dispatch(.cancelListening)
+        #expect(listener.cancelCount == 1)
+        #expect(updates.map(\.phase) == [.start, .cancel])
+
+        let snapshot = await fixture.host.dispatch(.applySync(trackTime: 1.0, matchDate: now.addingTimeInterval(-1), source: .phone))
+        #expect(abs(snapshot.currentTime - 2.0) < 0.01)
+    }
+
+    @Test("dispatch(.listenEvent) logs the watch phase without starting a phone listener")
+    func dispatchListenEventDoesNotStartListener() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let listener = HostFakeListener()
+        fixture.coordinator.makeListener = { _ in listener }
+        var updates: [ListenUpdate] = []
+        fixture.coordinator.sendListenUpdate = { updates.append($0) }
+
+        _ = await fixture.host.dispatch(.listenEvent(ListenUpdate(source: .watch, phase: .start, listenSeconds: 0)))
+
+        #expect(listener.startCount == 0)
+        #expect(updates.isEmpty)
+    }
+
     @Test("dispatch(.switchTrack) updates activeTrackID and snapshot reflects it")
     func dispatchSwitchTrackUpdatesActive() async throws {
         let fixture = try await makeMultiTrackFixture()
@@ -711,6 +776,26 @@ struct WatchSessionHostTests {
         #expect(sends.count == 1)
     }
 
+}
+
+@MainActor
+private final class HostFakeListener: CinemaListening {
+    private(set) var startCount = 0
+    private(set) var cancelCount = 0
+    private var onEvent: (@MainActor (ListenEvent) -> Void)?
+
+    func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
+        startCount += 1
+        self.onEvent = onEvent
+        onEvent(ListenEvent(phase: .started, listenSeconds: 0))
+    }
+
+    func cancel() {
+        cancelCount += 1
+        let onEvent = onEvent
+        self.onEvent = nil
+        onEvent?(ListenEvent(phase: .cancelled, listenSeconds: 1))
+    }
 }
 
 #endif

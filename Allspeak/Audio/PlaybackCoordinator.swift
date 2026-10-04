@@ -57,6 +57,19 @@ final class PlaybackCoordinator {
     var diagnostics: DiagnosticsLog = .shared
     private var monitor: DiagnosticsMonitor?
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
+    var routeReader: DiagnosticsMonitor.Route = {
+        let session = AVAudioSession.sharedInstance()
+        let output = session.currentRoute.outputs.first
+        return (output?.portType.rawValue ?? "", output?.portName ?? "", session.outputLatency)
+    }
+    var makeListener: @MainActor (URL) -> any CinemaListening = { PhoneCinemaListener(catalogURL: $0) }
+    var sendListenUpdate: @MainActor (ListenUpdate) -> Void = { update in
+        #if os(iOS)
+        WatchSessionHost.shared.sendListenUpdate(update)
+        #endif
+    }
+    var now: () -> Date = { Date() }
+    private var listener: (any CinemaListening)?
 
     init() {}
 
@@ -244,11 +257,7 @@ final class PlaybackCoordinator {
             snapshot: { [weak self] in
                 (self?.controller?.livePosition ?? 0, self?.controller?.isPlayerPlaying ?? false)
             },
-            route: {
-                let session = AVAudioSession.sharedInstance()
-                let output = session.currentRoute.outputs.first
-                return (output?.portType.rawValue ?? "", output?.portName ?? "", session.outputLatency)
-            },
+            route: routeReader,
             log: { [weak self] event in
                 self?.diagnostics.log(event)
             }
@@ -559,6 +568,7 @@ final class PlaybackCoordinator {
     }
 
     func endSession() {
+        cancelListening()
         loadGeneration += 1
         monitor?.stop()
         monitor = nil
@@ -745,6 +755,109 @@ final class PlaybackCoordinator {
             controller.setVolume(value)
         case .requestCueChunk, .requestFingerprintChunk:
             break
+        case .startListening:
+            startListening()
+        case .cancelListening:
+            cancelListening()
+        case .listenEvent(let update):
+            noteWatchListenEvent(update)
+        case .applySync(let trackTime, let matchDate, let source):
+            applySync(trackTime: trackTime, matchDate: matchDate, source: source)
+        }
+    }
+
+    func startListening() {
+        guard controller != nil, listener == nil else { return }
+        guard let fingerprint else {
+            let update = ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no fingerprint")
+            logListen(update)
+            sendListenUpdate(update)
+            return
+        }
+        let listener = makeListener(fingerprint.url)
+        self.listener = listener
+        listener.start { [weak self, weak listener] event in
+            guard let self, let listener, self.listener === listener else { return }
+            self.handlePhoneListenEvent(event)
+        }
+    }
+
+    func cancelListening() {
+        listener?.cancel()
+    }
+
+    func noteWatchListenEvent(_ update: ListenUpdate) {
+        logListen(ListenUpdate(
+            source: .watch,
+            phase: update.phase,
+            trackTime: update.trackTime,
+            matchDate: update.matchDate,
+            chunkStart: update.chunkStart,
+            listenSeconds: update.listenSeconds,
+            error: update.error
+        ))
+    }
+
+    func applySync(trackTime: Double, matchDate: Date, source: ListenSource) {
+        guard let controller else { return }
+        let now = self.now()
+        let latency = routeReader().latency
+        let elapsed = now.timeIntervalSince(matchDate)
+        let pos = controller.livePosition
+        let target = FingerprintMatch.target(trackTime: trackTime, matchDate: matchDate, now: now, outputLatency: latency)
+        diagnostics.log(.listen(DiagnosticsEvent.Listen(
+            source: source,
+            phase: .apply,
+            trackTime: trackTime,
+            pos: pos,
+            delta: trackTime + elapsed - pos,
+            latency: latency,
+            target: target,
+            elapsed: elapsed
+        )))
+        seek(to: target, source: .sync)
+    }
+
+    private func handlePhoneListenEvent(_ event: ListenEvent) {
+        switch event.phase {
+        case .started, .noMatch:
+            break
+        case .matched, .timedOut, .cancelled, .interrupted, .failed:
+            listener = nil
+        }
+        let update = ListenUpdate(source: .phone, event: event)
+        logListen(update)
+        sendListenUpdate(update)
+    }
+
+    private func logListen(_ update: ListenUpdate) {
+        guard let controller else { return }
+        let pos = controller.livePosition
+        var listen = DiagnosticsEvent.Listen(
+            source: update.source,
+            phase: Self.diagnosticsPhase(update.phase),
+            pos: pos,
+            listenSec: update.listenSeconds,
+            chunk: update.chunkStart,
+            error: update.error
+        )
+        if let trackTime = update.trackTime, let matchDate = update.matchDate {
+            listen.trackTime = trackTime
+            listen.delta = trackTime + now().timeIntervalSince(matchDate) - pos
+            listen.latency = routeReader().latency
+        }
+        diagnostics.log(.listen(listen))
+    }
+
+    private static func diagnosticsPhase(_ phase: ListenUpdate.Phase) -> DiagnosticsEvent.ListenPhase {
+        switch phase {
+        case .start: return .start
+        case .match: return .match
+        case .nomatch: return .nomatch
+        case .timeout: return .timeout
+        case .cancel: return .cancel
+        case .interrupted: return .interrupted
+        case .failed: return .failed
         }
     }
 

@@ -36,6 +36,16 @@ import Foundation
 //                                     (or an empty dict for an unknown sha or a
 //                                     missing file); the watch loops
 //                                     0..<totalChunks and caches the file.
+//   .startListening                   start the phone listener for the active
+//                                     session's fingerprint; the phone then
+//                                     pushes ListenUpdates (see below)
+//   .cancelListening                  stop the phone listener
+//   .listenEvent(ListenUpdate)        a phase of the watch's own listener
+//                                     (source watch); the phone only logs it
+//   .applySync(trackTime:,            seek to a match: the phone computes
+//              matchDate:, source:)   trackTime + (now - matchDate) +
+//                                     outputLatency and seeks with the sync
+//                                     source
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -81,6 +91,12 @@ import Foundation
 //       fire-and-forget, 1Hz while reachable + playing; dropped silently
 //       when watch is asleep or out of range
 //
+//   iPhone --sendMessage (no reply)-----> Watch   ListenUpdate
+//       every phase of the phone listener (source phone) after a
+//       startListening; dropped silently when the watch is not reachable.
+//       Optional fields (trackTime, matchDate, chunkStart, error) are omitted
+//       when nil, so older and newer builds decode each other.
+//
 //   Watch  --sendMessage (with reply)---> iPhone  WatchCommand
 //       reply payload is a PlaybackSnapshot (or a CueChunkReply for
 //       requestCueChunk, a FingerprintChunkReply for requestFingerprintChunk) so the watch stays fresh after every user action;
@@ -88,7 +104,7 @@ import Foundation
 //
 // Wrapper dictionary shape (see WirePayloadKey / WirePayloadKind):
 //
-//   ["kind": "<command|snapshot|metadata>", "payload": <Data: JSON>]
+//   ["kind": "<command|snapshot|metadata|listenUpdate>", "payload": <Data: JSON>]
 //
 // The JSON-inside-Data wrapper exists because WCSession dictionaries are
 // property-list-only (no nested Codable), and a single discriminator key
@@ -117,6 +133,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case setVolume(Float)
     case requestCueChunk(sessionID: UUID, revision: Int, index: Int)
     case requestFingerprintChunk(sha256: String, index: Int)
+    case startListening
+    case cancelListening
+    case listenEvent(ListenUpdate)
+    case applySync(trackTime: Double, matchDate: Date, source: ListenSource)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -128,6 +148,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case revision
         case index
         case sha256
+        case update
+        case trackTime
+        case matchDate
+        case source
     }
 
     private enum Kind: String, Codable {
@@ -140,6 +164,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case setVolume
         case requestCueChunk
         case requestFingerprintChunk
+        case startListening
+        case cancelListening
+        case listenEvent
+        case applySync
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -172,6 +200,18 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(Kind.requestFingerprintChunk, forKey: .kind)
             try container.encode(sha256, forKey: .sha256)
             try container.encode(index, forKey: .index)
+        case .startListening:
+            try container.encode(Kind.startListening, forKey: .kind)
+        case .cancelListening:
+            try container.encode(Kind.cancelListening, forKey: .kind)
+        case .listenEvent(let update):
+            try container.encode(Kind.listenEvent, forKey: .kind)
+            try container.encode(update, forKey: .update)
+        case .applySync(let trackTime, let matchDate, let source):
+            try container.encode(Kind.applySync, forKey: .kind)
+            try container.encode(trackTime, forKey: .trackTime)
+            try container.encode(matchDate, forKey: .matchDate)
+            try container.encode(source, forKey: .source)
         }
     }
 
@@ -203,6 +243,18 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .requestFingerprintChunk(
                 sha256: try container.decode(String.self, forKey: .sha256),
                 index: try container.decode(Int.self, forKey: .index)
+            )
+        case .startListening:
+            self = .startListening
+        case .cancelListening:
+            self = .cancelListening
+        case .listenEvent:
+            self = .listenEvent(try container.decode(ListenUpdate.self, forKey: .update))
+        case .applySync:
+            self = .applySync(
+                trackTime: try container.decode(Double.self, forKey: .trackTime),
+                matchDate: try container.decode(Date.self, forKey: .matchDate),
+                source: try container.decode(ListenSource.self, forKey: .source)
             )
         }
     }
@@ -298,6 +350,92 @@ struct CueChunkReply: Equatable, Sendable {
     let data: Data
 }
 
+struct ListenUpdate: Codable, Equatable, Sendable {
+    enum Phase: String, Codable, Sendable {
+        case start
+        case match
+        case nomatch
+        case timeout
+        case cancel
+        case interrupted
+        case failed
+    }
+
+    let source: ListenSource
+    let phase: Phase
+    let trackTime: Double?
+    let matchDate: Date?
+    let chunkStart: Double?
+    let listenSeconds: Double
+    let error: String?
+
+    init(
+        source: ListenSource,
+        phase: Phase,
+        trackTime: Double? = nil,
+        matchDate: Date? = nil,
+        chunkStart: Double? = nil,
+        listenSeconds: Double,
+        error: String? = nil
+    ) {
+        self.source = source
+        self.phase = phase
+        self.trackTime = trackTime
+        self.matchDate = matchDate
+        self.chunkStart = chunkStart
+        self.listenSeconds = listenSeconds
+        self.error = error
+    }
+
+    init(source: ListenSource, event: ListenEvent) {
+        switch event.phase {
+        case .started:
+            self.init(source: source, phase: .start, listenSeconds: event.listenSeconds)
+        case .matched(let match):
+            self.init(
+                source: source,
+                phase: .match,
+                trackTime: match.trackTime,
+                matchDate: match.matchDate,
+                chunkStart: match.chunkStart,
+                listenSeconds: event.listenSeconds
+            )
+        case .noMatch:
+            self.init(source: source, phase: .nomatch, listenSeconds: event.listenSeconds)
+        case .timedOut:
+            self.init(source: source, phase: .timeout, listenSeconds: event.listenSeconds)
+        case .cancelled:
+            self.init(source: source, phase: .cancel, listenSeconds: event.listenSeconds)
+        case .interrupted:
+            self.init(source: source, phase: .interrupted, listenSeconds: event.listenSeconds)
+        case .failed(let message):
+            self.init(source: source, phase: .failed, listenSeconds: event.listenSeconds, error: message)
+        }
+    }
+
+    var event: ListenEvent? {
+        let phase: ListenEvent.Phase
+        switch self.phase {
+        case .start:
+            phase = .started
+        case .match:
+            guard let trackTime, let matchDate else { return nil }
+            phase = .matched(FingerprintMatch(trackTime: trackTime, matchDate: matchDate, chunkStart: chunkStart ?? 0))
+        case .nomatch:
+            phase = .noMatch
+        case .timeout:
+            phase = .timedOut
+        case .cancel:
+            phase = .cancelled
+        case .interrupted:
+            phase = .interrupted
+        case .failed:
+            phase = .failed(error ?? "")
+        }
+        return ListenEvent(phase: phase, listenSeconds: listenSeconds)
+    }
+}
+
 struct FingerprintChunkReply: Equatable, Sendable {
     let sha256: String
     let index: Int
@@ -317,6 +455,7 @@ enum WirePayloadKind: String {
     case sessionEnded
     case cueChunk
     case fingerprintChunk
+    case listenUpdate
 }
 
 enum CueChunkKey {
@@ -438,6 +577,26 @@ extension SessionMetadata {
             throw WireCodingError.missingPayload
         }
         self = try wireJSONDecoder.decode(SessionMetadata.self, from: data)
+    }
+}
+
+extension ListenUpdate {
+    func toPropertyList() throws -> [String: Any] {
+        let data = try wireJSONEncoder.encode(self)
+        return [
+            WirePayloadKey.kind: WirePayloadKind.listenUpdate.rawValue,
+            WirePayloadKey.payload: data,
+        ]
+    }
+
+    init(propertyList: [String: Any]) throws {
+        guard (propertyList[WirePayloadKey.kind] as? String) == WirePayloadKind.listenUpdate.rawValue else {
+            throw WireCodingError.kindMismatch
+        }
+        guard let data = propertyList[WirePayloadKey.payload] as? Data else {
+            throw WireCodingError.missingPayload
+        }
+        self = try wireJSONDecoder.decode(ListenUpdate.self, from: data)
     }
 }
 
