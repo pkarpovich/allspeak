@@ -13,6 +13,8 @@ private enum SHA {
     static let sub2 = String(repeating: "2", count: 64)
     static let clip = String(repeating: "5", count: 64)
     static let clip2 = String(repeating: "6", count: 64)
+    static let fingerprint = String(repeating: "7", count: 64)
+    static let fingerprint2 = String(repeating: "8", count: 64)
 }
 
 private func manifestTrack(
@@ -33,26 +35,35 @@ private func clip(filename: String = "first-line.mp4", sha256: String, size: Int
     CatalogClip(filename: filename, size: size, sha256: sha256, url: URL(string: "https://example.com/\(filename)")!)
 }
 
+private func fingerprint(
+    filename: String = "movie.shazamcatalog", sha256: String, size: Int64 = 11
+) -> CatalogFingerprint {
+    CatalogFingerprint(filename: filename, size: size, sha256: sha256, url: URL(string: "https://example.com/\(filename)")!)
+}
+
 private func manifest(
     serverID: UUID = UUID(), title: String = "The Invite · RU dub", revision: Int,
-    tracks: [CatalogTrack], subtitle sub: CatalogSubtitle, clip: CatalogClip? = nil
+    tracks: [CatalogTrack], subtitle sub: CatalogSubtitle, clip: CatalogClip? = nil,
+    fingerprint: CatalogFingerprint? = nil
 ) -> CatalogSessionDetail {
     CatalogSessionDetail(
         id: serverID, title: title, revision: revision,
         createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 100),
-        tracks: tracks, subtitle: sub, clip: clip, urlsExpireAt: Date(timeIntervalSince1970: 3600)
+        tracks: tracks, subtitle: sub, clip: clip, fingerprint: fingerprint,
+        urlsExpireAt: Date(timeIntervalSince1970: 3600)
     )
 }
 
 private func sidecar(
     serverID: UUID = UUID(), revision: Int, subtitleSHA: String,
-    tracks: [CatalogSidecar.Track], clipSHA: String? = nil
+    tracks: [CatalogSidecar.Track], clipSHA: String? = nil, fingerprintSHA: String? = nil
 ) -> CatalogSidecar {
     CatalogSidecar(
         serverID: serverID, revision: revision,
         subtitle: CatalogSidecar.Subtitle(filename: "movie.srt", sha256: subtitleSHA),
         tracks: tracks,
-        clip: clipSHA.map { CatalogSidecar.Clip(filename: "first-line.mp4", sha256: $0) }
+        clip: clipSHA.map { CatalogSidecar.Clip(filename: "first-line.mp4", sha256: $0) },
+        fingerprint: fingerprintSHA.map { CatalogSidecar.Fingerprint(filename: "movie.shazamcatalog", sha256: $0) }
     )
 }
 
@@ -278,6 +289,86 @@ struct CatalogSyncPlannerTests {
 
         #expect(plan.removeClip)
         #expect(plan.replaceClip == nil)
+        #expect(plan.downloadRequests.isEmpty)
+        #expect(plan.fileRows.map(\.filename) == ["a.m4a", "movie.srt"])
+        #expect(plan.hasChanges)
+    }
+
+    @Test("a revision that only adds a fingerprint plans exactly one fingerprint download and nothing else")
+    func fingerprintAddedPlansReplaceFingerprint() {
+        let sc = sidecar(
+            revision: 1, subtitleSHA: SHA.sub, tracks: [sidecarTrack(sha256: SHA.a, label: "original")], clipSHA: SHA.clip
+        )
+        let m = manifest(revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(sha256: SHA.sub), clip: clip(sha256: SHA.clip), fingerprint: fingerprint(sha256: SHA.fingerprint))
+
+        let plan = SyncPlan(sidecar: sc, manifest: m, currentTitle: Self.title)
+
+        #expect(plan.replaceFingerprint == fingerprint(sha256: SHA.fingerprint))
+        #expect(!plan.removeFingerprint)
+        #expect(plan.replaceClip == nil)
+        #expect(!plan.removeClip)
+        #expect(plan.replaceSubtitle == nil)
+        #expect(plan.addTracks.isEmpty)
+        #expect(plan.removeTrackIDs.isEmpty)
+        #expect(plan.newTitle == nil)
+        #expect(plan.downloadRequests == [CatalogFileRequest(fingerprint: fingerprint(sha256: SHA.fingerprint))])
+        #expect(plan.downloadBytes == 11)
+        #expect(plan.fileRows.map(\.changed) == [false, false, false, true])
+        #expect(plan.fileRows.last == SyncFileRow(filename: "movie.shazamcatalog", size: 11, changed: true))
+        #expect(plan.hasChanges)
+    }
+
+    @Test("a fingerprint with a new sha plans a replaceFingerprint; the same sha plans nothing for it")
+    func fingerprintReplacedOrUnchanged() {
+        let tracks = [manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)]
+        let sc = sidecar(
+            revision: 1, subtitleSHA: SHA.sub, tracks: [sidecarTrack(sha256: SHA.a, label: "original")],
+            fingerprintSHA: SHA.fingerprint
+        )
+
+        let replaced = SyncPlan(
+            sidecar: sc,
+            manifest: manifest(
+                revision: 2, tracks: tracks, subtitle: subtitle(sha256: SHA.sub),
+                fingerprint: fingerprint(sha256: SHA.fingerprint2)
+            ),
+            currentTitle: Self.title
+        )
+        #expect(replaced.replaceFingerprint == fingerprint(sha256: SHA.fingerprint2))
+        #expect(!replaced.removeFingerprint)
+        #expect(replaced.downloadRequests == [CatalogFileRequest(fingerprint: fingerprint(sha256: SHA.fingerprint2))])
+
+        let unchanged = SyncPlan(
+            sidecar: sc,
+            manifest: manifest(
+                revision: 1, tracks: tracks, subtitle: subtitle(sha256: SHA.sub),
+                fingerprint: fingerprint(sha256: SHA.fingerprint.uppercased())
+            ),
+            currentTitle: Self.title
+        )
+        #expect(unchanged.replaceFingerprint == nil)
+        #expect(!unchanged.removeFingerprint)
+        #expect(unchanged.downloadRequests.isEmpty)
+        #expect(unchanged.fileRows.last == SyncFileRow(filename: "movie.shazamcatalog", size: 11, changed: false))
+        #expect(!unchanged.hasChanges)
+    }
+
+    @Test("a fingerprint dropped from the manifest plans a removeFingerprint with no downloads and no row")
+    func fingerprintRemovedPlansRemoveFingerprint() {
+        let sc = sidecar(
+            revision: 1, subtitleSHA: SHA.sub, tracks: [sidecarTrack(sha256: SHA.a, label: "original")],
+            fingerprintSHA: SHA.fingerprint
+        )
+        let m = manifest(revision: 2, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(sha256: SHA.sub))
+
+        let plan = SyncPlan(sidecar: sc, manifest: m, currentTitle: Self.title)
+
+        #expect(plan.removeFingerprint)
+        #expect(plan.replaceFingerprint == nil)
         #expect(plan.downloadRequests.isEmpty)
         #expect(plan.fileRows.map(\.filename) == ["a.m4a", "movie.srt"])
         #expect(plan.hasChanges)
@@ -537,6 +628,105 @@ struct CatalogSyncApplierTests {
         let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
         #expect(updated.clip == nil)
         #expect(updated.clipURL(sessionID: uuid, storage: f.storage) == nil)
+    }
+
+    @Test("a revision that only adds a fingerprint stores it and records it in the sidecar, leaving the rest alone")
+    func fingerprintAddedOnDisk() async throws {
+        let f = makeFixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let serverID = UUID()
+
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.a, filename: "a.m4a", contents: "a")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.sub, filename: "movie.srt", contents: Self.sampleSRT)
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.clip, filename: "first-line.mp4", contents: "clip")
+        let rev1 = manifest(serverID: serverID, revision: 1, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub), clip: clip(sha256: SHA.clip))
+        let sessionID = try await f.importer.run(detail: rev1)
+        let uuid = try await f.repo.sessionUUID(id: sessionID)
+        let sc = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        #expect(sc.fingerprint == nil)
+        let tracksBefore = try await f.repo.tracks(for: sessionID)
+
+        let rev2 = manifest(serverID: serverID, revision: 2, tracks: rev1.tracks,
+                            subtitle: rev1.subtitle, clip: rev1.clip, fingerprint: fingerprint(sha256: SHA.fingerprint))
+        let plan = SyncPlan(sidecar: sc, manifest: rev2, currentTitle: Self.title)
+        #expect(plan.downloadRequests == [CatalogFileRequest(fingerprint: fingerprint(sha256: SHA.fingerprint))])
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.fingerprint, filename: "movie.shazamcatalog", contents: "fp1")
+
+        try await f.applier.apply(plan: plan, detail: rev2, sessionID: sessionID, sidecar: sc)
+
+        let url = f.storage.fingerprintURL(sessionID: uuid, sha256: SHA.fingerprint, filename: "movie.shazamcatalog")
+        #expect(try String(contentsOf: url, encoding: .utf8) == "fp1")
+        let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        #expect(updated.revision == 2)
+        #expect(updated.fingerprint == CatalogSidecar.Fingerprint(filename: "movie.shazamcatalog", sha256: SHA.fingerprint))
+        #expect(updated.fingerprintURL(sessionID: uuid, storage: f.storage) == url)
+        #expect(updated.clip == sc.clip)
+        #expect(updated.clipURL(sessionID: uuid, storage: f.storage) != nil)
+        let tracksAfter = try await f.repo.tracks(for: sessionID)
+        #expect(tracksAfter.map(\.trackID) == tracksBefore.map(\.trackID))
+    }
+
+    @Test("replacing the fingerprint copies the new file, removes the old one, and records it in the sidecar")
+    func fingerprintReplacedOnDisk() async throws {
+        let f = makeFixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let serverID = UUID()
+
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.a, filename: "a.m4a", contents: "a")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.sub, filename: "movie.srt", contents: Self.sampleSRT)
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.fingerprint, filename: "movie.shazamcatalog", contents: "fp1")
+        let rev1 = manifest(serverID: serverID, revision: 1, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub), fingerprint: fingerprint(sha256: SHA.fingerprint))
+        let sessionID = try await f.importer.run(detail: rev1)
+        let uuid = try await f.repo.sessionUUID(id: sessionID)
+        let sc = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        let oldURL = f.storage.fingerprintURL(sessionID: uuid, sha256: SHA.fingerprint, filename: "movie.shazamcatalog")
+        #expect(FileManager.default.fileExists(atPath: oldURL.path))
+
+        let rev2 = manifest(serverID: serverID, revision: 2, tracks: rev1.tracks,
+                            subtitle: rev1.subtitle, fingerprint: fingerprint(sha256: SHA.fingerprint2))
+        let plan = SyncPlan(sidecar: sc, manifest: rev2, currentTitle: Self.title)
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.fingerprint2, filename: "movie.shazamcatalog", contents: "fp2")
+
+        try await f.applier.apply(plan: plan, detail: rev2, sessionID: sessionID, sidecar: sc)
+
+        let newURL = f.storage.fingerprintURL(sessionID: uuid, sha256: SHA.fingerprint2, filename: "movie.shazamcatalog")
+        #expect(try String(contentsOf: newURL, encoding: .utf8) == "fp2")
+        #expect(!FileManager.default.fileExists(atPath: oldURL.path))
+        let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        #expect(updated.fingerprint == CatalogSidecar.Fingerprint(filename: "movie.shazamcatalog", sha256: SHA.fingerprint2))
+        #expect(updated.fingerprintURL(sessionID: uuid, storage: f.storage) == newURL)
+    }
+
+    @Test("dropping the fingerprint removes its file and clears it from the sidecar")
+    func fingerprintRemovedOnDisk() async throws {
+        let f = makeFixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let serverID = UUID()
+
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.a, filename: "a.m4a", contents: "a")
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.sub, filename: "movie.srt", contents: Self.sampleSRT)
+        try stageFile(f.staging, serverID: serverID, sha256: SHA.fingerprint, filename: "movie.shazamcatalog", contents: "fp1")
+        let rev1 = manifest(serverID: serverID, revision: 1, tracks: [
+            manifestTrack(filename: "a.m4a", sha256: SHA.a, label: "original", sortOrder: 0, isDefault: true)
+        ], subtitle: subtitle(filename: "movie.srt", sha256: SHA.sub), fingerprint: fingerprint(sha256: SHA.fingerprint))
+        let sessionID = try await f.importer.run(detail: rev1)
+        let uuid = try await f.repo.sessionUUID(id: sessionID)
+        let sc = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+
+        let rev2 = manifest(serverID: serverID, revision: 2, tracks: rev1.tracks, subtitle: rev1.subtitle)
+        let plan = SyncPlan(sidecar: sc, manifest: rev2, currentTitle: Self.title)
+
+        try await f.applier.apply(plan: plan, detail: rev2, sessionID: sessionID, sidecar: sc)
+
+        let oldURL = f.storage.fingerprintURL(sessionID: uuid, sha256: SHA.fingerprint, filename: "movie.shazamcatalog")
+        #expect(!FileManager.default.fileExists(atPath: oldURL.path))
+        let updated = try CatalogSidecar.load(from: f.storage.sessionDir(for: uuid))
+        #expect(updated.fingerprint == nil)
+        #expect(updated.fingerprintURL(sessionID: uuid, storage: f.storage) == nil)
     }
 
     @Test("adding a track and renaming keeps surviving trackIDs and updates the title")

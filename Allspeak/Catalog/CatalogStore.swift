@@ -176,6 +176,7 @@ extension CatalogSessionDetail {
             .sorted { $0.sortOrder < $1.sortOrder }
             .map(CatalogFileRequest.init(track:))
         let clipRequests = clip.map { [CatalogFileRequest(clip: $0)] } ?? []
-        return trackRequests + [CatalogFileRequest(subtitle: subtitle)] + clipRequests
+        let fingerprintRequests = fingerprint.map { [CatalogFileRequest(fingerprint: $0)] } ?? []
+        return trackRequests + [CatalogFileRequest(subtitle: subtitle)] + clipRequests + fingerprintRequests
     }
 }

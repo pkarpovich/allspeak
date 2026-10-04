@@ -18,18 +18,32 @@ struct CatalogSidecar: Codable, Equatable, Sendable {
         let sha256: String
     }
 
+    struct Fingerprint: Codable, Equatable, Sendable {
+        let filename: String
+        let sha256: String
+    }
+
     let serverID: UUID
     let revision: Int
     let subtitle: Subtitle
     let tracks: [Track]
     let clip: Clip?
+    let fingerprint: Fingerprint?
 
-    init(serverID: UUID, revision: Int, subtitle: Subtitle, tracks: [Track], clip: Clip? = nil) {
+    init(
+        serverID: UUID,
+        revision: Int,
+        subtitle: Subtitle,
+        tracks: [Track],
+        clip: Clip? = nil,
+        fingerprint: Fingerprint? = nil
+    ) {
         self.serverID = serverID
         self.revision = revision
         self.subtitle = subtitle
         self.tracks = tracks
         self.clip = clip
+        self.fingerprint = fingerprint
     }
 
     static let filename = "server.json"
@@ -46,13 +60,20 @@ struct CatalogSidecar: Codable, Equatable, Sendable {
             revision: revision,
             subtitle: subtitle,
             tracks: tracks.filter { liveTrackIDs.contains($0.trackID) },
-            clip: clip
+            clip: clip,
+            fingerprint: fingerprint
         )
     }
 
     func clipURL(sessionID: UUID, storage: DocumentsStorage) -> URL? {
         guard let clip else { return nil }
         let url = storage.clipURL(sessionID: sessionID, sha256: clip.sha256, filename: clip.filename)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func fingerprintURL(sessionID: UUID, storage: DocumentsStorage) -> URL? {
+        guard let fingerprint else { return nil }
+        let url = storage.fingerprintURL(sessionID: sessionID, sha256: fingerprint.sha256, filename: fingerprint.filename)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 

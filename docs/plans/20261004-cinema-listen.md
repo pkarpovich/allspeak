@@ -193,15 +193,15 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Modify: `Allspeak/Catalog/CatalogModels.swift`, `Allspeak/Catalog/SessionDownloader.swift`, `Allspeak/Catalog/CatalogStore.swift`, `Allspeak/Catalog/CatalogImporter.swift`, `Allspeak/Catalog/CatalogSidecar.swift`, `Allspeak/Catalog/CatalogSync.swift`, `Allspeak/Storage/DocumentsStorage.swift`
 - Modify: `AllspeakTests/CatalogClientTests.swift`, `AllspeakTests/CatalogImporterTests.swift`, `AllspeakTests/CatalogSyncTests.swift`, `AllspeakTests/CatalogSidecarTests.swift`, `AllspeakTests/SessionDownloaderTests.swift`
 
-- [ ] add the fingerprint everywhere the clip is handled, following Technical Details. Keep the clip code untouched and add parallel branches, rather than a generic abstraction.
-- [ ] write tests:
+- [x] add the fingerprint everywhere the clip is handled, following Technical Details. Keep the clip code untouched and add parallel branches, rather than a generic abstraction.
+- [x] write tests:
   - a detail with and without `fingerprint` decodes;
   - the downloader requests the fingerprint and remaps its URL after a 403;
   - the importer copies it as `fingerprint-<sha>-<name>` and records it in the sidecar;
   - an old `server.json` without the key still loads;
   - a `SyncPlan` for a revision that only adds a fingerprint plans exactly one add, and the applier downloads and records it;
   - replace and remove cases.
-- [ ] run tests - must pass before task 2
+- [x] run tests - must pass before task 2
 
 ### Task 2: Match core and listener seam
 

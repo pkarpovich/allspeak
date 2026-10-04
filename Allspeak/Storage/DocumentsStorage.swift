@@ -51,6 +51,22 @@ struct DocumentsStorage: Sendable {
         }
     }
 
+    static func fingerprintFilename(sha256: String, originalFilename: String) -> String {
+        "fingerprint-\(sha256.lowercased())-\(originalFilename)"
+    }
+
+    func fingerprintURL(sessionID: UUID, sha256: String, filename: String) -> URL {
+        sessionDir(for: sessionID)
+            .appendingPathComponent(Self.fingerprintFilename(sha256: sha256, originalFilename: filename))
+    }
+
+    func removeFingerprintFile(sessionID: UUID, sha256: String, filename: String) throws {
+        let url = fingerprintURL(sessionID: sessionID, sha256: sha256, filename: filename)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     func removeTrackFile(sessionID: UUID, trackID: UUID, originalFilename: String) throws {
         let url = trackURL(sessionID: sessionID, trackID: trackID, originalFilename: originalFilename)
         if FileManager.default.fileExists(atPath: url.path) {

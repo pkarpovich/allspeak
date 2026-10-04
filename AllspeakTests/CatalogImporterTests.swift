@@ -165,6 +165,39 @@ struct CatalogImporterTests {
         #expect(sidecar.clipURL(sessionID: uuid, storage: storage) == clipURL)
     }
 
+    @Test("copies a manifest fingerprint into the session dir as fingerprint-<sha>-<name> and records it in the sidecar")
+    func importsFingerprint() async throws {
+        let (importer, repo, _, storage, staging, root) = makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let serverID = UUID()
+        let shaFingerprint = String(repeating: "7", count: 64)
+        try stageFile(staging, serverID: serverID, sha256: Self.shaA, filename: "original.m4a", contents: "a")
+        try stageFile(staging, serverID: serverID, sha256: Self.shaSub, filename: "movie.srt", contents: Self.sampleSRT)
+        try stageFile(staging, serverID: serverID, sha256: shaFingerprint, filename: "movie.shazamcatalog", contents: "fp")
+        let manifest = CatalogSessionDetail(
+            id: serverID, title: "The Invite · RU dub", revision: 1,
+            createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 100),
+            tracks: [track(filename: "original.m4a", sha256: Self.shaA, label: "original", sortOrder: 0, isDefault: true)],
+            subtitle: CatalogSubtitle(filename: "movie.srt", size: 5, sha256: Self.shaSub, url: URL(string: "https://example.com/s")!),
+            fingerprint: CatalogFingerprint(
+                filename: "movie.shazamcatalog", size: 2, sha256: shaFingerprint, url: URL(string: "https://example.com/f")!
+            ),
+            urlsExpireAt: Date(timeIntervalSince1970: 3600)
+        )
+
+        let sessionID = try await importer.run(detail: manifest)
+        let uuid = try await repo.sessionUUID(id: sessionID)
+
+        let fingerprintURL = storage.sessionDir(for: uuid)
+            .appendingPathComponent("fingerprint-\(shaFingerprint)-movie.shazamcatalog")
+        #expect(storage.fingerprintURL(sessionID: uuid, sha256: shaFingerprint, filename: "movie.shazamcatalog") == fingerprintURL)
+        #expect(try String(contentsOf: fingerprintURL, encoding: .utf8) == "fp")
+        let sidecar = try CatalogSidecar.load(from: storage.sessionDir(for: uuid))
+        #expect(sidecar.fingerprint == CatalogSidecar.Fingerprint(filename: "movie.shazamcatalog", sha256: shaFingerprint))
+        #expect(sidecar.fingerprintURL(sessionID: uuid, storage: storage) == fingerprintURL)
+        #expect(sidecar.clip == nil)
+    }
+
     @Test("clears the staging directory on a successful import")
     func clearsStagingOnSuccess() async throws {
         let (importer, _, _, _, staging, root) = makeFixture()
