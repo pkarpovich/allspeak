@@ -350,10 +350,10 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 
 ### Task 9: Verify acceptance criteria
 
-- [ ] verify every Overview point and every Technical Details item has a code path and a test.
-- [ ] grep the touched audio-session code for `allowBluetooth` (without `A2DP`): it must not appear.
-- [ ] run the full test suite: the test command above.
-- [ ] build the watch target for the simulator, so the watch-only files compile.
+- [x] verify every Overview point and every Technical Details item has a code path and a test. Mapped: catalog import/sync (`CatalogImporterTests`, `CatalogSyncTests` incl. fingerprint-only revision, `CatalogSidecarTests`, `SessionDownloaderTests`), match core (`FingerprintMatchTests`), diagnostics (`DiagnosticsEventTests`), phone listener and audio session order (`PhoneCinemaListenerTests`), wire and chunked pull (`WireProtocolTests`, `WatchSessionHostTests`, `WatchSessionClientTests`, `FingerprintCacheTests`), orchestration and apply (`PlaybackCoordinatorTests`), page state (`ListenPanelStateTests`). `WatchCinemaListener` and `ListenView` are watch-only (no test target) and covered by the task 8 smoke run.
+- [x] grep the touched audio-session code for `allowBluetooth` (without `A2DP`): it must not appear. Only `.allowBluetoothA2DP` in `PhoneCinemaListener.swift` and its test.
+- [x] run the full test suite: the test command above. 616 tests in 50 suites passed.
+- [x] build the watch target for the simulator, so the watch-only files compile. `AllspeakWatch` for `generic/platform=watchOS Simulator`: BUILD SUCCEEDED.
 
 ### Task 10: [Final] Update documentation
 
