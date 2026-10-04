@@ -93,7 +93,8 @@ import Foundation
 //
 //   iPhone --sendMessage (no reply)-----> Watch   ListenUpdate
 //       every phase of the phone listener (source phone) after a
-//       startListening; dropped silently when the watch is not reachable.
+//       startListening. While the watch is not reachable the latest one is
+//       held and re-sent when it becomes reachable; session end drops it.
 //       Optional fields (trackTime, matchDate, chunkStart, error) are omitted
 //       when nil, so older and newer builds decode each other.
 //

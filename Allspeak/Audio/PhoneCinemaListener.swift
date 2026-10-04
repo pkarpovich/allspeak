@@ -11,7 +11,10 @@ protocol ListeningAudioSession: AnyObject {
 }
 
 protocol ListenCapture: AnyObject {
-    func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) throws
+    func start(
+        onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void,
+        onInterruption: @escaping @MainActor @Sendable () -> Void
+    ) throws
     func stop()
 }
 
@@ -33,8 +36,6 @@ typealias StreamMatcherFactory = @MainActor (URL, @escaping @MainActor @Sendable
 
 @MainActor
 final class PhoneCinemaListener: CinemaListening {
-    static let defaultTimeout: Duration = .seconds(120)
-
     private enum State {
         case idle
         case running
@@ -63,8 +64,8 @@ final class PhoneCinemaListener: CinemaListening {
         audioSession: any ListeningAudioSession = SystemListeningAudioSession(),
         capture: any ListenCapture = EngineInputCapture(),
         makeMatcher: @escaping StreamMatcherFactory = ShazamStreamMatcher.make,
-        timeout: Duration = PhoneCinemaListener.defaultTimeout,
-        requestMicPermission: @escaping @MainActor () async -> Bool = PhoneCinemaListener.requestRecordPermission,
+        timeout: Duration = ListenEvent.timeout,
+        requestMicPermission: @escaping @MainActor () async -> Bool = { await AVAudioApplication.requestRecordPermission() },
         now: @escaping () -> Date = { Date() }
     ) {
         self.catalogURL = catalogURL
@@ -82,6 +83,7 @@ final class PhoneCinemaListener: CinemaListening {
         self.onEvent = onEvent
         startedAt = now()
         emit(.started)
+        startTimeout()
         preparation = Task { [weak self] in
             await self?.prepare()
         }
@@ -131,15 +133,19 @@ final class PhoneCinemaListener: CinemaListening {
         }
 
         do {
-            try capture.start { @Sendable buffer, time in
-                matcher.match(buffer, at: time)
-            }
+            try capture.start(
+                onBuffer: { @Sendable buffer, time in
+                    matcher.match(buffer, at: time)
+                },
+                onInterruption: { [weak self] in
+                    self?.finish(.interrupted)
+                }
+            )
         } catch {
             finish(.failed("capture: \(error.localizedDescription)"))
             return
         }
         captureStarted = true
-        startTimeout()
     }
 
     private func startTimeout() {
@@ -190,10 +196,6 @@ final class PhoneCinemaListener: CinemaListening {
         let listenSeconds = startedAt.map { now().timeIntervalSince($0) } ?? 0
         onEvent?(ListenEvent(phase: phase, listenSeconds: listenSeconds))
     }
-
-    static func requestRecordPermission() async -> Bool {
-        await AVAudioApplication.requestRecordPermission()
-    }
 }
 
 final class SystemListeningAudioSession: ListeningAudioSession {
@@ -230,8 +232,12 @@ final class EngineInputCapture: ListenCapture {
 
     private let engine = AVAudioEngine()
     private var tapInstalled = false
+    private var interruptionObserver: (any NSObjectProtocol)?
 
-    func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) throws {
+    func start(
+        onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void,
+        onInterruption: @escaping @MainActor @Sendable () -> Void
+    ) throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw EngineInputCaptureError.noInputFormat }
@@ -244,13 +250,32 @@ final class EngineInputCapture: ListenCapture {
             stop()
             throw error
         }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { notification in
+            guard Self.isInterruptionBegan(notification) else { return }
+            MainActor.assumeIsolated {
+                onInterruption()
+            }
+        }
     }
 
     func stop() {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+            self.interruptionObserver = nil
+        }
         engine.stop()
         guard tapInstalled else { return }
         engine.inputNode.removeTap(onBus: 0)
         tapInstalled = false
+    }
+
+    private nonisolated static func isInterruptionBegan(_ notification: Notification) -> Bool {
+        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return false }
+        return AVAudioSession.InterruptionType(rawValue: raw) == .began
     }
 
     private nonisolated static func tapBlock(_ onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) -> AVAudioNodeTapBlock {

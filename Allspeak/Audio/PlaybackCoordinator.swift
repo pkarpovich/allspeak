@@ -767,10 +767,14 @@ final class PlaybackCoordinator {
     }
 
     func startListening() {
-        guard controller != nil, listener == nil else { return }
+        guard listener == nil else { return }
+        guard controller != nil else {
+            sendListenUpdate(ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no session"))
+            return
+        }
         guard let fingerprint else {
             let update = ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no fingerprint")
-            logListen(update)
+            logListen(update, source: .phone)
             sendListenUpdate(update)
             return
         }
@@ -787,15 +791,7 @@ final class PlaybackCoordinator {
     }
 
     func noteWatchListenEvent(_ update: ListenUpdate) {
-        logListen(ListenUpdate(
-            source: .watch,
-            phase: update.phase,
-            trackTime: update.trackTime,
-            matchDate: update.matchDate,
-            chunkStart: update.chunkStart,
-            listenSeconds: update.listenSeconds,
-            error: update.error
-        ))
+        logListen(update, source: .watch)
     }
 
     func applySync(trackTime: Double, matchDate: Date, source: ListenSource) {
@@ -826,15 +822,15 @@ final class PlaybackCoordinator {
             listener = nil
         }
         let update = ListenUpdate(source: .phone, event: event)
-        logListen(update)
+        logListen(update, source: .phone)
         sendListenUpdate(update)
     }
 
-    private func logListen(_ update: ListenUpdate) {
+    private func logListen(_ update: ListenUpdate, source: ListenSource) {
         guard let controller else { return }
         let pos = controller.livePosition
         var listen = DiagnosticsEvent.Listen(
-            source: update.source,
+            source: source,
             phase: Self.diagnosticsPhase(update.phase),
             pos: pos,
             listenSec: update.listenSeconds,

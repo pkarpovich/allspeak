@@ -55,7 +55,7 @@ struct ListenPanelState: Equatable, Sendable {
     }
 
     mutating func receive(source: ListenSource, event: ListenEvent, now: Date) {
-        guard status(for: source).isListening else { return }
+        guard accepts(event, from: source) else { return }
         let next = Self.status(for: event.phase, listenSeconds: event.listenSeconds, now: now)
         setStatus(next, for: source)
         guard case .matched(let match) = event.phase, shownMatch == nil else { return }
@@ -65,6 +65,11 @@ struct ListenPanelState: Equatable, Sendable {
     mutating func apply() {
         guard shownMatch != nil else { return }
         applied = true
+    }
+
+    mutating func applyFailed(_ match: ShownMatch) {
+        guard shownMatch == match else { return }
+        applied = false
     }
 
     mutating func dismiss() {
@@ -109,6 +114,13 @@ struct ListenPanelState: Equatable, Sendable {
     static func elapsedText(_ seconds: TimeInterval) -> String {
         let total = max(Int(seconds), 0)
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    private func accepts(_ event: ListenEvent, from source: ListenSource) -> Bool {
+        let current = status(for: source)
+        if current.isListening { return true }
+        guard source == .phone, current == .timedOut, case .matched = event.phase else { return false }
+        return true
     }
 
     private mutating func setStatus(_ status: SourceStatus, for source: ListenSource) {

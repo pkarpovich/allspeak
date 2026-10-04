@@ -18,6 +18,7 @@ final class WatchSessionHost: NSObject {
     // pulling, cached so repeated chunk requests don't re-gzip the bundle.
     private var cueChunkCache: (sessionID: UUID, revision: Int, data: Data)?
     private var fingerprintChunkCache: (sha256: String, data: Data)?
+    private var pendingListenUpdate: ListenUpdate?
 
     init(
         coordinator: PlaybackCoordinator = .shared,
@@ -69,6 +70,7 @@ final class WatchSessionHost: NSObject {
     func broadcastSessionEnded() {
         cueChunkCache = nil
         fingerprintChunkCache = nil
+        pendingListenUpdate = nil
         guard let session, session.activationState == .activated else { return }
         try? session.updateApplicationContext(SessionEndedSignal.propertyList())
     }
@@ -173,11 +175,7 @@ final class WatchSessionHost: NSObject {
     }
 
     func sendListenUpdate(_ update: ListenUpdate) {
-        let reachable = session?.isReachable ?? false
-        sendListenUpdate(update, isReachable: reachable) { [weak self] payload in
-            guard let session = self?.session, session.activationState == .activated else { return }
-            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-        }
+        sendListenUpdate(update, isReachable: isReachable, send: sendListenPayload)
     }
 
     func sendListenUpdate(
@@ -185,9 +183,23 @@ final class WatchSessionHost: NSObject {
         isReachable: Bool,
         send: ([String: Any]) -> Void
     ) {
-        guard isReachable else { return }
+        guard isReachable else {
+            pendingListenUpdate = update
+            return
+        }
+        pendingListenUpdate = nil
         guard let payload = try? update.toPropertyList() else { return }
         send(payload)
+    }
+
+    func resendPendingListenUpdate(isReachable: Bool, send: ([String: Any]) -> Void) {
+        guard let pendingListenUpdate else { return }
+        sendListenUpdate(pendingListenUpdate, isReachable: isReachable, send: send)
+    }
+
+    private func sendListenPayload(_ payload: [String: Any]) {
+        guard let session, session.activationState == .activated else { return }
+        session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
     }
 }
 
@@ -221,6 +233,7 @@ extension WatchSessionHost: WCSessionDelegate {
             } else {
                 self.broadcastSessionEnded()
             }
+            self.resendPendingListenUpdate(isReachable: reachable, send: self.sendListenPayload)
         }
     }
 

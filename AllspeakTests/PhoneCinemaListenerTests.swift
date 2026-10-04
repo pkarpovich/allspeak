@@ -24,13 +24,20 @@ struct PhoneCinemaListenerTests {
         timeout: Duration = .seconds(120),
         permission: Bool = true
     ) -> PhoneCinemaListener {
+        makeListener(timeout: timeout, requestMicPermission: { permission })
+    }
+
+    private func makeListener(
+        timeout: Duration,
+        requestMicPermission: @escaping @MainActor () async -> Bool
+    ) -> PhoneCinemaListener {
         PhoneCinemaListener(
             catalogURL: catalogURL,
             audioSession: audioSession,
             capture: capture,
             makeMatcher: matcherHub.make,
             timeout: timeout,
-            requestMicPermission: { permission },
+            requestMicPermission: requestMicPermission,
             now: clock.now
         )
     }
@@ -53,6 +60,85 @@ struct PhoneCinemaListenerTests {
         #expect(capture.startCount == 1)
         #expect(matcherHub.catalogURLs == [catalogURL])
         #expect(recorder.phases == [.started])
+    }
+
+    @Test("captured buffers are fed to the matcher")
+    func capturedBuffersReachMatcher() async throws {
+        let listener = makeListener()
+        await startListening(listener)
+
+        capture.deliverBuffer()
+        capture.deliverBuffer()
+
+        let matcher = try #require(matcherHub.matcher)
+        #expect(matcher.matchCount == 2)
+    }
+
+    @Test("an audio interruption reports interrupted and restores playback")
+    func interruptionRestoresPlayback() async {
+        let listener = makeListener()
+        await startListening(listener)
+
+        capture.interrupt()
+
+        #expect(recorder.phases == [.started, .interrupted])
+        #expect(audioSession.calls == listeningConfiguration + [.activatePlayback])
+        #expect(capture.stopCount == 1)
+    }
+
+    @Test("the timeout also covers a permission prompt that never answers")
+    func timeoutCoversHungPermission() async {
+        let listener = makeListener(timeout: .milliseconds(20)) {
+            try? await Task.sleep(for: .seconds(10))
+            return true
+        }
+        listener.start(onEvent: recorder.record)
+
+        await eventually { recorder.hasTerminal }
+
+        #expect(recorder.phases == [.started, .timedOut])
+        #expect(audioSession.calls.isEmpty)
+        #expect(capture.startCount == 0)
+    }
+
+    @Test("a setCategory failure reports failed and restores playback")
+    func setCategoryFailureRestoresPlayback() async {
+        audioSession.categoryError = FakeListenError.boom
+        let listener = makeListener()
+        await startListening(listener)
+
+        #expect(recorder.failureMessage?.hasPrefix("audio session") == true)
+        #expect(audioSession.calls == [.activatePlayback])
+        #expect(capture.startCount == 0)
+    }
+
+    @Test("a setActive failure reports failed and restores playback")
+    func setActiveFailureRestoresPlayback() async {
+        audioSession.activeError = FakeListenError.boom
+        let listener = makeListener()
+        await startListening(listener)
+
+        #expect(recorder.failureMessage?.hasPrefix("audio session") == true)
+        #expect(audioSession.calls == [
+            .setCategory(.playAndRecord, .default, [.allowBluetoothA2DP]),
+            .activatePlayback,
+        ])
+        #expect(capture.startCount == 0)
+    }
+
+    @Test("a preferred input failure reports failed and restores playback")
+    func preferredInputFailureRestoresPlayback() async {
+        audioSession.preferredInputError = FakeListenError.boom
+        let listener = makeListener()
+        await startListening(listener)
+
+        #expect(recorder.failureMessage?.hasPrefix("preferred input") == true)
+        #expect(audioSession.calls == [
+            .setCategory(.playAndRecord, .default, [.allowBluetoothA2DP]),
+            .setActive(true),
+            .activatePlayback,
+        ])
+        #expect(capture.startCount == 0)
     }
 
     @Test("a match reports the parsed track time and restores playback")
@@ -242,6 +328,7 @@ private func eventually(_ condition: @MainActor () -> Bool) async {
         if condition() { return }
         try? await Task.sleep(for: .milliseconds(5))
     }
+    Issue.record("condition not met within 1s")
 }
 
 private enum FakeListenError: Error {
@@ -287,16 +374,22 @@ private final class FakeListeningAudioSession: ListeningAudioSession {
 
     var calls: [Call] = []
     var availableInputPorts: [AVAudioSession.Port] = [.bluetoothA2DP, .builtInMic]
+    var categoryError: Error?
+    var activeError: Error?
+    var preferredInputError: Error?
 
     func setCategory(_ category: AVAudioSession.Category, mode: AVAudioSession.Mode, options: AVAudioSession.CategoryOptions) throws {
+        if let categoryError { throw categoryError }
         calls.append(.setCategory(category, mode, options))
     }
 
     func setActive(_ active: Bool) throws {
+        if let activeError { throw activeError }
         calls.append(.setActive(active))
     }
 
     func setPreferredInput(port: AVAudioSession.Port) throws {
+        if let preferredInputError { throw preferredInputError }
         calls.append(.setPreferredInput(port))
     }
 
@@ -309,24 +402,47 @@ private final class FakeListenCapture: ListenCapture {
     var startCount = 0
     var stopCount = 0
     var startError: Error?
+    private var onBuffer: (@Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void)?
+    private var onInterruption: (@MainActor @Sendable () -> Void)?
 
-    func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) throws {
+    func start(
+        onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void,
+        onInterruption: @escaping @MainActor @Sendable () -> Void
+    ) throws {
         if let startError { throw startError }
         startCount += 1
+        self.onBuffer = onBuffer
+        self.onInterruption = onInterruption
     }
 
     func stop() {
         stopCount += 1
     }
+
+    func deliverBuffer() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16)!
+        onBuffer?(buffer, AVAudioTime(sampleTime: 0, atRate: 44_100))
+    }
+
+    @MainActor
+    func interrupt() {
+        onInterruption?()
+    }
 }
 
-private final class FakeStreamMatcher: StreamMatching {
-    func match(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) {}
+private final class FakeStreamMatcher: StreamMatching, @unchecked Sendable {
+    private(set) var matchCount = 0
+
+    func match(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) {
+        matchCount += 1
+    }
 }
 
 @MainActor
 private final class FakeMatcherHub {
     private(set) var catalogURLs: [URL] = []
+    private(set) var matcher: FakeStreamMatcher?
     var makeError: Error?
     private var onOutcome: (@MainActor @Sendable (ListenMatcherOutcome) -> Void)?
 
@@ -337,7 +453,9 @@ private final class FakeMatcherHub {
         if let makeError { throw makeError }
         catalogURLs.append(catalogURL)
         self.onOutcome = onOutcome
-        return FakeStreamMatcher()
+        let matcher = FakeStreamMatcher()
+        self.matcher = matcher
+        return matcher
     }
 
     func deliver(_ outcome: ListenMatcherOutcome) {

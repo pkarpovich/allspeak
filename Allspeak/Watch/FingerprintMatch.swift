@@ -29,6 +29,8 @@ enum ListenSource: String, Codable, Sendable, Equatable {
 }
 
 struct ListenEvent: Equatable, Sendable {
+    static let timeout: Duration = .seconds(120)
+
     enum Phase: Equatable, Sendable {
         case started
         case matched(FingerprintMatch)

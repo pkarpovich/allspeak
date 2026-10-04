@@ -605,6 +605,43 @@ struct WatchSessionHostTests {
         #expect(try ListenUpdate(propertyList: payload) == update)
     }
 
+    @Test("the latest update held back while unreachable is sent once the watch is reachable again")
+    func pendingListenUpdateResentOnReachable() throws {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let started = ListenUpdate(source: .phone, phase: .start, listenSeconds: 0)
+        let matched = ListenUpdate(source: .phone, phase: .match, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000), chunkStart: 600, listenSeconds: 9)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(started, isReachable: false) { sends.append($0) }
+        host.sendListenUpdate(matched, isReachable: false) { sends.append($0) }
+        host.resendPendingListenUpdate(isReachable: false) { sends.append($0) }
+        #expect(sends.isEmpty)
+
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        #expect(try ListenUpdate(propertyList: try #require(sends.first)) == matched)
+
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+    }
+
+    @Test("a delivered update clears the held one and session end drops it")
+    func pendingListenUpdateClearedBySendAndSessionEnd() {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let update = ListenUpdate(source: .phone, phase: .timeout, listenSeconds: 120)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(update, isReachable: false) { sends.append($0) }
+        host.sendListenUpdate(update, isReachable: true) { sends.append($0) }
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+
+        host.sendListenUpdate(update, isReachable: false) { sends.append($0) }
+        host.broadcastSessionEnded()
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+    }
+
     @Test("dispatch routes startListening, cancelListening and applySync to the coordinator")
     func dispatchRoutesListenCommands() async throws {
         let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))

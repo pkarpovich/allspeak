@@ -1612,10 +1612,33 @@ struct PlaybackCoordinatorTests {
 
         fixture.coordinator.apply(.startListening)
         let listener = try #require(fixture.harness.listeners.first)
+        let logURL = try #require(fixture.log.currentFileURL)
         fixture.coordinator.endSession()
 
         #expect(listener.cancelCount == 1)
         #expect(fixture.harness.updates.map(\.phase) == [.start, .cancel])
+        let lines = try Self.readJSONLines(logURL).filter { $0["event"] as? String == "listen" }
+        #expect(lines.map { $0["phase"] as? String } == ["start", "cancel"])
+        #expect(lines.last?["source"] as? String == "phone")
+    }
+
+    @Test("a late event from a replaced phone listener is dropped")
+    func lateEventFromReplacedListenerDropped() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.harness.keepCallbacks = true
+
+        fixture.coordinator.startListening()
+        let first = try #require(fixture.harness.listeners.first)
+        first.emit(.timedOut, listenSeconds: 120)
+        fixture.coordinator.startListening()
+        #expect(fixture.harness.listeners.count == 2)
+
+        first.emit(.matched(FingerprintMatch(trackTime: 3, matchDate: Self.listenNow, chunkStart: 0)), listenSeconds: 121)
+
+        #expect(fixture.harness.updates.map(\.phase) == [.start, .timeout, .start])
+        let phases = try Self.listenLines(fixture.log).map { $0["phase"] as? String }
+        #expect(phases == ["start", "timeout", "start"])
     }
 
     @Test("startListening without a fingerprint logs failed and tells the watch")
@@ -1636,8 +1659,8 @@ struct PlaybackCoordinatorTests {
         ])
     }
 
-    @Test("startListening without a session does nothing")
-    func startWithoutSessionIsNoOp() {
+    @Test("startListening without a session tells the watch it failed")
+    func startWithoutSessionFails() {
         let harness = ListenHarness()
         let coordinator = PlaybackCoordinator()
         coordinator.makeListener = { url in harness.makeListener(url) }
@@ -1646,7 +1669,9 @@ struct PlaybackCoordinatorTests {
         coordinator.startListening()
 
         #expect(harness.listeners.isEmpty)
-        #expect(harness.updates.isEmpty)
+        #expect(harness.updates == [
+            ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no session"),
+        ])
     }
 
     @Test("applySync seeks to trackTime + elapsed + latency and logs apply then a sync seek")
@@ -1730,6 +1755,7 @@ struct PlaybackCoordinatorTests {
 @MainActor
 private final class FakeCinemaListener: CinemaListening {
     private(set) var cancelCount = 0
+    var keepsCallback = false
     private var onEvent: (@MainActor (ListenEvent) -> Void)?
 
     func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
@@ -1748,7 +1774,7 @@ private final class FakeCinemaListener: CinemaListening {
         case .started, .noMatch:
             break
         case .matched, .timedOut, .cancelled, .interrupted, .failed:
-            self.onEvent = nil
+            if !keepsCallback { self.onEvent = nil }
         }
         onEvent?(ListenEvent(phase: phase, listenSeconds: listenSeconds))
     }
@@ -1759,9 +1785,11 @@ private final class ListenHarness {
     private(set) var listeners: [FakeCinemaListener] = []
     private(set) var catalogURLs: [URL] = []
     var updates: [ListenUpdate] = []
+    var keepCallbacks = false
 
     func makeListener(_ url: URL) -> any CinemaListening {
         let listener = FakeCinemaListener()
+        listener.keepsCallback = keepCallbacks
         listeners.append(listener)
         catalogURLs.append(url)
         return listener

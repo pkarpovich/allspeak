@@ -5,8 +5,6 @@ import WatchKit
 
 @MainActor
 final class WatchCinemaListener: CinemaListening {
-    static let defaultTimeout: Duration = .seconds(120)
-
     private enum State {
         case idle
         case running
@@ -14,7 +12,6 @@ final class WatchCinemaListener: CinemaListening {
     }
 
     private let catalogURL: URL
-    private let timeout: Duration
 
     private var state = State.idle
     private var onEvent: (@MainActor (ListenEvent) -> Void)?
@@ -24,9 +21,8 @@ final class WatchCinemaListener: CinemaListening {
     private var timeoutTask: Task<Void, Never>?
     private var resignObserver: (any NSObjectProtocol)?
 
-    init(catalogURL: URL, timeout: Duration = WatchCinemaListener.defaultTimeout) {
+    init(catalogURL: URL) {
         self.catalogURL = catalogURL
-        self.timeout = timeout
     }
 
     func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
@@ -96,9 +92,8 @@ final class WatchCinemaListener: CinemaListening {
     }
 
     private func startTimeout() {
-        let timeout = timeout
         timeoutTask = Task { [weak self] in
-            try? await Task.sleep(for: timeout)
+            try? await Task.sleep(for: ListenEvent.timeout)
             guard !Task.isCancelled else { return }
             self?.finish(.timedOut)
         }

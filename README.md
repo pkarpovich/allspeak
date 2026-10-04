@@ -8,8 +8,8 @@ scrolling subtitle window acts as a visual sync anchor. Tapping any subtitle
 line seeks the audio to that line's timestamp.
 
 The in-cinema experience is fully offline; the only online path is the optional
-Catalog for pulling prepared sessions onto the phone (see below). No offset
-arithmetic, no calibration, no accounts, no onboarding, no settings.
+Catalog for pulling prepared sessions onto the phone (see below). No manual
+offset entry, no calibration, no accounts, no onboarding, no settings.
 
 <p align="center">
   <img src="docs/screenshots/phones.png" width="100%" alt="Catalog, player, and session detail" />
@@ -45,7 +45,7 @@ open Allspeak.xcodeproj
 
 Then in Xcode: pick the `Allspeak` scheme, choose a destination, and build /
 run. There are no third-party Swift packages; all dependencies are system
-frameworks (SwiftUI, AVFoundation, CoreData).
+frameworks (SwiftUI, AVFoundation, CoreData, WatchConnectivity, ShazamKit).
 
 ## Preparing files
 
@@ -138,7 +138,17 @@ no automatic or background listening.
   `trackTime + (now - matchDate) + outputLatency` with the `sync` source.
 - Each listener stops on its first match, after 120 s, or on `Стоп`. The watch
   listener (`SHManagedSession`) also stops as `interrupted` when the watch app
-  leaves the active phase (wrist down).
+  leaves the active phase (wrist down); the phone listener stops as
+  `interrupted` when an audio interruption (a call, Siri) begins.
+- A phone result that arrives while the watch is unreachable (wrist down) is
+  held on the phone and re-sent when the watch becomes reachable again. If the
+  phone never answers, the watch marks it `нет совпадения` 15 s after the
+  phone's own timeout. If `Применить` cannot reach the phone, the card returns
+  so it can be retried.
+- Both apps ask for microphone access the first time `Слушать` is tapped. The
+  phone is usually locked in a pocket at that point, so do the first tap at
+  home with Allspeak open on the phone and grant both prompts. A refused
+  permission shows as `ошибка: mic permission` for that source.
 - The phone listener uses `SHSession` with its own `AVAudioEngine` input tap.
   While listening the audio session is `.playAndRecord` / `.default` with
   options exactly `[.allowBluetoothA2DP]` and the built-in mic as preferred
@@ -268,7 +278,9 @@ from the `ALLSPEAK_CATALOG_URL` / `ALLSPEAK_CATALOG_READ_TOKEN` GitHub secrets.
 Allspeak ships with a companion watchOS app (`AllspeakWatch`) that lets you
 resync subtitles in a cinema without taking the iPhone out of your pocket.
 The watch is a thin remote: it sends commands (play/pause, skip ±1s / ±3s,
-seek-to-cue, set volume) to the iPhone, which remains the audio host.
+seek-to-cue, set volume, start / stop cinema listen) to the iPhone, which
+remains the audio host. During cinema listen the watch also runs its own mic
+listener as a second source.
 
 <p align="center">
   <img src="docs/screenshots/watch.png" width="100%" alt="Apple Watch remote and subtitle river" />
@@ -288,8 +300,9 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
    requires both peers to have been launched by the user before delivery
    starts working.
 4. Open a session on the iPhone. The watch will receive the session
-   metadata via `updateApplicationContext` and the full cue bundle via
-   `transferFile` (gzipped JSON, cached on-watch for restart resilience).
+   metadata via `updateApplicationContext` and pull the full cue bundle in
+   ~30 KB gzipped `sendMessage` chunks (cached on-watch for restart
+   resilience).
 
 ### Usage
 
@@ -363,7 +376,9 @@ the protocol summary.
   only filenames.
 - **Audio**: Single `AVAudioPlayer` per player session, `.playback` category,
   `.spokenAudio` mode. Background audio is permitted via the `audio` entry in
-  `UIBackgroundModes`.
+  `UIBackgroundModes`. While cinema listen runs, the category is temporarily
+  `.playAndRecord` with a separate `AVAudioEngine` input tap, and `.playback` /
+  `.spokenAudio` is restored afterwards (see Cinema listen).
 - **Now Playing**: Lock-screen and Control Center integration via
   `MPNowPlayingInfoCenter` (metadata + elapsed time) and
   `MPRemoteCommandCenter` (play/pause, ±15s skip, scrub). The card and

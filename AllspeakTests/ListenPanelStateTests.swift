@@ -91,9 +91,33 @@ struct ListenPanelStateTests {
     @Test("events for a source that is not listening are ignored")
     func eventsAfterTerminalIgnored() {
         var state = listening()
-        state.receive(source: .phone, event: event(.timedOut), now: start)
+        state.receive(source: .phone, event: event(.failed("boom")), now: start)
         state.receive(source: .phone, event: event(.matched(match(trackTime: 10, at: 1))), now: start)
-        #expect(state.phone == .timedOut)
+        #expect(state.phone == .failed("boom"))
+        #expect(state.shownMatch == nil)
+    }
+
+    @Test("a late phone match after the phone timed out is still shown")
+    func latePhoneMatchAfterTimeoutShown() {
+        var state = listening()
+        state.receive(source: .phone, event: event(.timedOut), now: start)
+        let phoneMatch = match(trackTime: 612.5, at: 4)
+
+        state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
+
+        let shown = ListenPanelState.ShownMatch(source: .phone, match: phoneMatch)
+        #expect(state.phone == .matched(phoneMatch))
+        #expect(state.phase == .match(shown))
+    }
+
+    @Test("a late watch match after the watch timed out is ignored")
+    func lateWatchMatchAfterTimeoutIgnored() {
+        var state = listening()
+        state.receive(source: .watch, event: event(.timedOut), now: start)
+
+        state.receive(source: .watch, event: event(.matched(match(trackTime: 612.5, at: 4))), now: start)
+
+        #expect(state.watch == .timedOut)
         #expect(state.shownMatch == nil)
     }
 
@@ -113,6 +137,32 @@ struct ListenPanelStateTests {
         let shown = ListenPanelState.ShownMatch(source: .phone, match: phoneMatch)
         #expect(state.applied)
         #expect(state.phase == .applied(shown))
+    }
+
+    @Test("a failed apply returns to the match card so it can be retried")
+    func applyFailedReturnsToMatch() {
+        var state = listening()
+        let phoneMatch = match(trackTime: 612.5, at: 4)
+        state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
+        let shown = ListenPanelState.ShownMatch(source: .phone, match: phoneMatch)
+        state.apply()
+
+        state.applyFailed(shown)
+
+        #expect(!state.applied)
+        #expect(state.phase == .match(shown))
+    }
+
+    @Test("a failed apply for a different match is ignored")
+    func applyFailedForOtherMatchIgnored() {
+        var state = listening()
+        let phoneMatch = match(trackTime: 612.5, at: 4)
+        state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
+        state.apply()
+
+        state.applyFailed(ListenPanelState.ShownMatch(source: .watch, match: match(trackTime: 100, at: 1)))
+
+        #expect(state.applied)
     }
 
     @Test("apply without a shown match does nothing")

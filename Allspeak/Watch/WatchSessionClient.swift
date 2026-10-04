@@ -41,7 +41,9 @@ final class WatchSessionClient: NSObject {
 
     @ObservationIgnored var onMetadataChange: (@MainActor (SessionMetadata?) -> Void)?
     @ObservationIgnored var makeListener: (@MainActor (URL) -> any CinemaListening)?
+    @ObservationIgnored var phoneListenTimeout: Duration = ListenEvent.timeout + .seconds(15)
     @ObservationIgnored private var watchListener: (any CinemaListening)?
+    @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
@@ -225,6 +227,9 @@ final class WatchSessionClient: NSObject {
         self.metadata = meta
         let sessionChanged = previous?.sessionID != meta.sessionID
         let revisionChanged = previous?.sessionID == meta.sessionID && previous?.revision != meta.revision
+        if previous != nil, sessionChanged {
+            cancelListening()
+        }
         if sessionChanged || revisionChanged {
             self.lastSnapshot = nil
             self.cueDownload = nil
@@ -432,6 +437,7 @@ final class WatchSessionClient: NSObject {
                 self?.receiveListenEvent(source: .phone, event: ListenEvent(phase: .failed(message), listenSeconds: 0))
             }
         })
+        startPhoneTimeout()
         startWatchListener()
     }
 
@@ -439,6 +445,8 @@ final class WatchSessionClient: NSObject {
         if listenPanel.phone.isListening {
             send(.cancelListening)
         }
+        phoneTimeoutTask?.cancel()
+        phoneTimeoutTask = nil
         watchListener?.cancel()
         watchListener = nil
         listenPanel.dismiss()
@@ -450,7 +458,14 @@ final class WatchSessionClient: NSObject {
             send(.cancelListening)
             receiveListenEvent(source: .phone, event: ListenEvent(phase: .cancelled, listenSeconds: 0))
         }
-        send(.applySync(trackTime: shown.match.trackTime, matchDate: shown.match.matchDate, source: shown.source))
+        phoneTimeoutTask?.cancel()
+        phoneTimeoutTask = nil
+        let command = WatchCommand.applySync(trackTime: shown.match.trackTime, matchDate: shown.match.matchDate, source: shown.source)
+        sendCommand(command, errorHandler: { [weak self] _ in
+            Task { @MainActor in
+                self?.listenPanel.applyFailed(shown)
+            }
+        })
         listenPanel.apply()
         watchListener?.cancel()
         watchListener = nil
@@ -463,8 +478,19 @@ final class WatchSessionClient: NSObject {
         }
         guard let update = try? ListenUpdate(propertyList: payload),
               update.source == .phone,
-              let event = update.event else { return }
+              let event = update.event,
+              event.phase != .cancelled else { return }
         receiveListenEvent(source: .phone, event: event)
+    }
+
+    private func startPhoneTimeout() {
+        phoneTimeoutTask?.cancel()
+        let timeout = phoneListenTimeout
+        phoneTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            self?.receiveListenEvent(source: .phone, event: ListenEvent(phase: .timedOut, listenSeconds: 0))
+        }
     }
 
     private func startWatchListener() {
