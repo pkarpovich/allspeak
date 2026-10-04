@@ -207,19 +207,21 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 - Modify: `Allspeak/Audio/PlaybackCoordinator.swift`
 - Modify: `AllspeakTests/PlaybackCoordinatorTests.swift`
 
-- [ ] in `play()`, `pause()`, `skip(by:source:)` and `seek(to:source:)`, read `controller.currentTime` before acting (`from`) and, for skip, after acting (`to`). For seek, `cue` is the index of the cue in `controller.subtitles` whose `start` equals the target within 0.001 s. Do not add logging to `AudioController`: the existing comment about restore seeks still applies.
-- [ ] after `diagnostics.begin` in both `startSession` overloads, log a `session` header:
+- [x] in `play()`, `pause()`, `skip(by:source:)` and `seek(to:source:)`, read `controller.currentTime` before acting (`from`) and, for skip, after acting (`to`). For seek, `cue` is the index of the cue in `controller.subtitles` whose `start` equals the target within 0.001 s. Do not add logging to `AudioController`: the existing comment about restore seeks still applies.
+- [x] after `diagnostics.begin` in both `startSession` overloads, log a `session` header:
   - session UUID, title, the active track's id, label and filename;
   - `trackSHA`, `catalogID` and `catalogRev` from `CatalogSidecar.load(from:)` for the session directory, matched by `trackID`. Missing or unreadable `server.json` means these fields are omitted, never an error.
   - app version, build, device and OS.
-- [ ] after a successful `switchTrack(to:)`, log `track` with the new track's id, label and position.
-- [ ] write tests:
+- [x] after a successful `switchTrack(to:)`, log `track` with the new track's id, label and position.
+- [x] write tests:
   - a subtitle-tap seek to an exact cue start logs `cue`;
   - a scrub seek to a non-cue time omits it;
   - skip logs `from`/`to` consistent with `seconds` (clamped at 0 and at the duration);
   - the header is the first line and includes the catalog fields when a `server.json` exists in the temp session dir, and omits them when it doesn't;
   - `track` is logged once on a successful switch and not on a failed one.
-- [ ] run tests - must pass before task 4
+- [x] run tests - must pass before task 4
+- ➕ `from` on skip and seek reads `controller.livePosition` (the player's own clock) instead of `currentTime`, which goes stale while backgrounded; `AudioController.skip` adds `seconds` to that same clock, so `to - from == seconds` holds unless clamped
+- ➕ the header's `trackFile` falls back to the session's `audioFilename` when the session has no tracks; the lightweight overload writes `audio.lastPathComponent` and no catalog fields
 
 ### Task 4: DiagnosticsMonitor (heartbeat, route changes, interruptions)
 

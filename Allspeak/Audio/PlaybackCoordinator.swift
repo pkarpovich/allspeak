@@ -1,6 +1,7 @@
 import AVFAudio
 import CoreData
 import Foundation
+import UIKit
 
 // Owns the iPhone-side audio session lifecycle and broadcasts state to the
 // paired watch app (via `WatchSessionHost`). Lock-screen / Dynamic Island
@@ -177,9 +178,50 @@ final class PlaybackCoordinator {
         self.persistence = persistence
         self.revision += 1
         diagnostics.begin(filmTitle: snap.name)
+        diagnostics.log(.session(Self.sessionHeader(
+            sessionID: snap.uuid,
+            title: snap.name,
+            trackID: selectedTrack?.trackID,
+            trackLabel: selectedTrack?.label,
+            trackFile: selectedTrack?.filename ?? snap.audioFilename,
+            sidecar: try? CatalogSidecar.load(from: dir)
+        )))
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
+    }
+
+    private static func sessionHeader(
+        sessionID: UUID,
+        title: String,
+        trackID: UUID?,
+        trackLabel: String?,
+        trackFile: String,
+        sidecar: CatalogSidecar?
+    ) -> DiagnosticsEvent.SessionHeader {
+        let info = Bundle.main.infoDictionary ?? [:]
+        return DiagnosticsEvent.SessionHeader(
+            sessionID: sessionID,
+            title: title,
+            trackID: trackID,
+            trackLabel: trackLabel,
+            trackFile: trackFile,
+            trackSHA: sidecar?.tracks.first { $0.trackID == trackID }?.sha256,
+            catalogID: sidecar?.serverID,
+            catalogRev: sidecar?.revision,
+            app: info["CFBundleShortVersionString"] as? String ?? "",
+            build: info["CFBundleVersion"] as? String ?? "",
+            device: deviceModel(),
+            os: UIDevice.current.systemVersion
+        )
+    }
+
+    private static func deviceModel() -> String {
+        var system = utsname()
+        uname(&system)
+        return withUnsafeBytes(of: system.machine) { bytes in
+            String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+        }
     }
 
     private static func resolveTrackURL(
@@ -222,6 +264,14 @@ final class PlaybackCoordinator {
         self.activeTrackID = nil
         self.revision += 1
         diagnostics.begin(filmTitle: title)
+        diagnostics.log(.session(Self.sessionHeader(
+            sessionID: sessionUUID,
+            title: title,
+            trackID: nil,
+            trackLabel: nil,
+            trackFile: audio.lastPathComponent,
+            sidecar: nil
+        )))
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -413,6 +463,7 @@ final class PlaybackCoordinator {
         if wasPlaying {
             controller.play()
         }
+        diagnostics.log(.track(trackID: trackID, trackLabel: track.label, pos: controller.currentTime))
         if let repository, let sessionID {
             try? await repository.setActiveTrack(sessionID: sessionID, trackID: trackID)
         }
@@ -566,16 +617,17 @@ final class PlaybackCoordinator {
 
     func skip(by seconds: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
-        let from = controller.currentTime
+        let from = controller.livePosition
         controller.skip(by: seconds)
         diagnostics.log(.skip(seconds: seconds, source: source, from: from, to: controller.currentTime))
     }
 
     func seek(to time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
-        let from = controller.currentTime
+        let from = controller.livePosition
+        let cue = controller.subtitles.firstIndex { abs($0.start - time) <= 0.001 }
         controller.seek(to: time)
-        diagnostics.log(.seek(time: time, source: source, from: from, cue: nil))
+        diagnostics.log(.seek(time: time, source: source, from: from, cue: cue))
     }
 
     func apply(_ command: WatchCommand) {
