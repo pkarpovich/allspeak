@@ -308,8 +308,8 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 
 ### Task 8: [Final] Update documentation
 
-- [ ] update `README.md` "Session diagnostics": list the event types, the hall picker and the 365-day retention.
-- [ ] move this plan to `docs/plans/completed/`.
+- [x] update `README.md` "Session diagnostics": list the event types, the hall picker and the 365-day retention.
+- [x] move this plan to `docs/plans/completed/`.
 
 ## Post-Completion
 
