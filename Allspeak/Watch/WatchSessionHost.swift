@@ -174,6 +174,7 @@ extension WatchSessionHost: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let reachable = session.isReachable
         Task { @MainActor in
+            self.coordinator.noteWatchReachable(reachable)
             guard reachable else { return }
             if let metadata = self.coordinator.currentMetadata() {
                 self.broadcast(metadata: metadata)

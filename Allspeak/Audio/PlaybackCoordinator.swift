@@ -653,6 +653,16 @@ final class PlaybackCoordinator {
         diagnostics.log(.seek(time: time, source: source, from: from, cue: cue))
     }
 
+    func noteAppState(foreground: Bool) {
+        guard let controller else { return }
+        diagnostics.log(.app(state: foreground ? .foreground : .background, pos: controller.livePosition))
+    }
+
+    func noteWatchReachable(_ reachable: Bool) {
+        guard let controller else { return }
+        diagnostics.log(.watch(reachable: reachable, pos: controller.livePosition))
+    }
+
     func apply(_ command: WatchCommand) {
         guard let controller else { return }
         switch command {

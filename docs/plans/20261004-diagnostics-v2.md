@@ -253,14 +253,16 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 - Modify: `Allspeak/Watch/WatchSessionHost.swift`
 - Modify: `AllspeakTests/PlaybackCoordinatorTests.swift`
 
-- [ ] add coordinator methods:
+- [x] add coordinator methods:
   - `noteAppState(foreground: Bool)` logs `app` with the position;
   - `noteWatchReachable(_ reachable: Bool)` logs `watch` with the position;
   - both do nothing when no session is active.
-- [ ] call `noteAppState` from `RootView`'s existing `scenePhase` handler (`.active` means foreground, `.background` means background; ignore `.inactive`).
-- [ ] call `noteWatchReachable` from `WatchSessionHost.sessionReachabilityDidChange`, hopping to MainActor the same way the file already does for other delegate callbacks.
-- [ ] write tests: both methods log with a session active and log nothing without one.
-- [ ] run tests - must pass before task 6
+- [x] call `noteAppState` from `RootView`'s existing `scenePhase` handler (`.active` means foreground, `.background` means background; ignore `.inactive`).
+- [x] call `noteWatchReachable` from `WatchSessionHost.sessionReachabilityDidChange`, hopping to MainActor the same way the file already does for other delegate callbacks.
+- [x] write tests: both methods log with a session active and log nothing without one.
+- [x] run tests - must pass before task 6
+- ➕ both methods log `controller.livePosition` (like the monitor), since `currentTime` goes stale while the app is backgrounded
+- ➕ the "no session" test begins the log directly with no controller, so it proves the coordinator guard rather than relying on a closed log
 
 ### Task 6: Hall list and hall picker in the player
 

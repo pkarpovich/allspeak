@@ -1099,6 +1099,60 @@ struct PlaybackCoordinatorTests {
         try await Task.sleep(for: .milliseconds(50))
         #expect(try Self.overrideRouteLines(url).count == 1)
     }
+
+    @Test("app state and watch reachability changes are logged with the position during a session")
+    func activeSessionLogsAppAndWatchEvents() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Lifecycle", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 1.5)
+        coordinator.noteAppState(foreground: false)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteWatchReachable(false)
+        coordinator.noteWatchReachable(true)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL)).filter {
+            ["app", "watch"].contains($0["event"] as? String ?? "")
+        }
+        #expect(records.map { $0["event"] as? String } == ["app", "app", "watch", "watch"])
+        #expect(records.map { $0["state"] as? String } == ["background", "foreground", nil, nil])
+        #expect(records.map { $0["reachable"] as? Int } == [nil, nil, 0, 1])
+        #expect(records.allSatisfy { $0["pos"] as? Double == 1.5 })
+    }
+
+    @Test("app state and watch reachability changes log nothing without an active session")
+    func idleCoordinatorLogsNoAppOrWatchEvents() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            log.end()
+            coordinator.diagnostics = .shared
+        }
+
+        log.begin(filmTitle: "Idle")
+        log.log(.play(pos: 0))
+        coordinator.noteAppState(foreground: false)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteWatchReachable(true)
+
+        let records = try Self.readAllJSONLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["event"] as? String } == ["play"])
+    }
 }
 
 #endif
