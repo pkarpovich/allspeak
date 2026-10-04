@@ -214,6 +214,22 @@ struct DocumentsStorageTests {
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.shazamcatalog").path) == false)
     }
 
+    @Test("removeLegacySyncFiles keeps the catalog-import fingerprint")
+    func removeLegacySyncFilesKeepsFingerprint() throws {
+        let (storage, root) = makeTempStorage()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let dir = storage.sessionDir(for: id)
+        let fingerprint = DocumentsStorage.fingerprintFilename(sha256: "abc", originalFilename: "movie.shazamcatalog")
+        _ = try writeFile(in: dir, name: fingerprint, contents: "fingerprint")
+        _ = try writeFile(in: dir, name: "Masters.shazamcatalog", contents: "catalog")
+
+        storage.removeLegacySyncFiles()
+
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent(fingerprint).path))
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Masters.shazamcatalog").path) == false)
+    }
+
     @Test("removeLegacySyncFiles is a no-op when there are no sessions")
     func removeLegacySyncFilesNoSessions() {
         let (storage, root) = makeTempStorage()

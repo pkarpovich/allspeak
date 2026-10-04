@@ -91,7 +91,8 @@ struct DocumentsStorage: Sendable {
     // Sessions imported by a pre-v5 build copied a ShazamKit catalog and a DTW map
     // into their session dir. The v5 model drops the columns that named them, so
     // nothing references the files any more and only the suffix identifies them.
-    // `server.json` (the catalog-import sidecar) does not match either suffix.
+    // `server.json` (the catalog-import sidecar) does not match either suffix, and
+    // the catalog-import fingerprint is kept by its `fingerprint-` prefix.
     static let legacySyncFileSuffixes = [".shazamcatalog", ".dtwmap.json"]
 
     func removeLegacySyncFiles() {
@@ -112,7 +113,8 @@ struct DocumentsStorage: Sendable {
     }
 
     static func isLegacySyncFile(_ filename: String) -> Bool {
-        legacySyncFileSuffixes.contains { filename.hasSuffix($0) }
+        guard !filename.hasPrefix("fingerprint-") else { return false }
+        return legacySyncFileSuffixes.contains { filename.hasSuffix($0) }
     }
 
     func removeSessionDir(_ id: UUID) throws {
