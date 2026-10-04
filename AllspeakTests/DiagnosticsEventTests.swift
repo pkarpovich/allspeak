@@ -208,4 +208,84 @@ struct DiagnosticsEventTests {
         #expect(object["hall"] as? String == "3")
         #expect(object["pos"] as? Double == 42.5)
     }
+
+    @Test("listen omits every optional key when nil", arguments: [
+        (DiagnosticsEvent.ListenPhase.start, "start"),
+        (.match, "match"),
+        (.nomatch, "nomatch"),
+        (.timeout, "timeout"),
+        (.cancel, "cancel"),
+        (.interrupted, "interrupted"),
+        (.failed, "failed"),
+        (.apply, "apply"),
+    ])
+    func listenMinimal(phase: DiagnosticsEvent.ListenPhase, text: String) {
+        #expect(
+            DiagnosticsEvent.listen(.init(source: .watch, phase: phase)).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"listen","source":"watch","phase":""# + text + #""}"#
+        )
+    }
+
+    @Test("listen start logs source and position")
+    func listenStart() {
+        #expect(
+            DiagnosticsEvent.listen(.init(source: .phone, phase: .start, pos: 1200.5)).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"listen","source":"phone","phase":"start","pos":1200.5}"#
+        )
+    }
+
+    @Test("listen match logs track time, position, delta, latency, listen time and chunk")
+    func listenMatch() {
+        let event = DiagnosticsEvent.listen(.init(
+            source: .phone,
+            phase: .match,
+            trackTime: 1212.5,
+            pos: 1210.1234,
+            delta: 2.4004,
+            latency: 0.16,
+            listenSec: 23.5,
+            chunk: 1140
+        ))
+        #expect(
+            event.jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"listen","source":"phone","phase":"match","#
+                + #""trackTime":1212.5,"pos":1210.123,"delta":2.4,"latency":0.16,"listenSec":23.5,"chunk":1140}"#
+        )
+    }
+
+    @Test("listen apply carries target and elapsed")
+    func listenApply() throws {
+        let event = DiagnosticsEvent.listen(.init(
+            source: .watch,
+            phase: .apply,
+            trackTime: 600,
+            pos: 597.5,
+            delta: 3.5,
+            latency: 0.2,
+            target: 604.2,
+            elapsed: 4
+        ))
+        let object = try decode(event.jsonLine(timestamp: ts))
+        #expect(Set(object.keys) == ["ts", "event", "source", "phase", "trackTime", "pos", "delta", "latency", "target", "elapsed"])
+        #expect(object["target"] as? Double == 604.2)
+        #expect(object["elapsed"] as? Double == 4)
+        #expect(object["phase"] as? String == "apply")
+    }
+
+    @Test("listen failed logs the error escaped")
+    func listenFailed() throws {
+        let line = DiagnosticsEvent.listen(.init(source: .watch, phase: .failed, listenSec: 0, error: #"mic "denied""#))
+            .jsonLine(timestamp: ts)
+        #expect(line == #"{"ts":"2026-06-12T19:43:02.000Z","event":"listen","source":"watch","phase":"failed","listenSec":0,"error":"mic \"denied\""}"#)
+        let object = try decode(line)
+        #expect(object["error"] as? String == #"mic "denied""#)
+    }
+
+    @Test("seek from sync writes the sync source")
+    func seekFromSync() {
+        #expect(
+            DiagnosticsEvent.seek(time: 604.2, source: .sync, from: 600, cue: nil).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"seek","time":604.2,"source":"sync","from":600}"#
+        )
+    }
 }

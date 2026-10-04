@@ -225,9 +225,9 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Modify: `Allspeak/Diagnostics/DiagnosticsEvent.swift`
 - Modify: `AllspeakTests/DiagnosticsEventTests.swift`
 
-- [ ] add `Source.sync` and the `listen(...)` case with the keys from Technical Details. Optional keys are omitted when nil.
-- [ ] write tests: each phase serializes with the expected keys; `apply` carries `target` and `elapsed`; a seek with source `sync` writes `"source":"sync"`.
-- [ ] run tests - must pass before task 4
+- [x] add `Source.sync` and the `listen(...)` case with the keys from Technical Details. Optional keys are omitted when nil.
+- [x] write tests: each phase serializes with the expected keys; `apply` carries `target` and `elapsed`; a seek with source `sync` writes `"source":"sync"`.
+- [x] run tests - must pass before task 4
 
 ### Task 4: Phone listener
 
