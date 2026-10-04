@@ -546,13 +546,13 @@ final class PlaybackCoordinator {
     func play() {
         guard let controller else { return }
         controller.play()
-        diagnostics.log(.play)
+        diagnostics.log(.play(pos: controller.currentTime))
     }
 
     func pause() {
         guard let controller else { return }
         controller.pause()
-        diagnostics.log(.pause)
+        diagnostics.log(.pause(pos: controller.currentTime))
     }
 
     func togglePlayPause() {
@@ -566,14 +566,16 @@ final class PlaybackCoordinator {
 
     func skip(by seconds: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
+        let from = controller.currentTime
         controller.skip(by: seconds)
-        diagnostics.log(.skip(seconds: seconds, source: source))
+        diagnostics.log(.skip(seconds: seconds, source: source, from: from, to: controller.currentTime))
     }
 
     func seek(to time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
+        let from = controller.currentTime
         controller.seek(to: time)
-        diagnostics.log(.seek(time: time, source: source))
+        diagnostics.log(.seek(time: time, source: source, from: from, cue: nil))
     }
 
     func apply(_ command: WatchCommand) {

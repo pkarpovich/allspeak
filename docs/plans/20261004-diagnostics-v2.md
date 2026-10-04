@@ -179,15 +179,17 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 - Modify: `Allspeak/Diagnostics/DiagnosticsEvent.swift`
 - Create: `AllspeakTests/DiagnosticsEventTests.swift`
 
-- [ ] add position payloads to existing cases while keeping their keys:
+- [x] add position payloads to existing cases while keeping their keys:
   - `play(pos:)`, `pause(pos:)`;
   - `skip(seconds:source:from:to:)`;
   - `seek(time:source:from:cue:)`, where `cue` is `Int?` and the key is omitted when nil.
-- [ ] add cases `session(SessionHeader)`, `track(...)`, `tick(...)`, `route(...)`, `interruption(...)`, `app(...)`, `watch(...)`, `hall(...)` with the exact keys from Technical Details. `SessionHeader` is a plain `Sendable` struct, and its optional fields are omitted from the line when nil.
-- [ ] extend `JSONLineBuilder` with an `Int` overload, emitting booleans as `1`/`0` via that, and keep string escaping unchanged.
-- [ ] write tests: each case's `jsonLine` has the expected keys and values; old keys (`seconds`, `time`, `source`) are unchanged; optional keys are omitted when nil; escaping of quotes in `title` and `hallName` still works.
-- [ ] write tests for non-ASCII hall names (`Sala 3 Tarczyński`) round-tripping through `JSONSerialization`.
-- [ ] run tests - must pass before task 2
+- [x] add cases `session(SessionHeader)`, `track(...)`, `tick(...)`, `route(...)`, `interruption(...)`, `app(...)`, `watch(...)`, `hall(...)` with the exact keys from Technical Details. `SessionHeader` is a plain `Sendable` struct, and its optional fields are omitted from the line when nil.
+- [x] extend `JSONLineBuilder` with an `Int` overload, emitting booleans as `1`/`0` via that, and keep string escaping unchanged.
+- [x] write tests: each case's `jsonLine` has the expected keys and values; old keys (`seconds`, `time`, `source`) are unchanged; optional keys are omitted when nil; escaping of quotes in `title` and `hallName` still works.
+- [x] write tests for non-ASCII hall names (`Sala 3 Tarczyński`) round-tripping through `JSONSerialization`.
+- [x] run tests - must pass before task 2
+- ➕ coordinator `play`/`pause`/`skip`/`seek` already pass `controller.currentTime` as `pos`/`from`/`to` (needed to compile); `seek` passes `cue: nil` until Task 3 adds the cue lookup and its tests
+- ⚠️ `name=iPhone 17 Pro` alone matches no destination (several runtimes installed); use `-destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5'`
 
 ### Task 2: Retention to 365 days
 

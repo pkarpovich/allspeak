@@ -459,7 +459,7 @@ struct PlaybackCoordinatorTests {
 
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent.hasPrefix("movie-"))
-        log.log(.play)
+        log.log(.play(pos: 0))
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
@@ -507,7 +507,7 @@ struct PlaybackCoordinatorTests {
 
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent.hasPrefix("quick-play-"))
-        log.log(.play)
+        log.log(.play(pos: 0))
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
@@ -627,12 +627,12 @@ struct PlaybackCoordinatorTests {
             storage: imported.storage
         )
         let url = try #require(log.currentFileURL)
-        log.log(.play)
+        log.log(.play(pos: 0))
 
         await coordinator.refreshIfActive(sessionID: imported.sessionID)
         #expect(log.currentFileURL == url)
 
-        log.log(.pause)
+        log.log(.pause(pos: 0))
         let records = try Self.readJSONLines(url)
         #expect(records.map { $0["event"] as? String } == ["play", "pause"])
     }
