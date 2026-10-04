@@ -1,22 +1,63 @@
 import Foundation
 
-enum DiagnosticsEvent {
-    enum Source: String {
+enum DiagnosticsEvent: Sendable {
+    enum Source: String, Sendable {
         case phone
         case watch
     }
 
-    case skip(seconds: Double, source: Source)
-    case seek(time: Double, source: Source)
-    case pause
-    case play
+    enum InterruptionPhase: String, Sendable {
+        case began
+        case ended
+    }
+
+    enum AppState: String, Sendable {
+        case foreground
+        case background
+    }
+
+    struct SessionHeader: Sendable {
+        var sessionID: UUID
+        var title: String
+        var trackID: UUID?
+        var trackLabel: String?
+        var trackFile: String
+        var trackSHA: String?
+        var catalogID: UUID?
+        var catalogRev: Int?
+        var app: String
+        var build: String
+        var device: String
+        var os: String
+    }
+
+    case session(SessionHeader)
+    case play(pos: Double)
+    case pause(pos: Double)
+    case skip(seconds: Double, source: Source, from: Double, to: Double)
+    case seek(time: Double, source: Source, from: Double, cue: Int?)
+    case track(trackID: UUID, trackLabel: String, pos: Double)
+    case tick(pos: Double, playing: Bool, route: String, routeName: String, latency: Double)
+    case route(reason: String, route: String, routeName: String, pos: Double)
+    case interruption(phase: InterruptionPhase, pos: Double)
+    case app(state: AppState, pos: Double)
+    case watch(reachable: Bool, pos: Double)
+    case hall(key: String, name: String, cinema: String, pos: Double)
 
     var name: String {
         switch self {
+        case .session: return "session"
+        case .play: return "play"
+        case .pause: return "pause"
         case .skip: return "skip"
         case .seek: return "seek"
-        case .pause: return "pause"
-        case .play: return "play"
+        case .track: return "track"
+        case .tick: return "tick"
+        case .route: return "route"
+        case .interruption: return "interruption"
+        case .app: return "app"
+        case .watch: return "watch"
+        case .hall: return "hall"
         }
     }
 
@@ -25,14 +66,60 @@ enum DiagnosticsEvent {
         builder.add("ts", timestamp)
         builder.add("event", name)
         switch self {
-        case let .skip(seconds, source):
+        case let .session(header):
+            builder.add("sessionID", header.sessionID.uuidString)
+            builder.add("title", header.title)
+            builder.add("trackID", header.trackID?.uuidString)
+            builder.add("trackLabel", header.trackLabel)
+            builder.add("trackFile", header.trackFile)
+            builder.add("trackSHA", header.trackSHA)
+            builder.add("catalogID", header.catalogID?.uuidString)
+            builder.add("catalogRev", header.catalogRev)
+            builder.add("app", header.app)
+            builder.add("build", header.build)
+            builder.add("device", header.device)
+            builder.add("os", header.os)
+        case let .play(pos), let .pause(pos):
+            builder.addPosition("pos", pos)
+        case let .skip(seconds, source, from, to):
             builder.add("seconds", seconds)
             builder.add("source", source.rawValue)
-        case let .seek(time, source):
+            builder.addPosition("from", from)
+            builder.addPosition("to", to)
+        case let .seek(time, source, from, cue):
             builder.add("time", time)
             builder.add("source", source.rawValue)
-        case .pause, .play:
-            break
+            builder.addPosition("from", from)
+            builder.add("cue", cue)
+        case let .track(trackID, trackLabel, pos):
+            builder.add("trackID", trackID.uuidString)
+            builder.add("trackLabel", trackLabel)
+            builder.addPosition("pos", pos)
+        case let .tick(pos, playing, route, routeName, latency):
+            builder.addPosition("pos", pos)
+            builder.add("playing", playing)
+            builder.add("route", route)
+            builder.add("routeName", routeName)
+            builder.add("latency", latency)
+        case let .route(reason, route, routeName, pos):
+            builder.add("reason", reason)
+            builder.add("route", route)
+            builder.add("routeName", routeName)
+            builder.addPosition("pos", pos)
+        case let .interruption(phase, pos):
+            builder.add("phase", phase.rawValue)
+            builder.addPosition("pos", pos)
+        case let .app(state, pos):
+            builder.add("state", state.rawValue)
+            builder.addPosition("pos", pos)
+        case let .watch(reachable, pos):
+            builder.add("reachable", reachable)
+            builder.addPosition("pos", pos)
+        case let .hall(key, name, cinema, pos):
+            builder.add("hall", key)
+            builder.add("hallName", name)
+            builder.add("cinema", cinema)
+            builder.addPosition("pos", pos)
         }
         return builder.line()
     }
@@ -45,8 +132,30 @@ private struct JSONLineBuilder {
         parts.append(Self.encode(key) + ":" + Self.encode(value))
     }
 
+    mutating func add(_ key: String, _ value: String?) {
+        guard let value else { return }
+        add(key, value)
+    }
+
     mutating func add(_ key: String, _ value: Double) {
         parts.append(Self.encode(key) + ":" + Self.number(value))
+    }
+
+    mutating func add(_ key: String, _ value: Int) {
+        parts.append(Self.encode(key) + ":" + String(value))
+    }
+
+    mutating func add(_ key: String, _ value: Int?) {
+        guard let value else { return }
+        add(key, value)
+    }
+
+    mutating func add(_ key: String, _ value: Bool) {
+        add(key, value ? 1 : 0)
+    }
+
+    mutating func addPosition(_ key: String, _ value: Double) {
+        add(key, (value * 1000).rounded() / 1000)
     }
 
     func line() -> String {

@@ -1,6 +1,7 @@
 import AVFAudio
 import CoreData
 import Foundation
+import UIKit
 
 // Owns the iPhone-side audio session lifecycle and broadcasts state to the
 // paired watch app (via `WatchSessionHost`). Lock-screen / Dynamic Island
@@ -33,6 +34,8 @@ final class PlaybackCoordinator {
     private(set) var revision: Int = 0
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
+    private(set) var selectedHallKey: String?
+    private var isInBackground: Bool = false
     private var isSwitching: Bool = false
     // Bumped by every startSession/endSession so an invocation resuming from
     // its awaits can detect it was superseded and must not publish state.
@@ -45,6 +48,7 @@ final class PlaybackCoordinator {
     private var storage: DocumentsStorage = .default
     private var persistence: PersistenceController = .shared
     var diagnostics: DiagnosticsLog = .shared
+    private var monitor: DiagnosticsMonitor?
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
 
     init() {}
@@ -172,14 +176,76 @@ final class PlaybackCoordinator {
         self.sessionTitle = snap.name
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
+        self.selectedHallKey = nil
+        self.isInBackground = false
         self.repository = repository
         self.storage = storage
         self.persistence = persistence
         self.revision += 1
         diagnostics.begin(filmTitle: snap.name)
+        diagnostics.log(.session(Self.sessionHeader(
+            sessionID: snap.uuid,
+            title: snap.name,
+            trackID: selectedTrack?.trackID,
+            trackLabel: selectedTrack?.label,
+            trackFile: selectedTrack?.filename ?? snap.audioFilename,
+            sidecar: try? CatalogSidecar.load(from: dir)
+        )))
+        startMonitor()
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
+    }
+
+    private static func sessionHeader(
+        sessionID: UUID,
+        title: String,
+        trackID: UUID?,
+        trackLabel: String?,
+        trackFile: String,
+        sidecar: CatalogSidecar?
+    ) -> DiagnosticsEvent.SessionHeader {
+        let info = Bundle.main.infoDictionary ?? [:]
+        return DiagnosticsEvent.SessionHeader(
+            sessionID: sessionID,
+            title: title,
+            trackID: trackID,
+            trackLabel: trackLabel,
+            trackFile: trackFile,
+            trackSHA: sidecar?.tracks.first { $0.trackID == trackID }?.sha256,
+            catalogID: sidecar?.serverID,
+            catalogRev: sidecar?.revision,
+            app: info["CFBundleShortVersionString"] as? String ?? "",
+            build: info["CFBundleVersion"] as? String ?? "",
+            device: deviceModel(),
+            os: UIDevice.current.systemVersion
+        )
+    }
+
+    private func startMonitor() {
+        let monitor = DiagnosticsMonitor(
+            snapshot: { [weak self] in
+                (self?.controller?.livePosition ?? 0, self?.controller?.isPlayerPlaying ?? false)
+            },
+            route: {
+                let session = AVAudioSession.sharedInstance()
+                let output = session.currentRoute.outputs.first
+                return (output?.portType.rawValue ?? "", output?.portName ?? "", session.outputLatency)
+            },
+            log: { [weak self] event in
+                self?.diagnostics.log(event)
+            }
+        )
+        monitor.start()
+        self.monitor = monitor
+    }
+
+    private static func deviceModel() -> String {
+        var system = utsname()
+        uname(&system)
+        return withUnsafeBytes(of: system.machine) { bytes in
+            String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+        }
     }
 
     private static func resolveTrackURL(
@@ -220,8 +286,19 @@ final class PlaybackCoordinator {
         self.sessionTitle = title
         self.tracks = []
         self.activeTrackID = nil
+        self.selectedHallKey = nil
+        self.isInBackground = false
         self.revision += 1
         diagnostics.begin(filmTitle: title)
+        diagnostics.log(.session(Self.sessionHeader(
+            sessionID: sessionUUID,
+            title: title,
+            trackID: nil,
+            trackLabel: nil,
+            trackFile: audio.lastPathComponent,
+            sidecar: nil
+        )))
+        startMonitor()
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -296,7 +373,7 @@ final class PlaybackCoordinator {
         }
 
         if let selectedTrack, previousActiveTrackID != selectedTrack.trackID {
-            let capturedTime = controller.currentTime
+            let capturedTime = controller.livePosition
             let wasPlaying = controller.isPlaying
             let cues = controller.subtitles
             let newURL = Self.resolveTrackURL(
@@ -315,6 +392,7 @@ final class PlaybackCoordinator {
                 if wasPlaying {
                     controller.play()
                 }
+                diagnostics.log(.track(trackID: selectedTrack.trackID, trackLabel: selectedTrack.label, pos: controller.currentTime))
                 if snap.activeTrackID != selectedTrack.trackID, let repository {
                     try? await repository.setActiveTrack(sessionID: sessionID, trackID: selectedTrack.trackID)
                     guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
@@ -365,7 +443,7 @@ final class PlaybackCoordinator {
         isSwitching = true
         defer { isSwitching = false }
 
-        let capturedTime = controller.currentTime
+        let capturedTime = controller.livePosition
         let wasPlaying = controller.isPlaying
         let cues = controller.subtitles
 
@@ -413,6 +491,7 @@ final class PlaybackCoordinator {
         if wasPlaying {
             controller.play()
         }
+        diagnostics.log(.track(trackID: trackID, trackLabel: track.label, pos: controller.currentTime))
         if let repository, let sessionID {
             try? await repository.setActiveTrack(sessionID: sessionID, trackID: trackID)
         }
@@ -444,6 +523,8 @@ final class PlaybackCoordinator {
 
     func endSession() {
         loadGeneration += 1
+        monitor?.stop()
+        monitor = nil
         diagnostics.end()
         guard let controller else { return }
         controller.onTick = nil
@@ -459,6 +540,8 @@ final class PlaybackCoordinator {
         self.sessionTitle = ""
         self.tracks = []
         self.activeTrackID = nil
+        self.selectedHallKey = nil
+        self.isInBackground = false
         self.repository = nil
         self.isSwitching = false
         #if os(iOS)
@@ -546,13 +629,13 @@ final class PlaybackCoordinator {
     func play() {
         guard let controller else { return }
         controller.play()
-        diagnostics.log(.play)
+        diagnostics.log(.play(pos: controller.livePosition))
     }
 
     func pause() {
         guard let controller else { return }
         controller.pause()
-        diagnostics.log(.pause)
+        diagnostics.log(.pause(pos: controller.livePosition))
     }
 
     func togglePlayPause() {
@@ -566,14 +649,35 @@ final class PlaybackCoordinator {
 
     func skip(by seconds: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
+        let from = controller.livePosition
         controller.skip(by: seconds)
-        diagnostics.log(.skip(seconds: seconds, source: source))
+        diagnostics.log(.skip(seconds: seconds, source: source, from: from, to: controller.currentTime))
     }
 
     func seek(to time: TimeInterval, source: DiagnosticsEvent.Source = .phone) {
         guard let controller else { return }
+        let from = controller.livePosition
+        let cue = controller.subtitles.firstIndex { abs($0.start - time) <= 0.001 }
         controller.seek(to: time)
-        diagnostics.log(.seek(time: time, source: source))
+        diagnostics.log(.seek(time: time, source: source, from: from, cue: cue))
+    }
+
+    func noteAppState(foreground: Bool) {
+        guard let controller else { return }
+        if foreground, !isInBackground { return }
+        isInBackground = !foreground
+        diagnostics.log(.app(state: foreground ? .foreground : .background, pos: controller.livePosition))
+    }
+
+    func noteWatchReachable(_ reachable: Bool) {
+        guard let controller else { return }
+        diagnostics.log(.watch(reachable: reachable, pos: controller.livePosition))
+    }
+
+    func selectHall(_ hall: Hall) {
+        guard let controller else { return }
+        selectedHallKey = hall.key
+        diagnostics.log(.hall(key: hall.key, name: hall.name, cinema: Hall.manufakturaCinemaID, pos: controller.livePosition))
     }
 
     func apply(_ command: WatchCommand) {

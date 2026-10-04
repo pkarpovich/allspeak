@@ -15,6 +15,7 @@ struct PlayerView: View {
     @State private var sessionName: String = ""
     @State private var tracks: [TrackInfo] = []
     @State private var activeTrackID: UUID?
+    @State private var selectedHallKey: String?
     @State private var loadError: String?
     @State private var cinema: CinemaMode = .off
     @State private var clipURL: URL?
@@ -68,11 +69,13 @@ struct PlayerView: View {
                         cinemaActive: cinema.isCinema,
                         tracks: tracks,
                         activeTrackID: activeTrackID,
+                        selectedHallKey: selectedHallKey,
                         clipAvailable: clipURL != nil,
                         onBack: { dismiss() },
                         onCinema: { applyCinema(.pill) },
                         onClip: presentClip,
-                        onSwitchTrack: switchTrack
+                        onSwitchTrack: switchTrack,
+                        onSelectHall: selectHall
                     )
                     .padding(.top, 18)
 
@@ -158,6 +161,11 @@ struct PlayerView: View {
         }
     }
 
+    private func selectHall(_ hall: Hall) {
+        PlaybackCoordinator.shared.selectHall(hall)
+        selectedHallKey = PlaybackCoordinator.shared.selectedHallKey
+    }
+
     private func presentClip() {
         PlaybackCoordinator.shared.pause()
         isPresentingClip = true
@@ -183,6 +191,7 @@ struct PlayerView: View {
             sessionName = PlaybackCoordinator.shared.sessionTitle
             tracks = PlaybackCoordinator.shared.tracks
             activeTrackID = PlaybackCoordinator.shared.activeTrackID
+            selectedHallKey = PlaybackCoordinator.shared.selectedHallKey
             clipURL = locateClip()
         } catch PlaybackCoordinator.StartError.sessionNotFound {
             loadError = "Couldn't load session."

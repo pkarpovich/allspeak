@@ -22,6 +22,10 @@ final class AudioController {
         player?.currentTime ?? currentTime
     }
 
+    var isPlayerPlaying: Bool {
+        player?.isPlaying ?? false
+    }
+
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var displayLink: CADisplayLink?
     @ObservationIgnored private var tickerProxy: TickerProxy?

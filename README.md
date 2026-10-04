@@ -118,10 +118,34 @@ that line's timestamp. The skip controls cover the fine adjustment from there �
 ### Session diagnostics
 
 Playing any session writes a per-screening JSONL log to
-`Documents/diagnostics/` (pulled via the Files app) capturing every play, pause,
-skip, and seek with its source (phone or watch) for after-the-fact analysis on
-the Mac. It is always on, has no UI, and no setting. Logs older than 30 days are
-deleted when the next session starts.
+`Documents/diagnostics/` (pulled via the Files app) for after-the-fact analysis
+on the Mac. It is always on and has no setting. Every line carries `ts` and
+`event`. Every event except `session` records the track position in track
+seconds: `pos`, or `from` / `to` for skips and `from` for seeks. Booleans are
+written as `1` / `0`. Event types:
+
+- `session` - first line: session, title, track (id, label, file, SHA), catalog
+  id and revision, app version, build, device and OS.
+- `play` / `pause` - user transport.
+- `skip` - `seconds` and `source` (phone or watch), position before and after.
+- `seek` - target `time`, `source`, position before, and the subtitle `cue`
+  index when the seek came from tapping a line.
+- `track` - track switch.
+- `tick` - every 30 s while a session is open: position, `playing`, audio
+  route and output latency.
+- `route` - audio route change with its reason.
+- `interruption` - audio interruption began / ended.
+- `app` - app moved to background / back to foreground (only while a session
+  is open).
+- `watch` - watch reachability change, `reachable` (only while a session is
+  open).
+- `hall` - cinema hall picked in the player.
+
+The player's title capsule is a menu with the Cinema City Łódź Manufaktura hall
+list (IMAX, Sala 1-14). Picking a hall logs a `hall` event and shows the hall
+name under the title for the rest of the session.
+
+Logs older than 365 days are deleted when the next session starts.
 
 ## Catalog (online session distribution)
 

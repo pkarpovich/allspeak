@@ -194,6 +194,10 @@ struct PlaybackCoordinatorTests {
         #expect(coordinator.currentMetadata() == nil)
     }
 
+    private static func blockMainRunLoop(seconds: TimeInterval) {
+        Thread.sleep(forTimeInterval: seconds)
+    }
+
     private struct MultiTrackFixture {
         let coordinator: PlaybackCoordinator
         let persistence: PersistenceController
@@ -293,6 +297,26 @@ struct PlaybackCoordinatorTests {
         let drift = abs(controller.currentTime - 2.5)
         #expect(drift < 0.2)
         #expect(fixture.coordinator.revision == beforeRevision)
+    }
+
+    @Test("switchTrack resumes from the live player position, not the stale display-link clock")
+    func switchTrackResumesFromLivePosition() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        controller.play()
+        Self.blockMainRunLoop(seconds: 0.6)
+        let stale = controller.currentTime
+        let live = controller.livePosition
+        try #require(live - stale > 0.3)
+
+        try await fixture.coordinator.switchTrack(to: fixture.track2UUID)
+
+        #expect(controller.currentTime >= live - 0.05)
+        #expect(controller.isPlaying)
     }
 
     @Test("switchTrack to the active track is a no-op")
@@ -425,7 +449,9 @@ struct PlaybackCoordinatorTests {
         root.appendingPathComponent("diagnostics", isDirectory: true)
     }
 
-    private static func readJSONLines(_ url: URL) throws -> [[String: Any]] {
+    private static let systemDrivenEvents: Set<String> = ["tick", "route", "interruption"]
+
+    private static func readAllJSONLines(_ url: URL) throws -> [[String: Any]] {
         let text = try String(contentsOf: url, encoding: .utf8)
         return text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
             guard let data = line.data(using: .utf8),
@@ -433,6 +459,14 @@ struct PlaybackCoordinatorTests {
             else { return nil }
             return obj
         }
+    }
+
+    private static func readJSONLines(_ url: URL) throws -> [[String: Any]] {
+        try readAllJSONLines(url).filter { !systemDrivenEvents.contains($0["event"] as? String ?? "") }
+    }
+
+    private static func readTransportLines(_ url: URL) throws -> [[String: Any]] {
+        try readJSONLines(url).filter { $0["event"] as? String != "session" }
     }
 
     @Test("startSession begins a diagnostics log named after the film")
@@ -459,7 +493,7 @@ struct PlaybackCoordinatorTests {
 
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent.hasPrefix("movie-"))
-        log.log(.play)
+        log.log(.play(pos: 0))
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
@@ -507,7 +541,7 @@ struct PlaybackCoordinatorTests {
 
         let url = try #require(log.currentFileURL)
         #expect(url.lastPathComponent.hasPrefix("quick-play-"))
-        log.log(.play)
+        log.log(.play(pos: 0))
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
@@ -540,7 +574,7 @@ struct PlaybackCoordinatorTests {
         await Self.drainRemoteCommand()
 
         let url = try #require(log.currentFileURL)
-        let events = try Self.readJSONLines(url)
+        let events = try Self.readTransportLines(url)
         #expect(events.map { $0["event"] as? String } == ["play", "pause", "skip", "seek"])
         #expect(events[2]["seconds"] as? Double == 15)
         #expect(events[2]["source"] as? String == "phone")
@@ -627,14 +661,14 @@ struct PlaybackCoordinatorTests {
             storage: imported.storage
         )
         let url = try #require(log.currentFileURL)
-        log.log(.play)
+        log.log(.play(pos: 0))
 
         await coordinator.refreshIfActive(sessionID: imported.sessionID)
         #expect(log.currentFileURL == url)
 
-        log.log(.pause)
+        log.log(.pause(pos: 0))
         let records = try Self.readJSONLines(url)
-        #expect(records.map { $0["event"] as? String } == ["play", "pause"])
+        #expect(records.map { $0["event"] as? String } == ["session", "play", "pause"])
     }
 
     @Test("watch transport commands log skip, seek, pause, and play with the watch source")
@@ -665,7 +699,7 @@ struct PlaybackCoordinatorTests {
         coordinator.apply(.togglePlayPause)
 
         let url = try #require(log.currentFileURL)
-        let records = try Self.readJSONLines(url)
+        let records = try Self.readTransportLines(url)
         #expect(records.count == 4)
 
         #expect(records[0]["event"] as? String == "skip")
@@ -708,7 +742,7 @@ struct PlaybackCoordinatorTests {
         coordinator.seek(to: 2.0)
 
         let url = try #require(log.currentFileURL)
-        let records = try Self.readJSONLines(url)
+        let records = try Self.readTransportLines(url)
         #expect(records.count == 4)
 
         #expect(records[0]["event"] as? String == "play")
@@ -749,10 +783,596 @@ struct PlaybackCoordinatorTests {
         coordinator.seek(to: 1.0)
 
         let url = try #require(log.currentFileURL)
-        let records = try Self.readJSONLines(url)
+        let records = try Self.readTransportLines(url)
         #expect(records.map { $0["event"] as? String } == ["skip", "seek", "pause", "play", "skip", "seek"])
         #expect(records[0]["source"] as? String == "watch")
         #expect(records[4]["source"] as? String == "phone")
+    }
+
+    @Test("a subtitle-tap seek to an exact cue start logs the cue index and the prior position")
+    func seekToCueStartLogsCue() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Cue", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 1.5)
+        coordinator.seek(to: Self.cues[1].start)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL))
+        #expect(records.count == 2)
+        #expect(records[1]["event"] as? String == "seek")
+        #expect(records[1]["time"] as? Double == 3)
+        #expect(records[1]["source"] as? String == "phone")
+        #expect(records[1]["from"] as? Double == 1.5)
+        #expect(records[1]["cue"] as? Int == 1)
+    }
+
+    @Test("a scrub seek to a non-cue time omits the cue key")
+    func scrubSeekOmitsCue() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Scrub", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 2.0)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL))
+        let seek = try #require(records.first)
+        #expect(seek["event"] as? String == "seek")
+        #expect(seek["from"] as? Double == 0)
+        #expect(seek["cue"] == nil)
+    }
+
+    @Test("a seek within 0.001 s of a cue start logs the cue, and one further away omits it")
+    func seekCueMatchTolerance() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Tolerance", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: Self.cues[1].start + 0.0005)
+        coordinator.seek(to: Self.cues[1].start + 0.002)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["cue"] as? Int } == [1, nil])
+    }
+
+    @Test("skip logs from and to consistent with seconds, clamped at zero and at the duration")
+    func skipLogsClampedFromTo() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Skip", audio: audio, subtitles: Self.cues)
+        let duration = try #require(coordinator.controller).duration
+        coordinator.seek(to: 1.0)
+        coordinator.skip(by: 0.5)
+        coordinator.skip(by: -10)
+        coordinator.skip(by: 100)
+
+        let skips = try Self.readTransportLines(try #require(log.currentFileURL))
+            .filter { $0["event"] as? String == "skip" }
+        #expect(skips.count == 3)
+
+        #expect(skips[0]["from"] as? Double == 1)
+        #expect(skips[0]["to"] as? Double == 1.5)
+
+        #expect(skips[1]["seconds"] as? Double == -10)
+        #expect(skips[1]["from"] as? Double == 1.5)
+        #expect(skips[1]["to"] as? Double == 0)
+
+        #expect(skips[2]["seconds"] as? Double == 100)
+        #expect(skips[2]["from"] as? Double == 0)
+        let to = try #require(skips[2]["to"] as? Double)
+        #expect(abs(to - duration) < 0.001)
+    }
+
+    @Test("the session header is the first line and carries catalog fields from server.json")
+    func sessionHeaderIncludesCatalogFields() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        fixture.coordinator.endSession()
+
+        let catalogID = UUID()
+        let sidecar = CatalogSidecar(
+            serverID: catalogID,
+            revision: 7,
+            subtitle: .init(filename: "subs.srt", sha256: "srt-sha"),
+            tracks: [
+                .init(filename: "dfn.caf", sha256: "dfn-sha", label: "DFN", trackID: fixture.track2UUID),
+                .init(filename: "loud.caf", sha256: "loud-sha", label: "Loudnorm", trackID: fixture.track1UUID),
+            ]
+        )
+        try sidecar.save(to: fixture.storage.sessionDir(for: fixture.sessionUUID))
+
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        fixture.coordinator.diagnostics = log
+
+        try await fixture.coordinator.startSession(
+            sessionID: fixture.sessionID,
+            repository: fixture.repo,
+            persistence: fixture.persistence,
+            storage: fixture.storage
+        )
+        fixture.coordinator.play()
+
+        let records = try Self.readJSONLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["event"] as? String } == ["session", "play"])
+        let header = try #require(records.first)
+        #expect(header["sessionID"] as? String == fixture.sessionUUID.uuidString)
+        #expect(header["title"] as? String == "Movie")
+        #expect(header["trackID"] as? String == fixture.track1UUID.uuidString)
+        #expect(header["trackLabel"] as? String == "Loudnorm")
+        #expect(header["trackFile"] as? String == "loud.caf")
+        #expect(header["trackSHA"] as? String == "loud-sha")
+        #expect(header["catalogID"] as? String == catalogID.uuidString)
+        #expect(header["catalogRev"] as? Int == 7)
+    }
+
+    @Test("the session header omits trackSHA but keeps catalog fields when server.json has no entry for the active track")
+    func sessionHeaderWithoutSidecarTrackEntry() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        fixture.coordinator.endSession()
+
+        let catalogID = UUID()
+        let sidecar = CatalogSidecar(
+            serverID: catalogID,
+            revision: 3,
+            subtitle: .init(filename: "subs.srt", sha256: "srt-sha"),
+            tracks: [
+                .init(filename: "dfn.caf", sha256: "dfn-sha", label: "DFN", trackID: fixture.track2UUID),
+            ]
+        )
+        try sidecar.save(to: fixture.storage.sessionDir(for: fixture.sessionUUID))
+
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        fixture.coordinator.diagnostics = log
+
+        try await fixture.coordinator.startSession(
+            sessionID: fixture.sessionID,
+            repository: fixture.repo,
+            persistence: fixture.persistence,
+            storage: fixture.storage
+        )
+
+        let records = try Self.readJSONLines(try #require(log.currentFileURL))
+        let header = try #require(records.first)
+        #expect(header["trackID"] as? String == fixture.track1UUID.uuidString)
+        #expect(header["trackSHA"] == nil)
+        #expect(header["catalogID"] as? String == catalogID.uuidString)
+        #expect(header["catalogRev"] as? Int == 3)
+    }
+
+    @Test("the session header omits catalog fields when there is no server.json")
+    func sessionHeaderWithoutSidecar() async throws {
+        let imported = try await Self.importSession()
+        defer { try? FileManager.default.removeItem(at: imported.root) }
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        let records = try Self.readJSONLines(try #require(log.currentFileURL))
+        let header = try #require(records.first)
+        #expect(header["event"] as? String == "session")
+        #expect(header["sessionID"] as? String == coordinator.sessionUUID?.uuidString)
+        #expect(header["title"] as? String == "Movie")
+        #expect(header["trackFile"] as? String != nil)
+        #expect(header["trackSHA"] == nil)
+        #expect(header["catalogID"] == nil)
+        #expect(header["catalogRev"] == nil)
+        #expect(header["app"] as? String != nil)
+        #expect(header["build"] as? String != nil)
+        #expect((header["device"] as? String)?.isEmpty == false)
+        #expect((header["os"] as? String)?.isEmpty == false)
+    }
+
+    @Test("the lightweight startSession writes a header with the audio filename")
+    func lightweightSessionHeader() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        let uuid = UUID()
+        try coordinator.startSession(sessionUUID: uuid, title: "Quick", audio: audio, subtitles: Self.cues)
+
+        let records = try Self.readJSONLines(try #require(log.currentFileURL))
+        #expect(records.count == 1)
+        let header = try #require(records.first)
+        #expect(header["event"] as? String == "session")
+        #expect(header["sessionID"] as? String == uuid.uuidString)
+        #expect(header["title"] as? String == "Quick")
+        #expect(header["trackFile"] as? String == audio.lastPathComponent)
+        #expect(header["trackID"] == nil)
+        #expect(header["catalogID"] == nil)
+    }
+
+    @Test("a successful track switch logs one track event with the new track and position")
+    func switchTrackLogsTrackEvent() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+            try? FileManager.default.removeItem(at: diagRoot)
+        }
+        fixture.coordinator.diagnostics = log
+        log.begin(filmTitle: "Movie")
+        try #require(fixture.coordinator.controller).seek(to: 2.5)
+
+        try await fixture.coordinator.switchTrack(to: fixture.track2UUID)
+
+        let tracks = try Self.readJSONLines(try #require(log.currentFileURL))
+            .filter { $0["event"] as? String == "track" }
+        #expect(tracks.count == 1)
+        let track = try #require(tracks.first)
+        #expect(track["trackID"] as? String == fixture.track2UUID.uuidString)
+        #expect(track["trackLabel"] as? String == "DFN")
+        let pos = try #require(track["pos"] as? Double)
+        #expect(abs(pos - 2.5) < 0.2)
+    }
+
+    @Test("a refresh that changes the active track logs one track event with the new track and position")
+    func refreshTrackChangeLogsTrackEvent() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+            try? FileManager.default.removeItem(at: diagRoot)
+        }
+        fixture.coordinator.diagnostics = log
+        log.begin(filmTitle: "Movie")
+        try #require(fixture.coordinator.controller).seek(to: 2.5)
+        try await fixture.repo.setActiveTrack(sessionID: fixture.sessionID, trackID: fixture.track2UUID)
+
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+
+        #expect(fixture.coordinator.activeTrackID == fixture.track2UUID)
+        let tracks = try Self.readJSONLines(try #require(log.currentFileURL))
+            .filter { $0["event"] as? String == "track" }
+        #expect(tracks.count == 1)
+        let track = try #require(tracks.first)
+        #expect(track["trackID"] as? String == fixture.track2UUID.uuidString)
+        #expect(track["trackLabel"] as? String == "DFN")
+        let pos = try #require(track["pos"] as? Double)
+        #expect(abs(pos - 2.5) < 0.2)
+    }
+
+    @Test("a failed track switch logs no track event")
+    func failedSwitchTrackLogsNothing() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+            try? FileManager.default.removeItem(at: diagRoot)
+        }
+        fixture.coordinator.diagnostics = log
+        log.begin(filmTitle: "Movie")
+        log.log(.play(pos: 0))
+        let t2URL = fixture.storage.trackURL(sessionID: fixture.sessionUUID, trackID: fixture.track2UUID, originalFilename: "dfn.caf")
+        try FileManager.default.removeItem(at: t2URL)
+
+        await #expect(throws: PlaybackCoordinator.SwitchError.trackNotFound) {
+            try await fixture.coordinator.switchTrack(to: UUID())
+        }
+        await #expect(throws: PlaybackCoordinator.SwitchError.loadFailed) {
+            try await fixture.coordinator.switchTrack(to: fixture.track2UUID)
+        }
+
+        let records = try Self.readJSONLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["event"] as? String } == ["play"])
+    }
+
+    private static func overrideRouteLines(_ url: URL) throws -> [[String: Any]] {
+        try readAllJSONLines(url).filter { $0["event"] as? String == "route" && $0["reason"] as? String == "override" }
+    }
+
+    private static func postOverrideRouteChange() {
+        NotificationCenter.default.post(
+            name: AVAudioSession.routeChangeNotification,
+            object: nil,
+            userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.override.rawValue]
+        )
+    }
+
+    private static func waitForLines(_ url: URL, count: Int) async throws -> [[String: Any]] {
+        for _ in 0..<1000 {
+            let lines = try overrideRouteLines(url)
+            if lines.count >= count { return lines }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        return try overrideRouteLines(url)
+    }
+
+    @Test("an active session logs audio route changes after the header")
+    func activeSessionLogsRouteChanges() async throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Route", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 1.5)
+        let url = try #require(log.currentFileURL)
+        Self.postOverrideRouteChange()
+
+        let routes = try await Self.waitForLines(url, count: 1)
+        #expect(routes.count == 1)
+        let route = try #require(routes.first)
+        #expect(route["pos"] as? Double == 1.5)
+        #expect(route["route"] is String)
+        #expect(route["routeName"] is String)
+        #expect(try Self.readAllJSONLines(url).first?["event"] as? String == "session")
+    }
+
+    @Test("endSession stops the previous session's monitor")
+    func endSessionStopsMonitor() async throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "First", audio: audio, subtitles: Self.cues)
+        coordinator.endSession()
+        log.begin(filmTitle: "After")
+        log.log(.play(pos: 0))
+        let url = try #require(log.currentFileURL)
+        Self.postOverrideRouteChange()
+
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try Self.overrideRouteLines(url).isEmpty)
+    }
+
+    @Test("app state and watch reachability changes are logged with the position during a session")
+    func activeSessionLogsAppAndWatchEvents() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Lifecycle", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 1.5)
+        coordinator.noteAppState(foreground: false)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteWatchReachable(false)
+        coordinator.noteWatchReachable(true)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL)).filter {
+            ["app", "watch"].contains($0["event"] as? String ?? "")
+        }
+        #expect(records.map { $0["event"] as? String } == ["app", "app", "watch", "watch"])
+        #expect(records.map { $0["state"] as? String } == ["background", "foreground", nil, nil])
+        #expect(records.map { $0["reachable"] as? Int } == [nil, nil, 0, 1])
+        #expect(records.allSatisfy { $0["pos"] as? Double == 1.5 })
+    }
+
+    @Test("a foreground without a preceding background logs nothing")
+    func foregroundWithoutBackgroundIsNotLogged() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Glance", audio: audio, subtitles: Self.cues)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteAppState(foreground: false)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteAppState(foreground: true)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["state"] as? String } == ["background", "foreground"])
+    }
+
+    @Test("app state and watch reachability changes log nothing without an active session")
+    func idleCoordinatorLogsNoAppOrWatchEvents() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            log.end()
+            coordinator.diagnostics = .shared
+        }
+
+        log.begin(filmTitle: "Idle")
+        log.log(.play(pos: 0))
+        coordinator.noteAppState(foreground: false)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteWatchReachable(true)
+
+        let records = try Self.readAllJSONLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["event"] as? String } == ["play"])
+    }
+
+    @Test("selectHall logs a hall line and stores the key, and re-selecting logs again")
+    func selectHallLogsAndStoresKey() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Hall", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 1.5)
+        let imax = try #require(Hall.manufaktura.first { $0.key == "IMAX" })
+        let hall3 = try #require(Hall.manufaktura.first { $0.key == "3" })
+        coordinator.selectHall(imax)
+        coordinator.selectHall(hall3)
+        coordinator.selectHall(hall3)
+
+        #expect(coordinator.selectedHallKey == "3")
+        let records = try Self.readTransportLines(try #require(log.currentFileURL)).filter {
+            $0["event"] as? String == "hall"
+        }
+        #expect(records.map { $0["hall"] as? String } == ["IMAX", "3", "3"])
+        #expect(records.map { $0["hallName"] as? String } == ["IMAX BNP Paribas", "Sala 3 Tarczyński", "Sala 3 Tarczyński"])
+        #expect(records.allSatisfy { $0["cinema"] as? String == "cinema-city-lodz-manufaktura" })
+        #expect(records.allSatisfy { $0["pos"] as? Double == 1.5 })
+    }
+
+    @Test("a new session and endSession reset the selected hall")
+    func newSessionResetsHall() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+        let hall = try #require(Hall.manufaktura.last)
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "First", audio: audio, subtitles: Self.cues)
+        coordinator.selectHall(hall)
+        #expect(coordinator.selectedHallKey == "14")
+        try coordinator.startSession(sessionUUID: UUID(), title: "Second", audio: audio, subtitles: Self.cues)
+        #expect(coordinator.selectedHallKey == nil)
+
+        coordinator.selectHall(hall)
+        coordinator.endSession()
+        #expect(coordinator.selectedHallKey == nil)
+    }
+
+    @Test("selectHall does nothing without an active session")
+    func selectHallWithoutSessionIsNoOp() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            log.end()
+            coordinator.diagnostics = .shared
+        }
+
+        log.begin(filmTitle: "Idle")
+        log.log(.play(pos: 0))
+        coordinator.selectHall(try #require(Hall.manufaktura.first))
+
+        #expect(coordinator.selectedHallKey == nil)
+        let records = try Self.readAllJSONLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["event"] as? String } == ["play"])
     }
 }
 

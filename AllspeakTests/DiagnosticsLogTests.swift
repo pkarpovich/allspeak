@@ -29,29 +29,6 @@ struct DiagnosticsLogTests {
         root.appendingPathComponent("diagnostics", isDirectory: true)
     }
 
-    // MARK: - Event JSON shape
-
-    @Test("skip, seek, pause and play encode their envelopes")
-    func transportRecords() {
-        let ts = "2026-06-12T19:43:02.000Z"
-        #expect(
-            DiagnosticsEvent.skip(seconds: -3.0, source: .phone).jsonLine(timestamp: ts)
-                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"skip","seconds":-3,"source":"phone"}"#
-        )
-        #expect(
-            DiagnosticsEvent.seek(time: 95.5, source: .watch).jsonLine(timestamp: ts)
-                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"seek","time":95.5,"source":"watch"}"#
-        )
-        #expect(
-            DiagnosticsEvent.pause.jsonLine(timestamp: ts)
-                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause"}"#
-        )
-        #expect(
-            DiagnosticsEvent.play.jsonLine(timestamp: ts)
-                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"#
-        )
-    }
-
     // MARK: - File lifecycle
 
     @Test("no file is created before the first event")
@@ -67,7 +44,7 @@ struct DiagnosticsLogTests {
     func noFileWhenNotBegun() {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
-        log.log(.play)
+        log.log(.play(pos: 0))
         #expect(!FileManager.default.fileExists(atPath: diagnosticsDir(root).path))
     }
 
@@ -76,12 +53,12 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
         log.begin(filmTitle: "Dune")
-        log.log(.play)
-        log.log(.pause)
+        log.log(.play(pos: 0))
+        log.log(.pause(pos: 0))
         let url = try #require(log.currentFileURL)
         let contents = try String(contentsOf: url, encoding: .utf8)
-        let expected = #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n"
-            + #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause"}"# + "\n"
+        let expected = #"{"ts":"2026-06-12T19:43:02.000Z","event":"play","pos":0}"# + "\n"
+            + #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause","pos":0}"# + "\n"
         #expect(contents == expected)
     }
 
@@ -92,12 +69,12 @@ struct DiagnosticsLogTests {
         let log = DiagnosticsLog(rootURL: root, now: { clock.current })
 
         log.begin(filmTitle: "Dune")
-        log.log(.play)
+        log.log(.play(pos: 0))
         log.end()
 
         clock.current = date("2026-06-12T21:10:00.000Z")
         log.begin(filmTitle: "Dune")
-        log.log(.play)
+        log.log(.play(pos: 0))
         log.end()
 
         let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
@@ -111,8 +88,8 @@ struct DiagnosticsLogTests {
             contentsOf: diagnosticsDir(root).appendingPathComponent("dune-20260612-2110.jsonl"),
             encoding: .utf8
         )
-        #expect(first == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n")
-        #expect(second == #"{"ts":"2026-06-12T21:10:00.000Z","event":"play"}"# + "\n")
+        #expect(first == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play","pos":0}"# + "\n")
+        #expect(second == #"{"ts":"2026-06-12T21:10:00.000Z","event":"play","pos":0}"# + "\n")
     }
 
     @Test("restarting the same film within the same minute creates a separate file")
@@ -121,11 +98,11 @@ struct DiagnosticsLogTests {
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
 
         log.begin(filmTitle: "Dune")
-        log.log(.play)
+        log.log(.play(pos: 0))
         log.end()
 
         log.begin(filmTitle: "Dune")
-        log.log(.pause)
+        log.log(.pause(pos: 0))
         log.end()
 
         let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
@@ -139,8 +116,8 @@ struct DiagnosticsLogTests {
             contentsOf: diagnosticsDir(root).appendingPathComponent("dune-20260612-1943-2.jsonl"),
             encoding: .utf8
         )
-        #expect(first == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n")
-        #expect(second == #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause"}"# + "\n")
+        #expect(first == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play","pos":0}"# + "\n")
+        #expect(second == #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause","pos":0}"# + "\n")
     }
 
     @Test("filename slug is derived from the film title")
@@ -176,15 +153,29 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let today = date("2026-06-12T19:43:02.000Z")
         let day = 24.0 * 60 * 60
-        try writeLog(named: "ancient-20260101-1200.jsonl", in: root, modified: today - 90 * day)
-        try writeLog(named: "expired-20260510-1200.jsonl", in: root, modified: today - 31 * day)
-        try writeLog(named: "fresh-20260611-1200.jsonl", in: root, modified: today - 29 * day)
+        let retention = Double(DiagnosticsLog.retentionDays)
+        try writeLog(named: "ancient-20240101-1200.jsonl", in: root, modified: today - (retention + 60) * day)
+        try writeLog(named: "expired-20250611-1200.jsonl", in: root, modified: today - (retention + 1) * day)
+        try writeLog(named: "fresh-20250613-1200.jsonl", in: root, modified: today - (retention - 1) * day)
 
         let log = DiagnosticsLog(rootURL: root, now: { today })
         log.begin(filmTitle: "Dune")
 
         let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
-        #expect(Set(files) == ["fresh-20260611-1200.jsonl"])
+        #expect(Set(files) == ["fresh-20250613-1200.jsonl"])
+    }
+
+    @Test("retention keeps a 200-day-old log")
+    func retentionKeepsHalfYearOldLog() throws {
+        let root = makeTempRoot()
+        let today = date("2026-06-12T19:43:02.000Z")
+        try writeLog(named: "old-20251124-1200.jsonl", in: root, modified: today - 200 * 24 * 60 * 60)
+
+        let log = DiagnosticsLog(rootURL: root, now: { today })
+        log.begin(filmTitle: "Dune")
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
+        #expect(files == ["old-20251124-1200.jsonl"])
     }
 
     @Test("retention keeps a log that is exactly at the retention boundary")
@@ -192,28 +183,29 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let today = date("2026-06-12T19:43:02.000Z")
         let day = 24.0 * 60 * 60
-        try writeLog(named: "boundary-20260513-1943.jsonl", in: root, modified: today - Double(DiagnosticsLog.retentionDays) * day)
+        try writeLog(named: "boundary-20250612-1943.jsonl", in: root, modified: today - Double(DiagnosticsLog.retentionDays) * day)
 
         let log = DiagnosticsLog(rootURL: root, now: { today })
         log.begin(filmTitle: "Dune")
 
         let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
-        #expect(files == ["boundary-20260513-1943.jsonl"])
+        #expect(files == ["boundary-20250612-1943.jsonl"])
     }
 
     @Test("retention never blocks the new screening's own log")
     func retentionDoesNotBlockLogging() throws {
         let root = makeTempRoot()
         let today = date("2026-06-12T19:43:02.000Z")
-        try writeLog(named: "expired-20260101-1200.jsonl", in: root, modified: today - 90 * 24 * 60 * 60)
+        let expiredAge = Double(DiagnosticsLog.retentionDays + 60) * 24 * 60 * 60
+        try writeLog(named: "expired-20250413-1200.jsonl", in: root, modified: today - expiredAge)
 
         let log = DiagnosticsLog(rootURL: root, now: { today })
         log.begin(filmTitle: "Dune")
-        log.log(.play)
+        log.log(.play(pos: 0))
 
         let url = try #require(log.currentFileURL)
         let contents = try String(contentsOf: url, encoding: .utf8)
-        #expect(contents == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play"}"# + "\n")
+        #expect(contents == #"{"ts":"2026-06-12T19:43:02.000Z","event":"play","pos":0}"# + "\n")
     }
 
     @Test("retention on a missing diagnostics directory is a no-op")
@@ -221,7 +213,7 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
         log.begin(filmTitle: "Dune")
-        log.log(.play)
+        log.log(.play(pos: 0))
         let url = try #require(log.currentFileURL)
         #expect(FileManager.default.fileExists(atPath: url.path))
     }

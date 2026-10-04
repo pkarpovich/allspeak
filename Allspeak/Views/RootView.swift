@@ -21,8 +21,15 @@ struct RootView: View {
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            Task { await catalogStore.refreshIfStale() }
+            switch phase {
+            case .active:
+                PlaybackCoordinator.shared.noteAppState(foreground: true)
+                Task { await catalogStore.refreshIfStale() }
+            case .background:
+                PlaybackCoordinator.shared.noteAppState(foreground: false)
+            default:
+                break
+            }
         }
         .tint(Tokens.accent)
         .preferredColorScheme(.dark)
