@@ -274,22 +274,25 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 - Modify: `AllspeakTests/PlayerTopBarTests.swift`
 - Create: `AllspeakTests/HallTests.swift`
 
-- [ ] add `Hall` and `Hall.manufaktura` with the 15 entries from Technical Details, IMAX first.
-- [ ] add to the coordinator:
+- [x] add `Hall` and `Hall.manufaktura` with the 15 entries from Technical Details, IMAX first.
+- [x] add to the coordinator:
   - `private(set) var selectedHallKey: String?`, reset in `startSession` and `endSession`;
   - `selectHall(_ hall: Hall)`, which stores the key and logs `hall` (with cinema `cinema-city-lodz-manufaktura` and the position). Re-selecting the same hall still logs, because Pavel may correct a mis-tap.
-- [ ] in `PlayerTopBar`, turn the existing title capsule (the `HStack` with `Text(sessionName)` and `.glassEffect(.regular, in: .capsule)`) into a native SwiftUI `Menu`. Its label is the same capsule: the session name, plus a small chevron-down after it to signal it is tappable, plus a second line with the selected hall's `name` when `selectedHallKey` is set. Keep the 44 pt height (the two lines are compact) and the current glass styling.
+- [x] in `PlayerTopBar`, turn the existing title capsule (the `HStack` with `Text(sessionName)` and `.glassEffect(.regular, in: .capsule)`) into a native SwiftUI `Menu`. Its label is the same capsule: the session name, plus a small chevron-down after it to signal it is tappable, plus a second line with the selected hall's `name` when `selectedHallKey` is set. Keep the 44 pt height (the two lines are compact) and the current glass styling.
   - The menu content is a `Picker("Зал", selection:)` with `.pickerStyle(.inline)` over `Hall.manufaktura`, in order (IMAX first, then 1-14). This gives the system checkmark on the selected hall.
   - The picker binding's setter calls the `onSelectHall` callback. Do not add new buttons to the top bar, and do not show a prompt or overlay over the subtitle river.
   - Pass `selectedHallKey` and `onSelectHall` in from `PlayerView`, the same way as `onSwitchTrack`, with no inline logic beyond the call.
   - Rejected: a separate glass circle button with its own menu, and a custom grid sheet or chip prompt (the Claude Design mockup). The capsule-as-menu is the native iOS pattern, like the title menus in Files and Notes, and adds no chrome.
-- [ ] write tests:
+- [x] write tests:
   - `Hall.manufaktura` has 15 unique keys, IMAX first, and keys `1`...`14` in order;
   - `selectHall` logs a `hall` line and updates `selectedHallKey`;
   - a new session resets the selection;
   - `PlayerTopBar` still exposes `showsTrackMenu` unchanged;
   - a new computed `PlayerTopBar.hallLine` returns the selected hall's `name`, or nil when nothing is selected or the key is unknown, so the capsule's second line is testable without rendering.
-- [ ] run tests - must pass before task 7
+- [x] run tests - must pass before task 7
+- ➕ `selectHall` does nothing without an active session (same guard as `noteAppState`), tested
+- ➕ `Hall.manufakturaCinemaID` holds the `cinema-city-lodz-manufaktura` key; the chevron is `Icons.chevronDown` (`chevron.down`)
+- ➕ `PlaybackCoordinator` is not observable, so `PlayerView` mirrors `selectedHallKey` into `@State` after `loadSession` and after each pick, like `activeTrackID`
 
 ### Task 7: Verify acceptance criteria
 

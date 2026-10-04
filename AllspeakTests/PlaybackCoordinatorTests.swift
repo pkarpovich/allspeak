@@ -1153,6 +1153,88 @@ struct PlaybackCoordinatorTests {
         let records = try Self.readAllJSONLines(try #require(log.currentFileURL))
         #expect(records.map { $0["event"] as? String } == ["play"])
     }
+
+    @Test("selectHall logs a hall line and stores the key, and re-selecting logs again")
+    func selectHallLogsAndStoresKey() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Hall", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 1.5)
+        let imax = try #require(Hall.manufaktura.first { $0.key == "IMAX" })
+        let hall3 = try #require(Hall.manufaktura.first { $0.key == "3" })
+        coordinator.selectHall(imax)
+        coordinator.selectHall(hall3)
+        coordinator.selectHall(hall3)
+
+        #expect(coordinator.selectedHallKey == "3")
+        let records = try Self.readTransportLines(try #require(log.currentFileURL)).filter {
+            $0["event"] as? String == "hall"
+        }
+        #expect(records.map { $0["hall"] as? String } == ["IMAX", "3", "3"])
+        #expect(records.map { $0["hallName"] as? String } == ["IMAX BNP Paribas", "Sala 3 Tarczyński", "Sala 3 Tarczyński"])
+        #expect(records.allSatisfy { $0["cinema"] as? String == "cinema-city-lodz-manufaktura" })
+        #expect(records.allSatisfy { $0["pos"] as? Double == 1.5 })
+    }
+
+    @Test("a new session and endSession reset the selected hall")
+    func newSessionResetsHall() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+        let hall = try #require(Hall.manufaktura.last)
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "First", audio: audio, subtitles: Self.cues)
+        coordinator.selectHall(hall)
+        #expect(coordinator.selectedHallKey == "14")
+        try coordinator.startSession(sessionUUID: UUID(), title: "Second", audio: audio, subtitles: Self.cues)
+        #expect(coordinator.selectedHallKey == nil)
+
+        coordinator.selectHall(hall)
+        coordinator.endSession()
+        #expect(coordinator.selectedHallKey == nil)
+    }
+
+    @Test("selectHall does nothing without an active session")
+    func selectHallWithoutSessionIsNoOp() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            log.end()
+            coordinator.diagnostics = .shared
+        }
+
+        log.begin(filmTitle: "Idle")
+        log.log(.play(pos: 0))
+        coordinator.selectHall(try #require(Hall.manufaktura.first))
+
+        #expect(coordinator.selectedHallKey == nil)
+        let records = try Self.readAllJSONLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["event"] as? String } == ["play"])
+    }
 }
 
 #endif

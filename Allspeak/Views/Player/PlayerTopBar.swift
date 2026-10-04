@@ -5,13 +5,20 @@ struct PlayerTopBar: View {
     let cinemaActive: Bool
     let tracks: [TrackInfo]
     let activeTrackID: UUID?
+    let selectedHallKey: String?
     let clipAvailable: Bool
     let onBack: () -> Void
     let onCinema: () -> Void
     let onClip: () -> Void
     let onSwitchTrack: (UUID) -> Void
+    let onSelectHall: (Hall) -> Void
 
     var showsTrackMenu: Bool { tracks.count > 1 }
+
+    var hallLine: String? {
+        guard let selectedHallKey else { return nil }
+        return Hall.manufaktura.first { $0.key == selectedHallKey }?.name
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -24,18 +31,7 @@ struct PlayerTopBar: View {
             .glassEffect(.regular, in: .circle)
             .accessibilityLabel("Back")
 
-            HStack {
-                Text(sessionName)
-                    .font(.system(size: 15, weight: .medium))
-                    .kerning(-0.3)
-                    .foregroundStyle(Tokens.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, 18)
-            .frame(height: 44)
-            .glassEffect(.regular, in: .capsule)
+            hallMenu
 
             if clipAvailable {
                 Button(action: onClip) {
@@ -62,6 +58,53 @@ struct PlayerTopBar: View {
             .accessibilityLabel(cinemaActive ? "Exit cinema mode" : "Enter cinema mode")
         }
         .padding(.horizontal, 14)
+    }
+
+    private var hallSelection: Binding<String?> {
+        Binding(
+            get: { selectedHallKey },
+            set: { key in
+                guard let hall = Hall.manufaktura.first(where: { $0.key == key }) else { return }
+                onSelectHall(hall)
+            }
+        )
+    }
+
+    private var hallMenu: some View {
+        Menu {
+            Picker("Зал", selection: hallSelection) {
+                ForEach(Hall.manufaktura) { hall in
+                    Text(hall.name).tag(Optional(hall.key))
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            VStack(spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(sessionName)
+                        .font(.system(size: 15, weight: .medium))
+                        .kerning(-0.3)
+                        .foregroundStyle(Tokens.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: Icons.chevronDown)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Tokens.text2)
+                }
+                if let hallLine {
+                    Text(hallLine)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(Tokens.text2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .contentShape(.capsule)
+        }
+        .glassEffect(.regular, in: .capsule)
     }
 
     private var trackMenu: some View {

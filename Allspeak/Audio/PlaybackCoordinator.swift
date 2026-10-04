@@ -34,6 +34,7 @@ final class PlaybackCoordinator {
     private(set) var revision: Int = 0
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
+    private(set) var selectedHallKey: String?
     private var isSwitching: Bool = false
     // Bumped by every startSession/endSession so an invocation resuming from
     // its awaits can detect it was superseded and must not publish state.
@@ -174,6 +175,7 @@ final class PlaybackCoordinator {
         self.sessionTitle = snap.name
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
+        self.selectedHallKey = nil
         self.repository = repository
         self.storage = storage
         self.persistence = persistence
@@ -282,6 +284,7 @@ final class PlaybackCoordinator {
         self.sessionTitle = title
         self.tracks = []
         self.activeTrackID = nil
+        self.selectedHallKey = nil
         self.revision += 1
         diagnostics.begin(filmTitle: title)
         diagnostics.log(.session(Self.sessionHeader(
@@ -533,6 +536,7 @@ final class PlaybackCoordinator {
         self.sessionTitle = ""
         self.tracks = []
         self.activeTrackID = nil
+        self.selectedHallKey = nil
         self.repository = nil
         self.isSwitching = false
         #if os(iOS)
@@ -661,6 +665,12 @@ final class PlaybackCoordinator {
     func noteWatchReachable(_ reachable: Bool) {
         guard let controller else { return }
         diagnostics.log(.watch(reachable: reachable, pos: controller.livePosition))
+    }
+
+    func selectHall(_ hall: Hall) {
+        guard let controller else { return }
+        selectedHallKey = hall.key
+        diagnostics.log(.hall(key: hall.key, name: hall.name, cinema: Hall.manufakturaCinemaID, pos: controller.livePosition))
     }
 
     func apply(_ command: WatchCommand) {

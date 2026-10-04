@@ -4,6 +4,7 @@ enum Icons {
     static let plus           = "plus"
     static let chevronLeft    = "chevron.backward"
     static let chevronRight   = "chevron.right"
+    static let chevronDown    = "chevron.down"
     static let play           = "play.fill"
     static let pause          = "pause.fill"
     static let skipForward    = "goforward"
