@@ -1239,4 +1239,240 @@ struct WatchSessionClientTests {
         #expect(client.metadata?.fingerprintSize == 1234)
     }
 
+    // MARK: - Cinema listen
+
+    @MainActor
+    final class FakeListener: CinemaListening {
+        private(set) var onEvent: (@MainActor (ListenEvent) -> Void)?
+        private(set) var cancelCount = 0
+
+        func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
+            self.onEvent = onEvent
+            onEvent(ListenEvent(phase: .started, listenSeconds: 0))
+        }
+
+        func cancel() {
+            cancelCount += 1
+            send(.cancelled)
+        }
+
+        func send(_ phase: ListenEvent.Phase, seconds: Double = 1) {
+            let handler = onEvent
+            if phase != .started { onEvent = nil }
+            handler?(ListenEvent(phase: phase, listenSeconds: seconds))
+        }
+    }
+
+    private static func sentCommands(_ messages: [[String: Any]]) -> [WatchCommand] {
+        messages.compactMap { try? WatchCommand(propertyList: $0) }
+    }
+
+    private func makeListeningClient() throws -> (WatchSessionClient, MockSender, FakeListener, URL) {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        try cache.save(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        let listener = FakeListener()
+        client.makeListener = { _ in listener }
+        sender.sentMessages = []
+        return (client, sender, listener, dir)
+    }
+
+    private static let listenMatch = FingerprintMatch(
+        trackTime: 612.5,
+        matchDate: Date(timeIntervalSince1970: 1_000_000),
+        chunkStart: 600
+    )
+
+    @Test("startListening sends the command, starts the watch listener and forwards its events")
+    func startListeningStartsBoth() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+
+        #expect(listener.onEvent != nil)
+        #expect(client.listenPanel.phase == .listening)
+        let commands = Self.sentCommands(sender.sentMessages)
+        #expect(commands.first == .startListening)
+        #expect(commands.contains(.listenEvent(ListenUpdate(source: .watch, phase: .start, listenSeconds: 0))))
+    }
+
+    @Test("a watch match is shown and sent to the phone as a listenEvent")
+    func watchMatchForwarded() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch), seconds: 7)
+
+        #expect(client.listenPanel.shownMatch == ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch))
+        #expect(client.listenPanel.phone.isListening)
+        let expected = WatchCommand.listenEvent(ListenUpdate(source: .watch, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 7)))
+        #expect(Self.sentCommands(sender.sentMessages).contains(expected))
+    }
+
+    @Test("a listenUpdate payload updates the phone source")
+    func listenUpdateUpdatesPhone() throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let update = ListenUpdate(source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try update.toPropertyList())
+
+        #expect(client.listenPanel.phone == .matched(Self.listenMatch))
+        #expect(client.listenPanel.shownMatch == ListenPanelState.ShownMatch(source: .phone, match: Self.listenMatch))
+        #expect(client.listenPanel.watch.isListening)
+    }
+
+    @Test("a listenUpdate from the watch source or without match fields is ignored")
+    func listenUpdateIgnoresWrongSource() throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let watchUpdate = ListenUpdate(source: .watch, phase: .timeout, listenSeconds: 120)
+        client.handleReceivedMessage(try watchUpdate.toPropertyList())
+        let brokenMatch = ListenUpdate(source: .phone, phase: .match, listenSeconds: 3)
+        client.handleReceivedMessage(try brokenMatch.toPropertyList())
+
+        #expect(client.listenPanel.phone.isListening)
+        #expect(client.listenPanel.shownMatch == nil)
+    }
+
+    @Test("a snapshot message still goes to the snapshot path")
+    func snapshotMessageStillRouted() throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = try #require(client.metadata)
+        let snapshot = PlaybackSnapshot(
+            sessionID: meta.sessionID, revision: meta.revision,
+            currentTime: 42, duration: 7200, currentIndex: 0,
+            isPlaying: true, serverDate: Date()
+        )
+
+        client.handleReceivedMessage(try snapshot.toPropertyList())
+
+        #expect(client.lastSnapshot?.currentTime == 42)
+    }
+
+    @Test("cancelListening cancels both listeners and resets the panel")
+    func cancelListeningStopsBoth() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        sender.sentMessages = []
+        client.cancelListening()
+
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel == ListenPanelState())
+        let commands = Self.sentCommands(sender.sentMessages)
+        #expect(commands.contains(.cancelListening))
+        #expect(commands.contains(.listenEvent(ListenUpdate(source: .watch, phase: .cancel, listenSeconds: 1))))
+    }
+
+    @Test("applyShownMatch sends applySync and stops the watch listener")
+    func applyShownMatchSendsApplySync() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let update = ListenUpdate(source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try update.toPropertyList())
+        sender.sentMessages = []
+        client.applyShownMatch()
+
+        let commands = Self.sentCommands(sender.sentMessages)
+        let apply = WatchCommand.applySync(trackTime: 612.5, matchDate: Self.listenMatch.matchDate, source: .phone)
+        #expect(commands.contains(apply))
+        #expect(!commands.contains(.cancelListening))
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel.phase == .applied(ListenPanelState.ShownMatch(source: .phone, match: Self.listenMatch)))
+    }
+
+    @Test("applyShownMatch cancels a phone that is still listening before the apply")
+    func applyCancelsListeningPhoneFirst() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.sentMessages = []
+        client.applyShownMatch()
+
+        let commands = Self.sentCommands(sender.sentMessages)
+        let apply = WatchCommand.applySync(trackTime: 612.5, matchDate: Self.listenMatch.matchDate, source: .watch)
+        let cancelIndex = try #require(commands.firstIndex(of: .cancelListening))
+        let applyIndex = try #require(commands.firstIndex(of: apply))
+        #expect(cancelIndex < applyIndex)
+        #expect(listener.cancelCount == 0)
+    }
+
+    @Test("applyShownMatch without a match sends nothing")
+    func applyWithoutMatchSendsNothing() throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        sender.sentMessages = []
+        client.applyShownMatch()
+
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("without a fingerprint the watch source fails and the phone keeps listening")
+    func startWithoutFingerprintFailsWatch() throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+
+        #expect(client.listenPanel.watch == .failed("no fingerprint"))
+        #expect(client.listenPanel.phone.isListening)
+        let failed = WatchCommand.listenEvent(ListenUpdate(source: .watch, phase: .failed, listenSeconds: 0, error: "no fingerprint"))
+        #expect(Self.sentCommands(sender.sentMessages).contains(failed))
+    }
+
+    @Test("an unreachable phone marks the phone source failed")
+    func unreachablePhoneFails() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        sender.nextError = WatchMessageError.notReachable
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(50))
+
+        guard case .failed = client.listenPanel.phone else {
+            Issue.record("phone source is \(client.listenPanel.phone)")
+            return
+        }
+        #expect(client.listenPanel.watch.isListening)
+        #expect(listener.onEvent != nil)
+    }
+
+    @Test("a second startListening while listening is ignored")
+    func startWhileListeningIgnored() throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let count = sender.sentMessages.count
+        client.startListening()
+
+        #expect(sender.sentMessages.count == count)
+    }
+
+    @Test("session end cancels the watch listener and resets the panel")
+    func sessionEndCancelsListening() throws {
+        let (client, _, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel == ListenPanelState())
+    }
 }

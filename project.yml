@@ -81,6 +81,7 @@ targets:
       - path: Allspeak/Watch/ComplicationState+Metadata.swift
       - path: Allspeak/Watch/FingerprintMatch.swift
       - path: Allspeak/Watch/FingerprintCache.swift
+      - path: Allspeak/Watch/ListenPanelState.swift
     dependencies:
       - target: AllspeakWatchWidget
       - sdk: ShazamKit.framework

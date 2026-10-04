@@ -301,29 +301,32 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Modify: `Allspeak/Watch/WatchSessionClient.swift`
 - Create: `AllspeakTests/ListenPanelStateTests.swift`
 
-- [ ] `ListenPanelState`:
+- [x] `ListenPanelState`:
   - per-source status: idle, listening(since), matched(FingerprintMatch), noMatch, timedOut, interrupted, failed(msg), cancelled;
   - plus `shownMatch` (the first match from either source) and `applied`;
   - reducers `start(now:)`, `receive(source:event:now:)`, `apply()`, `dismiss()`;
   - `delta(interpolatedPosition:now:)` returns `trackTime + (now - matchDate) - interpolatedPosition`;
   - display strings: "слушаю 0:23", "+2.4 с" / "-1.8 с", "нет совпадения", "прервано".
-- [ ] `WatchCinemaListener: CinemaListening` (watch only):
+- [x] `WatchCinemaListener: CinemaListening` (watch only):
   - uses `SHManagedSession(catalog:)` with the catalog from `FingerprintCache`;
   - loops `await session.result()` until a `.match` whose media item parses via `FingerprintMatch.make`, the 120 s timeout or cancel;
   - when the app's scene phase leaves `.active`, it cancels and reports `interrupted`.
-- [ ] `WatchSessionClient`:
+- [x] `WatchSessionClient`:
   - `startListening()` sends `.startListening`, starts the watch listener if `hasFingerprint`, and feeds both sources into `ListenPanelState`. Watch events are also sent to the phone as `.listenEvent`.
   - `cancelListening()` cancels both.
   - `applyShownMatch()` sends `.applySync` for `shownMatch`.
   - Incoming `listenUpdate` payloads update the phone source.
-- [ ] write tests for `ListenPanelState`:
+- [x] write tests for `ListenPanelState`:
   - the first match wins and a later match from the other source does not replace it;
   - both sources can fail independently while the other keeps listening;
   - the delta string sign and rounding;
   - apply and dismiss transitions;
   - `interrupted` display;
   - a client test that a `listenUpdate` payload updates the phone source.
-- [ ] run tests - must pass before task 8
+- [x] ➕ `WatchSessionClient.makeListener` is a factory the watch app sets (`WatchCinemaListener` is watch-only, the client is shared); `didReceiveMessage` branches on the payload kind so `listenUpdate` no longer falls into the snapshot decoder.
+- [x] ➕ a `.startListening` send error marks the phone source `failed`, so "Телефон: слушаю" never sticks when the phone is unreachable.
+- [x] ➕ `applyShownMatch()` sends `.cancelListening` before `.applySync` when the phone is still listening and cancels the watch listener; a session end cancels the watch listener and resets the panel.
+- [x] run tests - must pass before task 8
 
 ### Task 8: Watch "Слушать" page
 
@@ -338,6 +341,8 @@ Put the session behind a small protocol so tests can assert the exact calls and 
   - match: a big offset ("+2.4 с"), the source, and buttons "Применить" / "Отмена";
   - applied: a short "Готово" confirmation, then back to idle.
   - Play the existing click haptic on match. Reuse the existing watch tokens and glass styling.
+- ➕ the "Готово" to idle return calls `client.cancelListening()`: it sends nothing when no source is listening and resets the panel with `dismiss()`.
+- ➕ when both sources end without a match, `listenPanel.phase` is `.idle` but the per-source statuses stay ("нет совпадения" / "прервано" / "ошибка: ..."); render them under the "Слушать" button in the idle layout so the outcome stays visible.
 - [ ] simulator smoke: with the project `simulator` skill and a fake listener path (a debug-only injection used by the smoke run), step through idle, listening, match and applied, and capture screenshots. Do not ship the fake in release code paths.
 - [ ] run tests - must pass before task 9
 

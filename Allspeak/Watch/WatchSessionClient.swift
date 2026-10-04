@@ -18,6 +18,7 @@ final class WatchSessionClient: NSObject {
     var isConnected: Bool = false
     var interpolationTick: UInt64 = 0
     var fingerprintURL: URL?
+    var listenPanel = ListenPanelState()
 
     var tracks: [TrackInfo] { metadata?.tracks ?? [] }
     var activeTrackID: UUID? { metadata?.activeTrackID }
@@ -39,6 +40,8 @@ final class WatchSessionClient: NSObject {
     }
 
     @ObservationIgnored var onMetadataChange: (@MainActor (SessionMetadata?) -> Void)?
+    @ObservationIgnored var makeListener: (@MainActor (URL) -> any CinemaListening)?
+    @ObservationIgnored private var watchListener: (any CinemaListening)?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
@@ -208,6 +211,7 @@ final class WatchSessionClient: NSObject {
 
     func handleReceivedApplicationContext(_ context: [String: Any]) {
         if SessionEndedSignal.isSessionEnded(context) {
+            cancelListening()
             self.metadata = nil
             self.cues = []
             self.lastSnapshot = nil
@@ -417,6 +421,74 @@ final class WatchSessionClient: NSObject {
         startFingerprintDownloadIfNeeded(sha256: sha256)
     }
 
+    // MARK: - Cinema listen
+
+    func startListening() {
+        guard !listenPanel.isListening else { return }
+        listenPanel.start(now: Date())
+        sendCommand(.startListening, errorHandler: { [weak self] error in
+            let message = error.localizedDescription
+            Task { @MainActor in
+                self?.receiveListenEvent(source: .phone, event: ListenEvent(phase: .failed(message), listenSeconds: 0))
+            }
+        })
+        startWatchListener()
+    }
+
+    func cancelListening() {
+        if listenPanel.phone.isListening {
+            send(.cancelListening)
+        }
+        watchListener?.cancel()
+        watchListener = nil
+        listenPanel.dismiss()
+    }
+
+    func applyShownMatch() {
+        guard let shown = listenPanel.shownMatch, !listenPanel.applied else { return }
+        if listenPanel.phone.isListening {
+            send(.cancelListening)
+        }
+        send(.applySync(trackTime: shown.match.trackTime, matchDate: shown.match.matchDate, source: shown.source))
+        listenPanel.apply()
+        watchListener?.cancel()
+        watchListener = nil
+    }
+
+    func handleReceivedMessage(_ payload: [String: Any]) {
+        guard (payload[WirePayloadKey.kind] as? String) == WirePayloadKind.listenUpdate.rawValue else {
+            handleReceivedSnapshot(payload)
+            return
+        }
+        guard let update = try? ListenUpdate(propertyList: payload),
+              update.source == .phone,
+              let event = update.event else { return }
+        receiveListenEvent(source: .phone, event: event)
+    }
+
+    private func startWatchListener() {
+        guard let url = fingerprintURL, let makeListener else {
+            handleWatchListenEvent(ListenEvent(phase: .failed("no fingerprint"), listenSeconds: 0))
+            return
+        }
+        let listener = makeListener(url)
+        watchListener = listener
+        listener.start { [weak self] event in
+            self?.handleWatchListenEvent(event)
+        }
+    }
+
+    private func handleWatchListenEvent(_ event: ListenEvent) {
+        receiveListenEvent(source: .watch, event: event)
+        send(.listenEvent(ListenUpdate(source: .watch, event: event)))
+        guard event.phase != .started else { return }
+        watchListener = nil
+    }
+
+    private func receiveListenEvent(source: ListenSource, event: ListenEvent) {
+        listenPanel.receive(source: source, event: event, now: Date())
+    }
+
     #if os(watchOS)
     func register(backgroundTask: WKWatchConnectivityRefreshBackgroundTask) {
         pendingBackgroundTasks.append(backgroundTask)
@@ -497,7 +569,7 @@ extension WatchSessionClient: WCSessionDelegate {
     nonisolated func session(_: WCSession, didReceiveMessage message: [String: Any]) {
         let bridge = SendableDictionary(value: message)
         Task { @MainActor in
-            self.handleReceivedSnapshot(bridge.value)
+            self.handleReceivedMessage(bridge.value)
         }
     }
 
