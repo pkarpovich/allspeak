@@ -235,13 +235,13 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Create: `Allspeak/Audio/PhoneCinemaListener.swift` (iOS target only)
 - Create: `AllspeakTests/PhoneCinemaListenerTests.swift`
 
-- [ ] implement `PhoneCinemaListener: CinemaListening`, `@MainActor`:
+- [x] implement `PhoneCinemaListener: CinemaListening`, `@MainActor`:
   - init takes the catalog URL, an audio-session seam, a capture seam (engine tap), a matcher factory (wrapping `SHSession` plus a delegate proxy), a timeout `Duration` (default 120 s), a mic-permission closure and `now`;
   - it reports `started`, then exactly one terminal event;
   - on the first `didFind`, build `FingerprintMatch` from the first media item whose subtitle parses;
   - a `didNotFindMatch` without an error is not terminal, because streaming continues until timeout.
-- [ ] configure and restore the audio session exactly as in Technical Details. Restore on every terminal path, including cancel and failure.
-- [ ] write tests with fakes:
+- [x] configure and restore the audio session exactly as in Technical Details. Restore on every terminal path, including cancel and failure.
+- [x] write tests with fakes:
   - the session receives `.playAndRecord` / `.default` / `[.allowBluetoothA2DP]`, then `setActive(true)`, then preferred input built-in mic;
   - `activatePlayback` runs on match, timeout, cancel and failure;
   - a denied mic permission gives `failed`, and the session is never switched;
@@ -249,7 +249,7 @@ Put the session behind a small protocol so tests can assert the exact calls and 
   - a garbage subtitle followed by a valid match yields the valid one;
   - a timeout yields `timedOut`;
   - only one terminal event is emitted.
-- [ ] run tests - must pass before task 5
+- [x] run tests - must pass before task 5
 
 ### Task 5: Fingerprint on the watch link (metadata and chunked pull)
 
