@@ -194,6 +194,10 @@ struct PlaybackCoordinatorTests {
         #expect(coordinator.currentMetadata() == nil)
     }
 
+    private static func blockMainRunLoop(seconds: TimeInterval) {
+        Thread.sleep(forTimeInterval: seconds)
+    }
+
     private struct MultiTrackFixture {
         let coordinator: PlaybackCoordinator
         let persistence: PersistenceController
@@ -293,6 +297,26 @@ struct PlaybackCoordinatorTests {
         let drift = abs(controller.currentTime - 2.5)
         #expect(drift < 0.2)
         #expect(fixture.coordinator.revision == beforeRevision)
+    }
+
+    @Test("switchTrack resumes from the live player position, not the stale display-link clock")
+    func switchTrackResumesFromLivePosition() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let controller = try #require(fixture.coordinator.controller)
+        controller.play()
+        Self.blockMainRunLoop(seconds: 0.6)
+        let stale = controller.currentTime
+        let live = controller.livePosition
+        try #require(live - stale > 0.3)
+
+        try await fixture.coordinator.switchTrack(to: fixture.track2UUID)
+
+        #expect(controller.currentTime >= live - 0.05)
+        #expect(controller.isPlaying)
     }
 
     @Test("switchTrack to the active track is a no-op")

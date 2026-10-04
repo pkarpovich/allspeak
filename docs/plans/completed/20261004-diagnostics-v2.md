@@ -221,6 +221,7 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
   - `track` is logged once on a successful switch and not on a failed one.
 - [x] run tests - must pass before task 4
 - ➕ `from` on skip and seek reads `controller.livePosition` (the player's own clock) instead of `currentTime`, which goes stale while backgrounded; `AudioController.skip` adds `seconds` to that same clock, so `to - from == seconds` holds unless clamped
+- ⚠️ deviation from the "no change to playback behavior" non-goal: `switchTrack(to:)` and `refreshIfActive(sessionID:)` now resume the new track from `controller.livePosition` instead of `currentTime`. The old value goes stale while backgrounded, so a track switch from the watch with the phone in a pocket jumped the audio back to where the app was backgrounded. In the foreground both values match, so playback is unchanged there. Pinned by `switchTrackResumesFromLivePosition`
 - ➕ the header's `trackFile` falls back to the session's `audioFilename` when the session has no tracks; the lightweight overload writes `audio.lastPathComponent` and no catalog fields
 
 ### Task 4: DiagnosticsMonitor (heartbeat, route changes, interruptions)
