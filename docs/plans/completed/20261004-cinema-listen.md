@@ -357,11 +357,11 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 
 ### Task 10: [Final] Update documentation
 
-- [ ] README:
+- [x] README:
   - the catalog section gets the optional fingerprint;
   - a new "Cinema listen" section covers the watch page, the phone and watch mics, apply, and the `listen` log event;
   - diagnostics gets the `listen` event and the `sync` source.
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

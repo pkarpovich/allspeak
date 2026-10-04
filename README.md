@@ -105,15 +105,51 @@ In `PlayerView`, a toolbar `Menu` appears when a session has more than one
 track. Tapping it lists every track with a checkmark on the active one;
 selecting another switches the playing audio while preserving the current
 position (~100-300ms gap during reload, no crossfade). The same list lives
-on the Apple Watch as a third TabView page — see below.
+on the Apple Watch as its own TabView page - see below.
 
 ### Resyncing in the cinema
 
-There is no mic matching, no offset arithmetic, and no calibration. When the dub
-drifts from the screen, tap the subtitle line currently showing — on the phone's
-scrolling subtitle window or in the watch's cue list — and the audio seeks to
-that line's timestamp. The skip controls cover the fine adjustment from there —
-±0.5s on the phone's player, ±3s / ±1s on the watch transport.
+When the dub drifts from the screen, tap the subtitle line currently showing -
+on the phone's scrolling subtitle window or in the watch's cue list - and the
+audio seeks to that line's timestamp. The skip controls cover the fine
+adjustment from there - ±0.5s on the phone's player, ±3s / ±1s on the watch
+transport. Sessions that carry a fingerprint can also resync from the hall's
+sound, see below.
+
+### Cinema listen
+
+A catalog session can carry an optional ShazamKit fingerprint (a
+`.shazamcatalog` built on the Mac from the music and effects of the same RU
+track, in 600 s chunks with 30 s overlap; each chunk's media item has
+`subtitle = "abs_start=<seconds>"`). When it does, the watch shows a `Слушать`
+page right after the transport page. There is no listening UI on the phone and
+no automatic or background listening.
+
+- One tap on `Слушать` starts two independent listeners at once: the phone's
+  built-in mic and the watch mic. The page shows a status line per source
+  (`Телефон: слушаю 0:23`, `Часы: нет совпадения`, `прервано`, `ошибка: ...`),
+  a `Стоп` button, and a hint to keep the wrist raised.
+- The first match from either source shows a card with the offset
+  (`+2.4 с`), the source, and `Применить` / `Отмена`, with a click haptic. The
+  watch computes the offset as `(trackTime + (now - matchDate)) - position`,
+  where `trackTime = abs_start + predictedCurrentMatchOffset`.
+- `Применить` stops both listeners, shows `Готово`, and sends
+  `applySync(trackTime:matchDate:source:)`. The phone seeks to
+  `trackTime + (now - matchDate) + outputLatency` with the `sync` source.
+- Each listener stops on its first match, after 120 s, or on `Стоп`. The watch
+  listener (`SHManagedSession`) also stops as `interrupted` when the watch app
+  leaves the active phase (wrist down).
+- The phone listener uses `SHSession` with its own `AVAudioEngine` input tap.
+  While listening the audio session is `.playAndRecord` / `.default` with
+  options exactly `[.allowBluetoothA2DP]` and the built-in mic as preferred
+  input, so AirPods keep playing over A2DP instead of switching to the HFP mic.
+  The player keeps playing, and `.playback` / `.spokenAudio` is restored
+  afterwards.
+- The watch pulls the fingerprint from the phone in ~30 KB `sendMessage` chunks
+  (`requestFingerprintChunk(sha256:index:)`, like the cue bundle) and keeps
+  only the latest file in Application Support, keyed by sha256.
+- Both sources write `listen` events to the phone's diagnostics log (the watch
+  reports its phases to the phone), so the logs show which mic matches better.
 
 ### Session diagnostics
 
@@ -129,8 +165,9 @@ written as `1` / `0`. Event types:
   build, device and OS.
 - `play` / `pause` - user transport.
 - `skip` - `seconds` and `source` (phone or watch), position before and after.
-- `seek` - target `time`, `source`, position before, and the subtitle `cue`
-  index when the seek came from tapping a line.
+- `seek` - target `time`, `source` (phone, watch, or `sync` for an applied
+  cinema-listen match), position before, and the subtitle `cue` index when the
+  seek came from tapping a line.
 - `track` - track switch.
 - `tick` - every 30 s while a session is open: position, `playing`, audio
   route and output latency.
@@ -141,6 +178,11 @@ written as `1` / `0`. Event types:
 - `watch` - watch reachability change, `reachable` (only while a session is
   open).
 - `hall` - cinema hall picked in the player.
+- `listen` - a cinema-listen phase: `source` (phone or watch), `phase`
+  (`start`, `match`, `nomatch`, `timeout`, `cancel`, `interrupted`, `failed`,
+  `apply`), `listenSec`, and `error` on failure. A match adds `trackTime`, the
+  matched `chunk` start, `delta` against the current position and the output
+  `latency`; `apply` adds `elapsed` since the match and the seek `target`.
 
 The player's title capsule is a menu with the Cinema City Łódź Manufaktura hall
 list (IMAX, Sala 1-14). The hall is saved on the session, so it can be picked
@@ -174,6 +216,9 @@ title, total download size, and track labels.
    same `importMultiTrackSession` pipeline used for manual imports - an imported
    session is indistinguishable from a hand-made one and appears under `Mine`
    with its tracks (the server's default track pre-selected) and subtitles.
+   When the server lists an optional `fingerprint` (the ShazamKit catalog used
+   by cinema listen), it is downloaded too and stored in the session directory
+   as `fingerprint-<sha>-<name>`; sessions without one import as before.
 4. Downloads run inside a `BGContinuedProcessingTask`: locking the phone
    mid-download does not stop it, and the system shows a progress card. Files are
    staged and sha256-verified one at a time under `Application Support`, so a
@@ -194,6 +239,8 @@ a sync sheet that shows, per file, whether it `changed` or is the `same`, plus
 the total download size. Applying the sync downloads **only** the changed files
 and reconciles the local session with existing repository mutations (add / remove
 track, replace subtitle, rename), preserving the current playback position.
+The fingerprint is diffed like any other file, so a revision that only adds or
+changes it downloads just the fingerprint.
 
 ### Build-time config (the iOS ".env")
 
@@ -262,9 +309,12 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
   volume. As a consequence of the system locking fill direction to rotation
   direction, turning the Crown **down** raises the volume. Rapid rotation
   coalesces into a single trailing-edge command.
-- **Page 2** (swipe up): scrollable list of all cues with the current line
+- **Listen page** (swipe up, only when the session has a fingerprint):
+  `Слушать` resyncs from the hall's sound, see
+  [Cinema listen](#cinema-listen).
+- **Cue list** (swipe up): scrollable list of all cues with the current line
   highlighted; tap any line to seek the iPhone audio to that timestamp.
-- **Page 3** (swipe up again): list of audio tracks on the current
+- **Track list** (swipe up again): list of audio tracks on the current
   session, with a checkmark on the active one. Tap any track to switch
   the iPhone-side audio. Shows a `Single track` placeholder when the
   session has only one track.
@@ -283,10 +333,13 @@ seek-to-cue, set volume) to the iPhone, which remains the audio host.
 
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
-`setVolume(_:)`, and `requestCueChunk(sessionID:revision:index:)`. Session
-metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
-the current `activeTrackID`, and an optional `serverDate` playback anchor
-(decoded with `decodeIfPresent`, so an older phone build still decodes). The
+`setVolume(_:)`, `requestCueChunk(sessionID:revision:index:)`, and for cinema
+listen `requestFingerprintChunk(sha256:index:)`, `startListening`,
+`cancelListening`, `listenEvent(_:)` and `applySync(trackTime:matchDate:source:)`.
+Session metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
+the current `activeTrackID`, an optional `serverDate` playback anchor, and
+optional `fingerprintSHA` / `fingerprintSize` (all decoded with
+`decodeIfPresent`, so an older phone build still decodes). The
 wire contract lives in
 `Allspeak/Watch/WireProtocol.swift` — see the header comment there for
 the protocol summary.
