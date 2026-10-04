@@ -765,8 +765,6 @@ struct PlaybackCoordinatorTests {
         #expect(records[4]["source"] as? String == "phone")
     }
 
-    // MARK: - Diagnostics positions, header and track switches
-
     @Test("a subtitle-tap seek to an exact cue start logs the cue index and the prior position")
     func seekToCueStartLogsCue() throws {
         let (log, diagRoot) = Self.makeTempDiagnostics()

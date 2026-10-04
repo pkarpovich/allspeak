@@ -296,11 +296,15 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] verify every row of the event schema table is produced by some code path (grep the event names in `DiagnosticsEvent.swift` against call sites).
-- [ ] run the acceptance scenario from Overview in the simulator (project `simulator` skill) and inspect the produced JSONL in the app container's `Documents/diagnostics/`.
-- [ ] confirm old-key compatibility: every `play`, `pause`, `skip` and `seek` line in the acceptance JSONL still has the old keys (`event`; `seconds` + `source` on skips; `time` + `source` on seeks) with unchanged meaning.
-- [ ] run the full test suite: the test command from Code-Quality Rules.
-- [ ] verify no new comments and no new warnings in touched files.
+- [x] verify every row of the event schema table is produced by some code path (grep the event names in `DiagnosticsEvent.swift` against call sites).
+- [x] run the acceptance scenario from Overview in the simulator (project `simulator` skill) and inspect the produced JSONL in the app container's `Documents/diagnostics/`.
+- [x] confirm old-key compatibility: every `play`, `pause`, `skip` and `seek` line in the acceptance JSONL still has the old keys (`event`; `seconds` + `source` on skips; `time` + `source` on seeks) with unchanged meaning.
+- [x] run the full test suite: the test command from Code-Quality Rules.
+- [x] verify no new comments and no new warnings in touched files.
+- ➕ acceptance ran on "The Invite" (imported from the catalog, 3 tracks) since the local sessions had one track each; the JSONL had `session` first, `seek` with `from` and `cue: 1`, `skip` with `to - from == seconds`, one `track`, one `hall` (`Sala 3 Tarczyński`, shown as the capsule's second line), two `app` lines and four `tick` lines at 30 s spacing
+- ➕ `route`, `interruption` and `watch` have call sites (`DiagnosticsMonitor`, `WatchSessionHost`) and unit tests, but the simulator scenario does not trigger them; they are covered by the manual AirPods/Siri home run in Post-Completion
+- ➕ removed a `// MARK:` line added in Task 3 to `PlaybackCoordinatorTests.swift` (no new comments rule)
+- ➕ on the simulator `device` is `arm64` (`utsname.machine`); on a phone it is the model id. `latency` can print in exponent form (`9.9999e-05`), which is valid JSON
 
 ### Task 8: [Final] Update documentation
 
