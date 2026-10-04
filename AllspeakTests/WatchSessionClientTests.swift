@@ -1422,6 +1422,22 @@ struct WatchSessionClientTests {
         #expect(sender.sentMessages.isEmpty)
     }
 
+    @Test("cancelListening after an apply sends nothing and returns the panel to idle")
+    func cancelAfterApplyReturnsToIdle() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        client.applyShownMatch()
+        sender.sentMessages = []
+        client.cancelListening()
+
+        #expect(sender.sentMessages.isEmpty)
+        #expect(client.listenPanel.phase == .idle)
+        #expect(client.listenPanel == ListenPanelState())
+    }
+
     @Test("without a fingerprint the watch source fails and the phone keeps listening")
     func startWithoutFingerprintFailsWatch() throws {
         let (client, sender, dir) = try makeClient()

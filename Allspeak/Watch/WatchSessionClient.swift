@@ -448,6 +448,7 @@ final class WatchSessionClient: NSObject {
         guard let shown = listenPanel.shownMatch, !listenPanel.applied else { return }
         if listenPanel.phone.isListening {
             send(.cancelListening)
+            receiveListenEvent(source: .phone, event: ListenEvent(phase: .cancelled, listenSeconds: 0))
         }
         send(.applySync(trackTime: shown.match.trackTime, matchDate: shown.match.matchDate, source: shown.source))
         listenPanel.apply()

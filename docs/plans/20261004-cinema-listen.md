@@ -334,8 +334,8 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Create: `AllspeakWatch/Views/ListenView.swift`
 - Modify: `AllspeakWatch/ContentView.swift`, `AllspeakWatch/Tokens.swift` (an icon entry if needed)
 
-- [ ] add page `.listen` right after `.currentLine`, shown only when the client has a fingerprint for the current session. Fall back to `.currentLine` if it disappears while selected, the same as the track page.
-- [ ] `ListenView`, thin and driven by `ListenPanelState` from the client:
+- [x] add page `.listen` right after `.currentLine`, shown only when the client has a fingerprint for the current session. Fall back to `.currentLine` if it disappears while selected, the same as the track page.
+- [x] `ListenView`, thin and driven by `ListenPanelState` from the client:
   - idle: one large glass button "Слушать";
   - listening: two status lines (Телефон / Часы), a "Стоп" button, and a hint "держи руку поднятой" under the watch line;
   - match: a big offset ("+2.4 с"), the source, and buttons "Применить" / "Отмена";
@@ -343,8 +343,10 @@ Put the session behind a small protocol so tests can assert the exact calls and 
   - Play the existing click haptic on match. Reuse the existing watch tokens and glass styling.
 - ➕ the "Готово" to idle return calls `client.cancelListening()`: it sends nothing when no source is listening and resets the panel with `dismiss()`.
 - ➕ when both sources end without a match, `listenPanel.phase` is `.idle` but the per-source statuses stay ("нет совпадения" / "прервано" / "ошибка: ..."); render them under the "Слушать" button in the idle layout so the outcome stays visible.
-- [ ] simulator smoke: with the project `simulator` skill and a fake listener path (a debug-only injection used by the smoke run), step through idle, listening, match and applied, and capture screenshots. Do not ship the fake in release code paths.
-- [ ] run tests - must pass before task 9
+- [x] simulator smoke: with the project `simulator` skill and a fake listener path (a debug-only injection used by the smoke run), step through idle, listening, match and applied, and capture screenshots. Do not ship the fake in release code paths.
+- [x] ➕ the smoke harness is `AllspeakWatch/ListenSmoke.swift`, compiled only under `#if DEBUG` and enabled by the `-listenSmoke` launch argument: a client with a silent sender (the phone stays "слушаю"), a fake playing session with a fingerprint, and a fake watch listener that matches +2.4 s after 8 s. Screenshots of idle, listening, match, applied and back to idle are in `~/Downloads/allspeak-screenshots/listen-smoke/`. The Release watch build has no `ListenSmoke` symbols.
+- [x] ➕ `applyShownMatch()` marks the phone source `cancelled` locally when it sends `.cancelListening`, so the "Готово" return does not send a second cancel.
+- [x] run tests - must pass before task 9
 
 ### Task 9: Verify acceptance criteria
 

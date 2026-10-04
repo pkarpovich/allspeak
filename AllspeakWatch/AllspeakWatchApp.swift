@@ -11,6 +11,13 @@ struct AllspeakWatchApp: App {
     @State private var client: WatchSessionClient
 
     init() {
+        #if DEBUG
+        if let smoke = ListenSmoke.makeClientIfRequested() {
+            smoke.startInterpolationTimer()
+            self._client = State(initialValue: smoke)
+            return
+        }
+        #endif
         let shared = WatchSessionClient.shared
         shared.onMetadataChange = ComplicationPublisher.publish
         shared.makeListener = { WatchCinemaListener(catalogURL: $0) }
