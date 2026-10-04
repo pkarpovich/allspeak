@@ -120,8 +120,9 @@ that line's timestamp. The skip controls cover the fine adjustment from there �
 Playing any session writes a per-screening JSONL log to
 `Documents/diagnostics/` (pulled via the Files app) for after-the-fact analysis
 on the Mac. It is always on and has no setting. Every line carries `ts` and
-`event`, and every event records the track position (`pos`, or `from` / `to`
-for skips) in track seconds. Event types:
+`event`. Every event except `session` records the track position in track
+seconds: `pos`, or `from` / `to` for skips and `from` for seeks. Booleans are
+written as `1` / `0`. Event types:
 
 - `session` - first line: session, title, track (id, label, file, SHA), catalog
   id and revision, app version, build, device and OS.
@@ -130,12 +131,14 @@ for skips) in track seconds. Event types:
 - `seek` - target `time`, `source`, position before, and the subtitle `cue`
   index when the seek came from tapping a line.
 - `track` - track switch.
-- `tick` - every 30 s while a session is open: position, playing state, audio
+- `tick` - every 30 s while a session is open: position, `playing`, audio
   route and output latency.
 - `route` - audio route change with its reason.
 - `interruption` - audio interruption began / ended.
-- `app` - app moved to foreground / background.
-- `watch` - watch reachability change.
+- `app` - app moved to background / back to foreground (only while a session
+  is open).
+- `watch` - watch reachability change, `reachable` (only while a session is
+  open).
 - `hall` - cinema hall picked in the player.
 
 The player's title capsule is a menu with the Cinema City Łódź Manufaktura hall

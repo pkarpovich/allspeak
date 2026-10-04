@@ -818,6 +818,29 @@ struct PlaybackCoordinatorTests {
         #expect(seek["cue"] == nil)
     }
 
+    @Test("a seek within 0.001 s of a cue start logs the cue, and one further away omits it")
+    func seekCueMatchTolerance() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Tolerance", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: Self.cues[1].start + 0.0005)
+        coordinator.seek(to: Self.cues[1].start + 0.002)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["cue"] as? Int } == [1, nil])
+    }
+
     @Test("skip logs from and to consistent with seconds, clamped at zero and at the duration")
     func skipLogsClampedFromTo() throws {
         let (log, diagRoot) = Self.makeTempDiagnostics()
@@ -873,8 +896,8 @@ struct PlaybackCoordinatorTests {
             revision: 7,
             subtitle: .init(filename: "subs.srt", sha256: "srt-sha"),
             tracks: [
-                .init(filename: "loud.caf", sha256: "loud-sha", label: "Loudnorm", trackID: fixture.track1UUID),
                 .init(filename: "dfn.caf", sha256: "dfn-sha", label: "DFN", trackID: fixture.track2UUID),
+                .init(filename: "loud.caf", sha256: "loud-sha", label: "Loudnorm", trackID: fixture.track1UUID),
             ]
         )
         try sidecar.save(to: fixture.storage.sessionDir(for: fixture.sessionUUID))
@@ -902,6 +925,46 @@ struct PlaybackCoordinatorTests {
         #expect(header["trackSHA"] as? String == "loud-sha")
         #expect(header["catalogID"] as? String == catalogID.uuidString)
         #expect(header["catalogRev"] as? Int == 7)
+    }
+
+    @Test("the session header omits trackSHA but keeps catalog fields when server.json has no entry for the active track")
+    func sessionHeaderWithoutSidecarTrackEntry() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        fixture.coordinator.endSession()
+
+        let catalogID = UUID()
+        let sidecar = CatalogSidecar(
+            serverID: catalogID,
+            revision: 3,
+            subtitle: .init(filename: "subs.srt", sha256: "srt-sha"),
+            tracks: [
+                .init(filename: "dfn.caf", sha256: "dfn-sha", label: "DFN", trackID: fixture.track2UUID),
+            ]
+        )
+        try sidecar.save(to: fixture.storage.sessionDir(for: fixture.sessionUUID))
+
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        fixture.coordinator.diagnostics = log
+
+        try await fixture.coordinator.startSession(
+            sessionID: fixture.sessionID,
+            repository: fixture.repo,
+            persistence: fixture.persistence,
+            storage: fixture.storage
+        )
+
+        let records = try Self.readJSONLines(try #require(log.currentFileURL))
+        let header = try #require(records.first)
+        #expect(header["trackID"] as? String == fixture.track1UUID.uuidString)
+        #expect(header["trackSHA"] == nil)
+        #expect(header["catalogID"] as? String == catalogID.uuidString)
+        #expect(header["catalogRev"] as? Int == 3)
     }
 
     @Test("the session header omits catalog fields when there is no server.json")
@@ -996,6 +1059,34 @@ struct PlaybackCoordinatorTests {
         #expect(abs(pos - 2.5) < 0.2)
     }
 
+    @Test("a refresh that changes the active track logs one track event with the new track and position")
+    func refreshTrackChangeLogsTrackEvent() async throws {
+        let fixture = try await Self.makeMultiTrackFixture()
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer {
+            fixture.coordinator.endSession()
+            fixture.coordinator.diagnostics = .shared
+            try? FileManager.default.removeItem(at: fixture.root)
+            try? FileManager.default.removeItem(at: diagRoot)
+        }
+        fixture.coordinator.diagnostics = log
+        log.begin(filmTitle: "Movie")
+        try #require(fixture.coordinator.controller).seek(to: 2.5)
+        try await fixture.repo.setActiveTrack(sessionID: fixture.sessionID, trackID: fixture.track2UUID)
+
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+
+        #expect(fixture.coordinator.activeTrackID == fixture.track2UUID)
+        let tracks = try Self.readJSONLines(try #require(log.currentFileURL))
+            .filter { $0["event"] as? String == "track" }
+        #expect(tracks.count == 1)
+        let track = try #require(tracks.first)
+        #expect(track["trackID"] as? String == fixture.track2UUID.uuidString)
+        #expect(track["trackLabel"] as? String == "DFN")
+        let pos = try #require(track["pos"] as? Double)
+        #expect(abs(pos - 2.5) < 0.2)
+    }
+
     @Test("a failed track switch logs no track event")
     func failedSwitchTrackLogsNothing() async throws {
         let fixture = try await Self.makeMultiTrackFixture()
@@ -1060,13 +1151,14 @@ struct PlaybackCoordinatorTests {
         }
 
         try coordinator.startSession(sessionUUID: UUID(), title: "Route", audio: audio, subtitles: Self.cues)
+        coordinator.seek(to: 1.5)
         let url = try #require(log.currentFileURL)
         Self.postOverrideRouteChange()
 
         let routes = try await Self.waitForLines(url, count: 1)
         #expect(routes.count == 1)
         let route = try #require(routes.first)
-        #expect(route["pos"] as? Double == 0)
+        #expect(route["pos"] as? Double == 1.5)
         #expect(route["route"] is String)
         #expect(route["routeName"] is String)
         #expect(try Self.readAllJSONLines(url).first?["event"] as? String == "session")
@@ -1089,13 +1181,13 @@ struct PlaybackCoordinatorTests {
 
         try coordinator.startSession(sessionUUID: UUID(), title: "First", audio: audio, subtitles: Self.cues)
         coordinator.endSession()
-        try coordinator.startSession(sessionUUID: UUID(), title: "Second", audio: audio, subtitles: Self.cues)
+        log.begin(filmTitle: "After")
+        log.log(.play(pos: 0))
         let url = try #require(log.currentFileURL)
         Self.postOverrideRouteChange()
 
-        _ = try await Self.waitForLines(url, count: 1)
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(try Self.overrideRouteLines(url).count == 1)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try Self.overrideRouteLines(url).isEmpty)
     }
 
     @Test("app state and watch reachability changes are logged with the position during a session")
@@ -1127,6 +1219,31 @@ struct PlaybackCoordinatorTests {
         #expect(records.map { $0["state"] as? String } == ["background", "foreground", nil, nil])
         #expect(records.map { $0["reachable"] as? Int } == [nil, nil, 0, 1])
         #expect(records.allSatisfy { $0["pos"] as? Double == 1.5 })
+    }
+
+    @Test("a foreground without a preceding background logs nothing")
+    func foregroundWithoutBackgroundIsNotLogged() throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Glance", audio: audio, subtitles: Self.cues)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteAppState(foreground: false)
+        coordinator.noteAppState(foreground: true)
+        coordinator.noteAppState(foreground: true)
+
+        let records = try Self.readTransportLines(try #require(log.currentFileURL))
+        #expect(records.map { $0["state"] as? String } == ["background", "foreground"])
     }
 
     @Test("app state and watch reachability changes log nothing without an active session")

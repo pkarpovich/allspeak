@@ -35,6 +35,7 @@ final class PlaybackCoordinator {
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
     private(set) var selectedHallKey: String?
+    private var isInBackground: Bool = false
     private var isSwitching: Bool = false
     // Bumped by every startSession/endSession so an invocation resuming from
     // its awaits can detect it was superseded and must not publish state.
@@ -176,6 +177,7 @@ final class PlaybackCoordinator {
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
         self.selectedHallKey = nil
+        self.isInBackground = false
         self.repository = repository
         self.storage = storage
         self.persistence = persistence
@@ -223,7 +225,7 @@ final class PlaybackCoordinator {
     private func startMonitor() {
         let monitor = DiagnosticsMonitor(
             snapshot: { [weak self] in
-                (self?.controller?.livePosition ?? 0, self?.controller?.isPlaying ?? false)
+                (self?.controller?.livePosition ?? 0, self?.controller?.isPlayerPlaying ?? false)
             },
             route: {
                 let session = AVAudioSession.sharedInstance()
@@ -285,6 +287,7 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.selectedHallKey = nil
+        self.isInBackground = false
         self.revision += 1
         diagnostics.begin(filmTitle: title)
         diagnostics.log(.session(Self.sessionHeader(
@@ -370,7 +373,7 @@ final class PlaybackCoordinator {
         }
 
         if let selectedTrack, previousActiveTrackID != selectedTrack.trackID {
-            let capturedTime = controller.currentTime
+            let capturedTime = controller.livePosition
             let wasPlaying = controller.isPlaying
             let cues = controller.subtitles
             let newURL = Self.resolveTrackURL(
@@ -389,6 +392,7 @@ final class PlaybackCoordinator {
                 if wasPlaying {
                     controller.play()
                 }
+                diagnostics.log(.track(trackID: selectedTrack.trackID, trackLabel: selectedTrack.label, pos: controller.currentTime))
                 if snap.activeTrackID != selectedTrack.trackID, let repository {
                     try? await repository.setActiveTrack(sessionID: sessionID, trackID: selectedTrack.trackID)
                     guard refreshGen == refreshGeneration, self.sessionID == sessionID, self.controller === controller, self.sessionUUID == sessionUUID else {
@@ -439,7 +443,7 @@ final class PlaybackCoordinator {
         isSwitching = true
         defer { isSwitching = false }
 
-        let capturedTime = controller.currentTime
+        let capturedTime = controller.livePosition
         let wasPlaying = controller.isPlaying
         let cues = controller.subtitles
 
@@ -537,6 +541,7 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.selectedHallKey = nil
+        self.isInBackground = false
         self.repository = nil
         self.isSwitching = false
         #if os(iOS)
@@ -624,13 +629,13 @@ final class PlaybackCoordinator {
     func play() {
         guard let controller else { return }
         controller.play()
-        diagnostics.log(.play(pos: controller.currentTime))
+        diagnostics.log(.play(pos: controller.livePosition))
     }
 
     func pause() {
         guard let controller else { return }
         controller.pause()
-        diagnostics.log(.pause(pos: controller.currentTime))
+        diagnostics.log(.pause(pos: controller.livePosition))
     }
 
     func togglePlayPause() {
@@ -659,6 +664,8 @@ final class PlaybackCoordinator {
 
     func noteAppState(foreground: Bool) {
         guard let controller else { return }
+        if foreground, !isInBackground { return }
+        isInBackground = !foreground
         diagnostics.log(.app(state: foreground ? .foreground : .background, pos: controller.livePosition))
     }
 

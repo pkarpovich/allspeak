@@ -96,13 +96,12 @@ struct DiagnosticsEventTests {
         var header = fullHeader()
         header.trackID = nil
         header.trackLabel = nil
-        header.trackFile = nil
         header.trackSHA = nil
         header.catalogID = nil
         header.catalogRev = nil
         let line = DiagnosticsEvent.session(header).jsonLine(timestamp: ts)
         let object = try decode(line)
-        #expect(Set(object.keys) == ["ts", "event", "sessionID", "title", "app", "build", "device", "os"])
+        #expect(Set(object.keys) == ["ts", "event", "sessionID", "title", "trackFile", "app", "build", "device", "os"])
     }
 
     @Test("session header escapes quotes in the title")

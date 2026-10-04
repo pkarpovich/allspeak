@@ -21,7 +21,7 @@ enum DiagnosticsEvent: Sendable {
         var title: String
         var trackID: UUID?
         var trackLabel: String?
-        var trackFile: String?
+        var trackFile: String
         var trackSHA: String?
         var catalogID: UUID?
         var catalogRev: Int?
