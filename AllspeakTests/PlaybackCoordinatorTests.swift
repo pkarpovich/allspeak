@@ -425,7 +425,9 @@ struct PlaybackCoordinatorTests {
         root.appendingPathComponent("diagnostics", isDirectory: true)
     }
 
-    private static func readJSONLines(_ url: URL) throws -> [[String: Any]] {
+    private static let systemDrivenEvents: Set<String> = ["tick", "route", "interruption"]
+
+    private static func readAllJSONLines(_ url: URL) throws -> [[String: Any]] {
         let text = try String(contentsOf: url, encoding: .utf8)
         return text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
             guard let data = line.data(using: .utf8),
@@ -433,6 +435,10 @@ struct PlaybackCoordinatorTests {
             else { return nil }
             return obj
         }
+    }
+
+    private static func readJSONLines(_ url: URL) throws -> [[String: Any]] {
+        try readAllJSONLines(url).filter { !systemDrivenEvents.contains($0["event"] as? String ?? "") }
     }
 
     private static func readTransportLines(_ url: URL) throws -> [[String: Any]] {
@@ -1017,6 +1023,81 @@ struct PlaybackCoordinatorTests {
 
         let records = try Self.readJSONLines(try #require(log.currentFileURL))
         #expect(records.map { $0["event"] as? String } == ["play"])
+    }
+
+    private static func overrideRouteLines(_ url: URL) throws -> [[String: Any]] {
+        try readAllJSONLines(url).filter { $0["event"] as? String == "route" && $0["reason"] as? String == "override" }
+    }
+
+    private static func postOverrideRouteChange() {
+        NotificationCenter.default.post(
+            name: AVAudioSession.routeChangeNotification,
+            object: nil,
+            userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.override.rawValue]
+        )
+    }
+
+    private static func waitForLines(_ url: URL, count: Int) async throws -> [[String: Any]] {
+        for _ in 0..<1000 {
+            let lines = try overrideRouteLines(url)
+            if lines.count >= count { return lines }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        return try overrideRouteLines(url)
+    }
+
+    @Test("an active session logs audio route changes after the header")
+    func activeSessionLogsRouteChanges() async throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "Route", audio: audio, subtitles: Self.cues)
+        let url = try #require(log.currentFileURL)
+        Self.postOverrideRouteChange()
+
+        let routes = try await Self.waitForLines(url, count: 1)
+        #expect(routes.count == 1)
+        let route = try #require(routes.first)
+        #expect(route["pos"] as? Double == 0)
+        #expect(route["route"] is String)
+        #expect(route["routeName"] is String)
+        #expect(try Self.readAllJSONLines(url).first?["event"] as? String == "session")
+    }
+
+    @Test("endSession stops the previous session's monitor")
+    func endSessionStopsMonitor() async throws {
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer { try? FileManager.default.removeItem(at: diagRoot) }
+        let audio = try Self.makeSilenceFile(seconds: 5)
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let coordinator = PlaybackCoordinator.shared
+        coordinator.endSession()
+        coordinator.diagnostics = log
+        defer {
+            coordinator.endSession()
+            coordinator.diagnostics = .shared
+        }
+
+        try coordinator.startSession(sessionUUID: UUID(), title: "First", audio: audio, subtitles: Self.cues)
+        coordinator.endSession()
+        try coordinator.startSession(sessionUUID: UUID(), title: "Second", audio: audio, subtitles: Self.cues)
+        let url = try #require(log.currentFileURL)
+        Self.postOverrideRouteChange()
+
+        _ = try await Self.waitForLines(url, count: 1)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(try Self.overrideRouteLines(url).count == 1)
     }
 }
 

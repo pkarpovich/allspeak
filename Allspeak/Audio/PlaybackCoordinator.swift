@@ -46,6 +46,7 @@ final class PlaybackCoordinator {
     private var storage: DocumentsStorage = .default
     private var persistence: PersistenceController = .shared
     var diagnostics: DiagnosticsLog = .shared
+    private var monitor: DiagnosticsMonitor?
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
 
     init() {}
@@ -186,6 +187,7 @@ final class PlaybackCoordinator {
             trackFile: selectedTrack?.filename ?? snap.audioFilename,
             sidecar: try? CatalogSidecar.load(from: dir)
         )))
+        startMonitor()
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -214,6 +216,24 @@ final class PlaybackCoordinator {
             device: deviceModel(),
             os: UIDevice.current.systemVersion
         )
+    }
+
+    private func startMonitor() {
+        let monitor = DiagnosticsMonitor(
+            snapshot: { [weak self] in
+                (self?.controller?.livePosition ?? 0, self?.controller?.isPlaying ?? false)
+            },
+            route: {
+                let session = AVAudioSession.sharedInstance()
+                let output = session.currentRoute.outputs.first
+                return (output?.portType.rawValue ?? "", output?.portName ?? "", session.outputLatency)
+            },
+            log: { [weak self] event in
+                self?.diagnostics.log(event)
+            }
+        )
+        monitor.start()
+        self.monitor = monitor
     }
 
     private static func deviceModel() -> String {
@@ -272,6 +292,7 @@ final class PlaybackCoordinator {
             trackFile: audio.lastPathComponent,
             sidecar: nil
         )))
+        startMonitor()
         #if os(iOS)
         WatchSessionHost.shared.broadcastCurrentSession()
         #endif
@@ -495,6 +516,8 @@ final class PlaybackCoordinator {
 
     func endSession() {
         loadGeneration += 1
+        monitor?.stop()
+        monitor = nil
         diagnostics.end()
         guard let controller else { return }
         controller.onTick = nil

@@ -230,16 +230,20 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 - Modify: `Allspeak/Audio/PlaybackCoordinator.swift`
 - Create: `AllspeakTests/DiagnosticsMonitorTests.swift`
 
-- [ ] implement `DiagnosticsMonitor` per Technical Details (injected `sleep`, `snapshot`, `route` and `log`; `start()`/`stop()` idempotent).
-- [ ] implement route-change and interruption observers inside the monitor. They are registered in `start()` and removed in `stop()`, and translate notifications into `route` and `interruption` events with the current position.
-- [ ] wire into `PlaybackCoordinator`. Create and start the monitor after the session header in both `startSession` overloads, and stop it in `endSession` before `diagnostics.end()`. Production closures read `controller` and `AVAudioSession.sharedInstance().currentRoute.outputs.first` and `outputLatency`.
-- [ ] write tests:
+- [x] implement `DiagnosticsMonitor` per Technical Details (injected `sleep`, `snapshot`, `route` and `log`; `start()`/`stop()` idempotent).
+- [x] implement route-change and interruption observers inside the monitor. They are registered in `start()` and removed in `stop()`, and translate notifications into `route` and `interruption` events with the current position.
+- [x] wire into `PlaybackCoordinator`. Create and start the monitor after the session header in both `startSession` overloads, and stop it in `endSession` before `diagnostics.end()`. Production closures read `controller` and `AVAudioSession.sharedInstance().currentRoute.outputs.first` and `outputLatency`.
+- [x] write tests:
   - with a fake `sleep` that returns immediately N times, exactly N `tick` events are logged and then `stop()` ends the loop;
   - a second `start()` does not double the ticks;
   - posting a synthetic `routeChangeNotification` with `newDevice` and with a missing reason logs `newDevice` and `unknown`;
   - interruption `began`/`ended` are logged;
   - after `stop()` no further events arrive.
-- [ ] run tests - must pass before task 5
+- [x] run tests - must pass before task 5
+- ➕ the monitor takes an injectable `notificationCenter` (default `.default`) so tests post synthetic notifications on a private center; observers use `queue: .main` plus `MainActor.assumeIsolated`
+- ➕ an interruption notification without a parseable type is not logged (no valid `phase`); route changes still fall back to `unknown`
+- ➕ `AVAudioSession.RouteChangeReason.newDeviceAvailable` maps to the schema text `newDevice`
+- ➕ coordinator tests ignore system-driven `tick`/`route`/`interruption` lines when counting transport events, so real simulator route changes cannot flake them; two new tests post a synthetic `override` route change to check the wiring and that `endSession` stops the old monitor
 
 ### Task 5: App lifecycle and watch reachability events
 
