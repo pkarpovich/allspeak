@@ -182,6 +182,7 @@ final class WatchSessionClient: NSObject {
 
     private func sendCommand(
         _ command: WatchCommand,
+        noSessionHandler: (@MainActor @Sendable () -> Void)? = nil,
         errorHandler: @escaping @Sendable (Error) -> Void
     ) {
         guard let payload = try? command.toPropertyList() else { return }
@@ -189,6 +190,12 @@ final class WatchSessionClient: NSObject {
             let bridge = SendableDictionary(value: reply)
             Task { @MainActor in
                 guard let self else { return }
+                if let noSessionHandler,
+                   let snapshot = try? PlaybackSnapshot(propertyList: bridge.value),
+                   snapshot.sessionID == PlaybackSnapshot.empty.sessionID {
+                    noSessionHandler()
+                    return
+                }
                 self.handleReceivedSnapshot(bridge.value)
             }
         }
@@ -461,7 +468,9 @@ final class WatchSessionClient: NSObject {
         phoneTimeoutTask?.cancel()
         phoneTimeoutTask = nil
         let command = WatchCommand.applySync(trackTime: shown.match.trackTime, matchDate: shown.match.matchDate, source: shown.source)
-        sendCommand(command, errorHandler: { [weak self] _ in
+        sendCommand(command, noSessionHandler: { [weak self] in
+            self?.listenPanel.applyFailed(shown)
+        }, errorHandler: { [weak self] _ in
             Task { @MainActor in
                 self?.listenPanel.applyFailed(shown)
             }

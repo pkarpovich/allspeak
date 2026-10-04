@@ -1594,4 +1594,19 @@ struct WatchSessionClientTests {
         let shown = ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch)
         #expect(client.listenPanel.phase == .match(shown))
     }
+
+    @Test("an apply the phone answers without a session returns to the match card")
+    func applyWithoutPhoneSessionReturnsToMatch() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.nextReply = try PlaybackSnapshot.empty.toPropertyList()
+        client.applyShownMatch()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let shown = ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch)
+        #expect(client.listenPanel.phase == .match(shown))
+    }
 }

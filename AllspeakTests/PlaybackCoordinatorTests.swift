@@ -1674,6 +1674,21 @@ struct PlaybackCoordinatorTests {
         ])
     }
 
+    @Test("a startListening command from the watch without a session tells the watch it failed")
+    func startCommandWithoutSessionFails() {
+        let harness = ListenHarness()
+        let coordinator = PlaybackCoordinator()
+        coordinator.makeListener = { url in harness.makeListener(url) }
+        coordinator.sendListenUpdate = { update in harness.updates.append(update) }
+
+        coordinator.apply(.startListening)
+
+        #expect(harness.listeners.isEmpty)
+        #expect(harness.updates == [
+            ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no session"),
+        ])
+    }
+
     @Test("applySync seeks to trackTime + elapsed + latency and logs apply then a sync seek")
     func applySyncSeeksToTarget() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)

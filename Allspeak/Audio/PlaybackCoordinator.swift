@@ -735,7 +735,6 @@ final class PlaybackCoordinator {
     }
 
     func apply(_ command: WatchCommand) {
-        guard let controller else { return }
         switch command {
         case .play:
             play()
@@ -752,7 +751,7 @@ final class PlaybackCoordinator {
                 try? await self?.switchTrack(to: id)
             }
         case .setVolume(let value):
-            controller.setVolume(value)
+            controller?.setVolume(value)
         case .requestCueChunk, .requestFingerprintChunk:
             break
         case .startListening:
