@@ -36,16 +36,20 @@ import Foundation
 //                                     (or an empty dict for an unknown sha or a
 //                                     missing file); the watch loops
 //                                     0..<totalChunks and caches the file.
-//   .startListening                   start the phone listener for the active
+//   .startListening(listenID:)        start the phone listener for the active
 //                                     session's fingerprint; the phone then
-//                                     pushes ListenUpdates (see below)
-//   .cancelListening                  stop the phone listener
+//                                     pushes ListenUpdates (see below) tagged
+//                                     with this attempt's listenID
+//   .cancelListening(listenID:)       stop the phone listener when it still
+//                                     runs this attempt; a late retry for an
+//                                     older attempt leaves a newer one alone
 //   .listenEvent(ListenUpdate)        a phase of the watch's own listener
 //                                     (source watch); the phone only logs it
-//   .applySync(trackTime:,            seek to a match: the phone computes
-//              matchDate:, source:)   trackTime + (now - matchDate) +
-//                                     outputLatency and seeks with the sync
-//                                     source
+//   .applySync(sessionID:,            seek to a match: the phone computes
+//              trackTime:,            trackTime + (now - matchDate) +
+//              matchDate:, source:,   outputLatency and seeks with the sync
+//              sha256:)               source, only when sessionID is still the
+//                                     active session and sha256 its fingerprint
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -93,7 +97,8 @@ import Foundation
 //
 //   iPhone --sendMessage (no reply)-----> Watch   ListenUpdate
 //       every phase of the phone listener (source phone) after a
-//       startListening. While the watch is not reachable the latest one is
+//       startListening, tagged with its listenID; the watch drops updates
+//       of any other attempt. While the watch is not reachable the latest one is
 //       held and re-sent when it becomes reachable; session end drops it.
 //       Optional fields (trackTime, matchDate, chunkStart, error) are omitted
 //       when nil, so older and newer builds decode each other.
@@ -101,6 +106,7 @@ import Foundation
 //   Watch  --sendMessage (with reply)---> iPhone  WatchCommand
 //       reply payload is a PlaybackSnapshot (or a CueChunkReply for
 //       requestCueChunk, a FingerprintChunkReply for requestFingerprintChunk) so the watch stays fresh after every user action;
+//       applySync replies with PlaybackSnapshot.empty when it did not seek
 //       this is the only path that wakes the iOS app from background
 //
 // Wrapper dictionary shape (see WirePayloadKey / WirePayloadKind):
@@ -134,10 +140,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case setVolume(Float)
     case requestCueChunk(sessionID: UUID, revision: Int, index: Int)
     case requestFingerprintChunk(sha256: String, index: Int)
-    case startListening
-    case cancelListening
+    case startListening(listenID: UUID)
+    case cancelListening(listenID: UUID)
     case listenEvent(ListenUpdate)
-    case applySync(trackTime: Double, matchDate: Date, source: ListenSource)
+    case applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -153,6 +159,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case trackTime
         case matchDate
         case source
+        case listenID
     }
 
     private enum Kind: String, Codable {
@@ -201,18 +208,22 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(Kind.requestFingerprintChunk, forKey: .kind)
             try container.encode(sha256, forKey: .sha256)
             try container.encode(index, forKey: .index)
-        case .startListening:
+        case .startListening(let listenID):
             try container.encode(Kind.startListening, forKey: .kind)
-        case .cancelListening:
+            try container.encode(listenID, forKey: .listenID)
+        case .cancelListening(let listenID):
             try container.encode(Kind.cancelListening, forKey: .kind)
+            try container.encode(listenID, forKey: .listenID)
         case .listenEvent(let update):
             try container.encode(Kind.listenEvent, forKey: .kind)
             try container.encode(update, forKey: .update)
-        case .applySync(let trackTime, let matchDate, let source):
+        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
             try container.encode(Kind.applySync, forKey: .kind)
+            try container.encode(sessionID, forKey: .sessionID)
             try container.encode(trackTime, forKey: .trackTime)
             try container.encode(matchDate, forKey: .matchDate)
             try container.encode(source, forKey: .source)
+            try container.encode(sha256, forKey: .sha256)
         }
     }
 
@@ -246,16 +257,18 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 index: try container.decode(Int.self, forKey: .index)
             )
         case .startListening:
-            self = .startListening
+            self = .startListening(listenID: try container.decode(UUID.self, forKey: .listenID))
         case .cancelListening:
-            self = .cancelListening
+            self = .cancelListening(listenID: try container.decode(UUID.self, forKey: .listenID))
         case .listenEvent:
             self = .listenEvent(try container.decode(ListenUpdate.self, forKey: .update))
         case .applySync:
             self = .applySync(
+                sessionID: try container.decode(UUID.self, forKey: .sessionID),
                 trackTime: try container.decode(Double.self, forKey: .trackTime),
                 matchDate: try container.decode(Date.self, forKey: .matchDate),
-                source: try container.decode(ListenSource.self, forKey: .source)
+                source: try container.decode(ListenSource.self, forKey: .source),
+                sha256: try container.decode(String.self, forKey: .sha256)
             )
         }
     }
@@ -362,6 +375,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         case failed
     }
 
+    let listenID: UUID
     let source: ListenSource
     let phase: Phase
     let trackTime: Double?
@@ -371,6 +385,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
     let error: String?
 
     init(
+        listenID: UUID,
         source: ListenSource,
         phase: Phase,
         trackTime: Double? = nil,
@@ -379,6 +394,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         listenSeconds: Double,
         error: String? = nil
     ) {
+        self.listenID = listenID
         self.source = source
         self.phase = phase
         self.trackTime = trackTime
@@ -388,12 +404,13 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         self.error = error
     }
 
-    init(source: ListenSource, event: ListenEvent) {
+    init(listenID: UUID, source: ListenSource, event: ListenEvent) {
         switch event.phase {
         case .started:
-            self.init(source: source, phase: .start, listenSeconds: event.listenSeconds)
+            self.init(listenID: listenID, source: source, phase: .start, listenSeconds: event.listenSeconds)
         case .matched(let match):
             self.init(
+                listenID: listenID,
                 source: source,
                 phase: .match,
                 trackTime: match.trackTime,
@@ -402,15 +419,15 @@ struct ListenUpdate: Codable, Equatable, Sendable {
                 listenSeconds: event.listenSeconds
             )
         case .noMatch:
-            self.init(source: source, phase: .nomatch, listenSeconds: event.listenSeconds)
+            self.init(listenID: listenID, source: source, phase: .nomatch, listenSeconds: event.listenSeconds)
         case .timedOut:
-            self.init(source: source, phase: .timeout, listenSeconds: event.listenSeconds)
+            self.init(listenID: listenID, source: source, phase: .timeout, listenSeconds: event.listenSeconds)
         case .cancelled:
-            self.init(source: source, phase: .cancel, listenSeconds: event.listenSeconds)
+            self.init(listenID: listenID, source: source, phase: .cancel, listenSeconds: event.listenSeconds)
         case .interrupted:
-            self.init(source: source, phase: .interrupted, listenSeconds: event.listenSeconds)
+            self.init(listenID: listenID, source: source, phase: .interrupted, listenSeconds: event.listenSeconds)
         case .failed(let message):
-            self.init(source: source, phase: .failed, listenSeconds: event.listenSeconds, error: message)
+            self.init(listenID: listenID, source: source, phase: .failed, listenSeconds: event.listenSeconds, error: message)
         }
     }
 

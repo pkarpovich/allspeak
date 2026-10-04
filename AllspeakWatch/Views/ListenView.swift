@@ -118,6 +118,7 @@ struct ListenView: View {
             }
             .buttonStyle(.glassProminent)
             .tint(Tokens.accent)
+            .disabled(panel.applying)
             Button(action: handleStop) {
                 Text("Отмена")
                     .font(Tokens.Font.bodyEmphasized)
@@ -125,6 +126,7 @@ struct ListenView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glass)
+            .disabled(panel.applying)
         }
     }
 

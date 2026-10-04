@@ -133,12 +133,16 @@ no automatic or background listening.
   (`+2.4 с`), the source, and `Применить` / `Отмена`, with a click haptic. The
   watch computes the offset as `(trackTime + (now - matchDate)) - position`,
   where `trackTime = abs_start + predictedCurrentMatchOffset`.
-- `Применить` stops both listeners, shows `Готово`, and sends
-  `applySync(trackTime:matchDate:source:)`. The phone seeks to
-  `trackTime + (now - matchDate) + outputLatency` with the `sync` source.
+- `Применить` stops both listeners and sends
+  `applySync(sessionID:trackTime:matchDate:source:sha256:)`. The phone seeks to
+  `trackTime + (now - matchDate) + outputLatency` with the `sync` source only
+  while `sessionID` is still the active session and `sha256` its fingerprint,
+  and replies with an empty snapshot otherwise; the watch shows `Готово` only
+  when the reply snapshot belongs to the same session.
 - Each listener stops on its first match, after 120 s, or on `Стоп`. The watch
-  listener (`SHManagedSession`) also stops as `interrupted` when the watch app
-  leaves the active phase (wrist down); the phone listener stops as
+  listener (`SHManagedSession`) waits for the app to become active after the
+  first microphone prompt and stops as `interrupted` when the watch app leaves
+  the active phase (wrist down); the phone listener stops as
   `interrupted` when an audio interruption (a call, Siri) begins.
 - A phone result that arrives while the watch is unreachable (wrist down) is
   held on the phone and re-sent when the watch becomes reachable again. If the
@@ -347,8 +351,8 @@ listener as a second source.
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
 `setVolume(_:)`, `requestCueChunk(sessionID:revision:index:)`, and for cinema
-listen `requestFingerprintChunk(sha256:index:)`, `startListening`,
-`cancelListening`, `listenEvent(_:)` and `applySync(trackTime:matchDate:source:)`.
+listen `requestFingerprintChunk(sha256:index:)`, `startListening(listenID:)`,
+`cancelListening(listenID:)`, `listenEvent(_:)` and `applySync(sessionID:trackTime:matchDate:source:sha256:)`.
 Session metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
 the current `activeTrackID`, an optional `serverDate` playback anchor, and
 optional `fingerprintSHA` / `fingerprintSize` (all decoded with

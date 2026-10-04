@@ -27,6 +27,7 @@ struct ListenPanelState: Equatable, Sendable {
     private(set) var phone: SourceStatus = .idle
     private(set) var watch: SourceStatus = .idle
     private(set) var shownMatch: ShownMatch?
+    private(set) var applying = false
     private(set) var applied = false
 
     var phase: Phase {
@@ -51,6 +52,7 @@ struct ListenPanelState: Equatable, Sendable {
         phone = .listening(since: now)
         watch = .listening(since: now)
         shownMatch = nil
+        applying = false
         applied = false
     }
 
@@ -62,13 +64,20 @@ struct ListenPanelState: Equatable, Sendable {
         shownMatch = ShownMatch(source: source, match: match)
     }
 
-    mutating func apply() {
-        guard shownMatch != nil else { return }
+    mutating func beginApply() {
+        guard shownMatch != nil, !applied else { return }
+        applying = true
+    }
+
+    mutating func applySucceeded(_ match: ShownMatch) {
+        guard shownMatch == match, applying else { return }
+        applying = false
         applied = true
     }
 
     mutating func applyFailed(_ match: ShownMatch) {
         guard shownMatch == match else { return }
+        applying = false
         applied = false
     }
 

@@ -9,9 +9,10 @@ enum ListenSmoke {
 
     static func makeClientIfRequested() -> WatchSessionClient? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
-        let client = WatchSessionClient(sender: ListenSmokeSender())
+        let sessionID = UUID()
+        let client = WatchSessionClient(sender: ListenSmokeSender(sessionID: sessionID))
         client.metadata = SessionMetadata(
-            sessionID: UUID(),
+            sessionID: sessionID,
             revision: 1,
             title: "Smoke",
             duration: 7200,
@@ -68,13 +69,32 @@ private final class ListenSmokeListener: CinemaListening {
 }
 
 private final class ListenSmokeSender: WatchMessageSender {
+    private let sessionID: UUID
+
+    init(sessionID: UUID) {
+        self.sessionID = sessionID
+    }
+
     var isReachable: Bool { true }
 
     func send(
-        message _: [String: Any],
-        replyHandler _: @escaping @Sendable ([String: Any]) -> Void,
+        message: [String: Any],
+        replyHandler: @escaping @Sendable ([String: Any]) -> Void,
         errorHandler _: @escaping @Sendable (Error) -> Void
-    ) {}
+    ) {
+        guard case .applySync = try? WatchCommand(propertyList: message) else { return }
+        let snapshot = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 1800,
+            duration: 7200,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        guard let reply = try? snapshot.toPropertyList() else { return }
+        replyHandler(reply)
+    }
 
     func transferUserInfo(_: [String: Any]) {}
 }

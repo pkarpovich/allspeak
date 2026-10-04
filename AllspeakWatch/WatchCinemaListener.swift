@@ -42,12 +42,27 @@ final class WatchCinemaListener: CinemaListening {
     }
 
     private func listen() async {
+        let promptsForPermission = AVAudioApplication.shared.recordPermission == .undetermined
         let granted = await AVAudioApplication.requestRecordPermission()
         guard state == .running else { return }
         guard granted else {
             finish(.failed("mic permission"))
             return
         }
+        let activations = NotificationCenter.default.notifications(named: WKApplication.didBecomeActiveNotification)
+        if WKApplication.shared().applicationState != .active {
+            guard promptsForPermission else {
+                finish(.interrupted)
+                return
+            }
+            for await _ in activations.map({ _ in () }) { break }
+            guard state == .running else { return }
+        }
+        guard WKApplication.shared().applicationState == .active else {
+            finish(.interrupted)
+            return
+        }
+        observeResignActive()
 
         let catalog = SHCustomCatalog()
         do {
@@ -58,7 +73,6 @@ final class WatchCinemaListener: CinemaListening {
         }
         let session = SHManagedSession(catalog: catalog)
         self.session = session
-        observeResignActive()
 
         while state == .running {
             let result = await session.result()

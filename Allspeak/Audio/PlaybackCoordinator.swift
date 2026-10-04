@@ -70,6 +70,7 @@ final class PlaybackCoordinator {
     }
     var now: () -> Date = { Date() }
     private var listener: (any CinemaListening)?
+    private var listenID = UUID()
 
     init() {}
 
@@ -449,11 +450,15 @@ final class PlaybackCoordinator {
         }
 
         let dir = storage.sessionDir(for: sessionUUID)
+        let previousFingerprint = fingerprint
         fingerprint = Self.loadFingerprint(
             sidecar: try? CatalogSidecar.load(from: dir),
             sessionUUID: sessionUUID,
             storage: storage
         )
+        if fingerprint != previousFingerprint {
+            cancelListening()
+        }
         let srtURL = dir.appendingPathComponent(snap.srtFilename)
         var cuesChanged = false
         if let srtText = try? SRTParser.read(at: srtURL) {
@@ -489,10 +494,6 @@ final class PlaybackCoordinator {
         isSwitching = true
         defer { isSwitching = false }
 
-        let capturedTime = controller.livePosition
-        let wasPlaying = controller.isPlaying
-        let cues = controller.subtitles
-
         let filename: String
         if let repository, let sessionID {
             do {
@@ -517,6 +518,9 @@ final class PlaybackCoordinator {
             throw SwitchError.noActiveSession
         }
 
+        let capturedTime = controller.livePosition
+        let wasPlaying = controller.isPlaying
+        let cues = controller.subtitles
         let previousActiveTrackID = activeTrackID
         activeTrackID = trackID
         controller.pause()
@@ -754,25 +758,27 @@ final class PlaybackCoordinator {
             controller?.setVolume(value)
         case .requestCueChunk, .requestFingerprintChunk:
             break
-        case .startListening:
-            startListening()
-        case .cancelListening:
-            cancelListening()
+        case .startListening(let listenID):
+            startListening(listenID: listenID)
+        case .cancelListening(let listenID):
+            cancelListening(listenID: listenID)
         case .listenEvent(let update):
             noteWatchListenEvent(update)
-        case .applySync(let trackTime, let matchDate, let source):
-            applySync(trackTime: trackTime, matchDate: matchDate, source: source)
+        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
+            applySync(sessionID: sessionID, trackTime: trackTime, matchDate: matchDate, source: source, sha256: sha256)
         }
     }
 
-    func startListening() {
-        guard listener == nil else { return }
+    func startListening(listenID: UUID) {
+        guard listener == nil || self.listenID != listenID else { return }
+        listener?.cancel()
+        self.listenID = listenID
         guard controller != nil else {
-            sendListenUpdate(ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no session"))
+            sendListenUpdate(ListenUpdate(listenID: listenID, source: .phone, phase: .failed, listenSeconds: 0, error: "no session"))
             return
         }
         guard let fingerprint else {
-            let update = ListenUpdate(source: .phone, phase: .failed, listenSeconds: 0, error: "no fingerprint")
+            let update = ListenUpdate(listenID: listenID, source: .phone, phase: .failed, listenSeconds: 0, error: "no fingerprint")
             logListen(update, source: .phone)
             sendListenUpdate(update)
             return
@@ -789,12 +795,19 @@ final class PlaybackCoordinator {
         listener?.cancel()
     }
 
+    func cancelListening(listenID: UUID) {
+        guard self.listenID == listenID else { return }
+        cancelListening()
+    }
+
     func noteWatchListenEvent(_ update: ListenUpdate) {
         logListen(update, source: .watch)
     }
 
-    func applySync(trackTime: Double, matchDate: Date, source: ListenSource) {
-        guard let controller else { return }
+    @discardableResult
+    func applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String) -> Bool {
+        cancelListening()
+        guard let controller, sessionUUID == sessionID, fingerprint?.sha256 == sha256 else { return false }
         let now = self.now()
         let latency = routeReader().latency
         let elapsed = now.timeIntervalSince(matchDate)
@@ -811,6 +824,7 @@ final class PlaybackCoordinator {
             elapsed: elapsed
         )))
         seek(to: target, source: .sync)
+        return true
     }
 
     private func handlePhoneListenEvent(_ event: ListenEvent) {
@@ -820,7 +834,7 @@ final class PlaybackCoordinator {
         case .matched, .timedOut, .cancelled, .interrupted, .failed:
             listener = nil
         }
-        let update = ListenUpdate(source: .phone, event: event)
+        let update = ListenUpdate(listenID: listenID, source: .phone, event: event)
         logListen(update, source: .phone)
         sendListenUpdate(update)
     }

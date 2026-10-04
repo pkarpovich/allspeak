@@ -128,15 +128,30 @@ struct ListenPanelStateTests {
         #expect(state == ListenPanelState())
     }
 
-    @Test("apply marks the shown match applied and keeps it")
+    @Test("an apply stays on the match card until the phone confirms it")
     func applyTransition() {
         var state = listening()
         let phoneMatch = match(trackTime: 612.5, at: 4)
         state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
-        state.apply()
         let shown = ListenPanelState.ShownMatch(source: .phone, match: phoneMatch)
+        state.beginApply()
+        #expect(state.applying)
+        #expect(state.phase == .match(shown))
+
+        state.applySucceeded(shown)
+
+        #expect(!state.applying)
         #expect(state.applied)
         #expect(state.phase == .applied(shown))
+    }
+
+    @Test("a confirmation without a pending apply is ignored")
+    func applySucceededWithoutBeginIgnored() {
+        var state = listening()
+        let phoneMatch = match(trackTime: 612.5, at: 4)
+        state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
+        state.applySucceeded(ListenPanelState.ShownMatch(source: .phone, match: phoneMatch))
+        #expect(!state.applied)
     }
 
     @Test("a failed apply returns to the match card so it can be retried")
@@ -145,10 +160,11 @@ struct ListenPanelStateTests {
         let phoneMatch = match(trackTime: 612.5, at: 4)
         state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
         let shown = ListenPanelState.ShownMatch(source: .phone, match: phoneMatch)
-        state.apply()
+        state.beginApply()
 
         state.applyFailed(shown)
 
+        #expect(!state.applying)
         #expect(!state.applied)
         #expect(state.phase == .match(shown))
     }
@@ -158,17 +174,18 @@ struct ListenPanelStateTests {
         var state = listening()
         let phoneMatch = match(trackTime: 612.5, at: 4)
         state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
-        state.apply()
+        state.beginApply()
 
         state.applyFailed(ListenPanelState.ShownMatch(source: .watch, match: match(trackTime: 100, at: 1)))
 
-        #expect(state.applied)
+        #expect(state.applying)
     }
 
     @Test("apply without a shown match does nothing")
     func applyWithoutMatch() {
         var state = listening()
-        state.apply()
+        state.beginApply()
+        #expect(!state.applying)
         #expect(!state.applied)
         #expect(state.phase == .listening)
     }
@@ -178,7 +195,8 @@ struct ListenPanelStateTests {
         var state = listening()
         let phoneMatch = match(trackTime: 612.5, at: 4)
         state.receive(source: .phone, event: event(.matched(phoneMatch)), now: start)
-        state.apply()
+        state.beginApply()
+        state.applySucceeded(ListenPanelState.ShownMatch(source: .phone, match: phoneMatch))
         state.receive(source: .watch, event: event(.cancelled), now: start)
         #expect(state.watch == .cancelled)
         #expect(state.phase == .applied(ListenPanelState.ShownMatch(source: .phone, match: phoneMatch)))
@@ -200,10 +218,11 @@ struct ListenPanelStateTests {
     func restartAfterDismiss() {
         var state = listening()
         state.receive(source: .phone, event: event(.matched(match(trackTime: 612.5, at: 4))), now: start)
-        state.apply()
+        state.beginApply()
         let later = start.addingTimeInterval(60)
         state.start(now: later)
         #expect(state.shownMatch == nil)
+        #expect(!state.applying)
         #expect(!state.applied)
         #expect(state.phone == .listening(since: later))
     }

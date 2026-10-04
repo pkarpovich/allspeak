@@ -43,6 +43,9 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored var makeListener: (@MainActor (URL) -> any CinemaListening)?
     @ObservationIgnored var phoneListenTimeout: Duration = ListenEvent.timeout + .seconds(15)
     @ObservationIgnored private var watchListener: (any CinemaListening)?
+    @ObservationIgnored var makeListenID: () -> UUID = UUID.init
+    @ObservationIgnored private var listenID: UUID?
+    @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
     @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
@@ -182,7 +185,7 @@ final class WatchSessionClient: NSObject {
 
     private func sendCommand(
         _ command: WatchCommand,
-        noSessionHandler: (@MainActor @Sendable () -> Void)? = nil,
+        snapshotReplyHandler: (@MainActor @Sendable (PlaybackSnapshot?) -> Void)? = nil,
         errorHandler: @escaping @Sendable (Error) -> Void
     ) {
         guard let payload = try? command.toPropertyList() else { return }
@@ -190,13 +193,9 @@ final class WatchSessionClient: NSObject {
             let bridge = SendableDictionary(value: reply)
             Task { @MainActor in
                 guard let self else { return }
-                if let noSessionHandler,
-                   let snapshot = try? PlaybackSnapshot(propertyList: bridge.value),
-                   snapshot.sessionID == PlaybackSnapshot.empty.sessionID {
-                    noSessionHandler()
-                    return
-                }
                 self.handleReceivedSnapshot(bridge.value)
+                guard let snapshotReplyHandler else { return }
+                snapshotReplyHandler(try? PlaybackSnapshot(propertyList: bridge.value))
             }
         }
         sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
@@ -234,7 +233,8 @@ final class WatchSessionClient: NSObject {
         self.metadata = meta
         let sessionChanged = previous?.sessionID != meta.sessionID
         let revisionChanged = previous?.sessionID == meta.sessionID && previous?.revision != meta.revision
-        if previous != nil, sessionChanged {
+        let fingerprintChanged = previous?.fingerprintSHA != meta.fingerprintSHA
+        if previous != nil, sessionChanged || fingerprintChanged {
             cancelListening()
         }
         if sessionChanged || revisionChanged {
@@ -437,45 +437,71 @@ final class WatchSessionClient: NSObject {
 
     func startListening() {
         guard !listenPanel.isListening else { return }
+        let listenID = makeListenID()
+        self.listenID = listenID
+        let supersededCancels = unconfirmedPhoneCancels
         listenPanel.start(now: Date())
-        sendCommand(.startListening, errorHandler: { [weak self] error in
+        sendCommand(.startListening(listenID: listenID), snapshotReplyHandler: { [weak self] _ in
+            self?.unconfirmedPhoneCancels.subtract(supersededCancels)
+        }, errorHandler: { [weak self] error in
             let message = error.localizedDescription
             Task { @MainActor in
-                self?.receiveListenEvent(source: .phone, event: ListenEvent(phase: .failed(message), listenSeconds: 0))
+                guard let self else { return }
+                self.sendPhoneCancel(listenID: listenID)
+                guard self.listenID == listenID else { return }
+                self.receiveListenEvent(source: .phone, event: ListenEvent(phase: .failed(message), listenSeconds: 0))
             }
         })
         startPhoneTimeout()
-        startWatchListener()
+        startWatchListener(listenID: listenID)
     }
 
     func cancelListening() {
-        if listenPanel.phone.isListening {
-            send(.cancelListening)
+        if listenPanel.phone.isListening, let listenID {
+            unconfirmedPhoneCancels.insert(listenID)
         }
+        retryPhoneCancelIfNeeded()
         phoneTimeoutTask?.cancel()
         phoneTimeoutTask = nil
         watchListener?.cancel()
         watchListener = nil
+        listenID = nil
         listenPanel.dismiss()
     }
 
     func applyShownMatch() {
-        guard let shown = listenPanel.shownMatch, !listenPanel.applied else { return }
-        if listenPanel.phone.isListening {
-            send(.cancelListening)
+        guard let shown = listenPanel.shownMatch,
+              let sessionID = metadata?.sessionID,
+              let sha256 = metadata?.fingerprintSHA,
+              !listenPanel.applying,
+              !listenPanel.applied else { return }
+        if listenPanel.phone.isListening, let listenID {
+            sendPhoneCancel(listenID: listenID)
             receiveListenEvent(source: .phone, event: ListenEvent(phase: .cancelled, listenSeconds: 0))
         }
         phoneTimeoutTask?.cancel()
         phoneTimeoutTask = nil
-        let command = WatchCommand.applySync(trackTime: shown.match.trackTime, matchDate: shown.match.matchDate, source: shown.source)
-        sendCommand(command, noSessionHandler: { [weak self] in
-            self?.listenPanel.applyFailed(shown)
+        let command = WatchCommand.applySync(
+            sessionID: sessionID,
+            trackTime: shown.match.trackTime,
+            matchDate: shown.match.matchDate,
+            source: shown.source,
+            sha256: sha256
+        )
+        listenPanel.beginApply()
+        let supersededCancels = unconfirmedPhoneCancels
+        sendCommand(command, snapshotReplyHandler: { [weak self] snapshot in
+            guard snapshot?.sessionID == sessionID else {
+                self?.listenPanel.applyFailed(shown)
+                return
+            }
+            self?.unconfirmedPhoneCancels.subtract(supersededCancels)
+            self?.listenPanel.applySucceeded(shown)
         }, errorHandler: { [weak self] _ in
             Task { @MainActor in
                 self?.listenPanel.applyFailed(shown)
             }
         })
-        listenPanel.apply()
         watchListener?.cancel()
         watchListener = nil
     }
@@ -487,9 +513,23 @@ final class WatchSessionClient: NSObject {
         }
         guard let update = try? ListenUpdate(propertyList: payload),
               update.source == .phone,
+              update.listenID == listenID,
               let event = update.event,
               event.phase != .cancelled else { return }
         receiveListenEvent(source: .phone, event: event)
+    }
+
+    func retryPhoneCancelIfNeeded() {
+        for listenID in unconfirmedPhoneCancels {
+            sendPhoneCancel(listenID: listenID)
+        }
+    }
+
+    private func sendPhoneCancel(listenID: UUID) {
+        unconfirmedPhoneCancels.insert(listenID)
+        sendCommand(.cancelListening(listenID: listenID), snapshotReplyHandler: { [weak self] _ in
+            self?.unconfirmedPhoneCancels.remove(listenID)
+        }, errorHandler: { _ in })
     }
 
     private func startPhoneTimeout() {
@@ -502,21 +542,21 @@ final class WatchSessionClient: NSObject {
         }
     }
 
-    private func startWatchListener() {
+    private func startWatchListener(listenID: UUID) {
         guard let url = fingerprintURL, let makeListener else {
-            handleWatchListenEvent(ListenEvent(phase: .failed("no fingerprint"), listenSeconds: 0))
+            handleWatchListenEvent(ListenEvent(phase: .failed("no fingerprint"), listenSeconds: 0), listenID: listenID)
             return
         }
         let listener = makeListener(url)
         watchListener = listener
         listener.start { [weak self] event in
-            self?.handleWatchListenEvent(event)
+            self?.handleWatchListenEvent(event, listenID: listenID)
         }
     }
 
-    private func handleWatchListenEvent(_ event: ListenEvent) {
+    private func handleWatchListenEvent(_ event: ListenEvent, listenID: UUID) {
         receiveListenEvent(source: .watch, event: event)
-        send(.listenEvent(ListenUpdate(source: .watch, event: event)))
+        send(.listenEvent(ListenUpdate(listenID: listenID, source: .watch, event: event)))
         guard event.phase != .started else { return }
         watchListener = nil
     }
@@ -587,6 +627,7 @@ extension WatchSessionClient: WCSessionDelegate {
             if reachable {
                 self.retryCueDownloadIfNeeded()
                 self.retryFingerprintDownloadIfNeeded()
+                self.retryPhoneCancelIfNeeded()
             }
         }
     }
@@ -598,6 +639,7 @@ extension WatchSessionClient: WCSessionDelegate {
             if reachable {
                 self.retryCueDownloadIfNeeded()
                 self.retryFingerprintDownloadIfNeeded()
+                self.retryPhoneCancelIfNeeded()
             }
         }
     }

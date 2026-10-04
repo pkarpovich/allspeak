@@ -20,6 +20,7 @@ final class WatchSessionHost: NSObject {
     private var fingerprintChunkCache: (sha256: String, data: Data)?
     private var pendingListenUpdate: ListenUpdate?
     private var latestListenUpdate: ListenUpdate?
+    private let incomingCommands: AsyncStream<IncomingCommand>.Continuation
 
     init(
         coordinator: PlaybackCoordinator = .shared,
@@ -27,7 +28,41 @@ final class WatchSessionHost: NSObject {
     ) {
         self.coordinator = coordinator
         self.broadcastGate = broadcastGate
+        let (stream, continuation) = AsyncStream<IncomingCommand>.makeStream()
+        incomingCommands = continuation
         super.init()
+        Task { [weak self] in
+            for await incoming in stream {
+                self?.process(incoming)
+            }
+        }
+    }
+
+    deinit {
+        incomingCommands.finish()
+    }
+
+    nonisolated func receive(_ command: WatchCommand, reply: @escaping @Sendable ([String: Any]) -> Void) {
+        incomingCommands.yield(IncomingCommand(command: command, reply: reply))
+    }
+
+    private func process(_ incoming: IncomingCommand) {
+        switch incoming.command {
+        case .requestCueChunk(let sessionID, let revision, let index):
+            incoming.reply(cueChunk(sessionID: sessionID, revision: revision, index: index)?.toPropertyList() ?? [:])
+        case .requestFingerprintChunk(let sha256, let index):
+            incoming.reply(fingerprintChunk(sha256: sha256, index: index)?.toPropertyList() ?? [:])
+        case .switchTrack:
+            Task {
+                incoming.reply(Self.payload(await dispatch(incoming.command)))
+            }
+        default:
+            incoming.reply(Self.payload(perform(incoming.command)))
+        }
+    }
+
+    private static func payload(_ snapshot: PlaybackSnapshot) -> [String: Any] {
+        (try? snapshot.toPropertyList()) ?? [:]
     }
 
     func activate() {
@@ -121,13 +156,29 @@ final class WatchSessionHost: NSObject {
     }
 
     func dispatch(_ command: WatchCommand) async -> PlaybackSnapshot {
+        guard case .switchTrack(let id) = command else { return perform(command) }
+        try? await coordinator.switchTrack(to: id)
+        return coordinator.currentSnapshot()
+    }
+
+    private func perform(_ command: WatchCommand) -> PlaybackSnapshot {
         switch command {
-        case .switchTrack(let id):
-            try? await coordinator.switchTrack(to: id)
+        case .switchTrack:
+            break
         case .requestCueChunk, .requestFingerprintChunk:
-            // Served directly in didReceiveMessage with a chunk reply; never
+            // Served directly in process(_:) with a chunk reply; never
             // routed here.
             break
+        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
+            guard coordinator.applySync(
+                sessionID: sessionID,
+                trackTime: trackTime,
+                matchDate: matchDate,
+                source: source,
+                sha256: sha256
+            ) else {
+                return .empty
+            }
         default:
             coordinator.apply(command)
         }
@@ -265,25 +316,16 @@ extension WatchSessionHost: WCSessionDelegate {
             return
         }
         let sendableReply = SendablePayloadCallback(invoke: replyHandler)
-        Task { @MainActor in
-            if case .requestCueChunk(let sessionID, let revision, let index) = command {
-                let payload = self.cueChunk(sessionID: sessionID, revision: revision, index: index)?.toPropertyList() ?? [:]
-                sendableReply.invoke(payload)
-                return
-            }
-            if case .requestFingerprintChunk(let sha256, let index) = command {
-                let payload = self.fingerprintChunk(sha256: sha256, index: index)?.toPropertyList() ?? [:]
-                sendableReply.invoke(payload)
-                return
-            }
-            let snapshot = await self.dispatch(command)
-            let payload = (try? snapshot.toPropertyList()) ?? [:]
-            sendableReply.invoke(payload)
-        }
+        receive(command) { sendableReply.invoke($0) }
     }
 }
 
 private struct SendablePayloadCallback: @unchecked Sendable {
     let invoke: ([String: Any]) -> Void
+}
+
+private struct IncomingCommand: Sendable {
+    let command: WatchCommand
+    let reply: @Sendable ([String: Any]) -> Void
 }
 #endif

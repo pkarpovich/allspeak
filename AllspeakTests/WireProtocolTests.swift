@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import Allspeak
 
+private let testListenID = UUID(uuidString: "5E5E5E5E-0000-4000-8000-000000000001")!
+
 @Suite("WireProtocol")
 struct WireProtocolTests {
 
@@ -28,10 +30,11 @@ struct WireProtocolTests {
         ),
         WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 0),
         WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 33),
-        WatchCommand.startListening,
-        WatchCommand.cancelListening,
-        WatchCommand.listenEvent(ListenUpdate(source: .watch, phase: .start, listenSeconds: 0)),
+        WatchCommand.startListening(listenID: testListenID),
+        WatchCommand.cancelListening(listenID: testListenID),
+        WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)),
         WatchCommand.listenEvent(ListenUpdate(
+            listenID: testListenID,
             source: .watch,
             phase: .match,
             trackTime: 612.5,
@@ -39,9 +42,9 @@ struct WireProtocolTests {
             chunkStart: 600,
             listenSeconds: 14.5
         )),
-        WatchCommand.listenEvent(ListenUpdate(source: .watch, phase: .failed, listenSeconds: 2, error: "mic permission")),
-        WatchCommand.applySync(trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000.25), source: .phone),
-        WatchCommand.applySync(trackTime: 30, matchDate: Date(timeIntervalSince1970: 1_700_000_000), source: .watch),
+        WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 2, error: "mic permission")),
+        WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000001")!, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000.25), source: .phone, sha256: "abc123"),
+        WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000002")!, trackTime: 30, matchDate: Date(timeIntervalSince1970: 1_700_000_000), source: .watch, sha256: "def456"),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()
@@ -440,10 +443,10 @@ struct WireProtocolTests {
     private static let listenDate = Date(timeIntervalSince1970: 1_700_000_000.5)
 
     @Test("ListenUpdate round-trips via property list with and without optional fields", arguments: [
-        ListenUpdate(source: .phone, phase: .start, listenSeconds: 0),
-        ListenUpdate(source: .phone, phase: .match, trackTime: 612.5, matchDate: listenDate, chunkStart: 600, listenSeconds: 23.25),
-        ListenUpdate(source: .phone, phase: .timeout, listenSeconds: 120),
-        ListenUpdate(source: .watch, phase: .failed, listenSeconds: 1, error: "no built-in mic"),
+        ListenUpdate(listenID: testListenID, source: .phone, phase: .start, listenSeconds: 0),
+        ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 612.5, matchDate: listenDate, chunkStart: 600, listenSeconds: 23.25),
+        ListenUpdate(listenID: testListenID, source: .phone, phase: .timeout, listenSeconds: 120),
+        ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 1, error: "no built-in mic"),
     ])
     func listenUpdateRoundTrip(update: ListenUpdate) throws {
         let plist = try update.toPropertyList()
@@ -453,10 +456,10 @@ struct WireProtocolTests {
 
     @Test("ListenUpdate omits nil optional fields from the JSON payload")
     func listenUpdateOmitsNilFields() throws {
-        let plist = try ListenUpdate(source: .phone, phase: .cancel, listenSeconds: 3).toPropertyList()
+        let plist = try ListenUpdate(listenID: testListenID, source: .phone, phase: .cancel, listenSeconds: 3).toPropertyList()
         let data = try #require(plist[WirePayloadKey.payload] as? Data)
         let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(Set(json.keys) == ["source", "phase", "listenSeconds"])
+        #expect(Set(json.keys) == ["listenID", "source", "phase", "listenSeconds"])
         #expect(json["phase"] as? String == "cancel")
         #expect(json["source"] as? String == "phone")
     }
@@ -482,7 +485,7 @@ struct WireProtocolTests {
         ListenEvent(phase: .failed("mic permission"), listenSeconds: 0),
     ])
     func listenUpdateEventMapping(event: ListenEvent) throws {
-        let update = ListenUpdate(source: .watch, event: event)
+        let update = ListenUpdate(listenID: testListenID, source: .watch, event: event)
         #expect(update.source == .watch)
         #expect(update.event == event)
         let decoded = try ListenUpdate(propertyList: try update.toPropertyList())
@@ -491,8 +494,8 @@ struct WireProtocolTests {
 
     @Test("a match update without trackTime or matchDate has no event")
     func listenUpdateMatchWithoutFields() {
-        #expect(ListenUpdate(source: .phone, phase: .match, trackTime: 10, listenSeconds: 1).event == nil)
-        #expect(ListenUpdate(source: .phone, phase: .match, matchDate: Self.listenDate, listenSeconds: 1).event == nil)
+        #expect(ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 10, listenSeconds: 1).event == nil)
+        #expect(ListenUpdate(listenID: testListenID, source: .phone, phase: .match, matchDate: Self.listenDate, listenSeconds: 1).event == nil)
     }
 
     @Test("ListenUpdate phase raw values are the wire strings")
