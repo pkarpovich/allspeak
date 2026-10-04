@@ -4,7 +4,7 @@ import OSLog
 @MainActor
 final class DiagnosticsLog {
     static let shared = DiagnosticsLog()
-    static let retentionDays = 30
+    static let retentionDays = 365
 
     private let rootURL: URL
     private let now: () -> Date

@@ -153,15 +153,29 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let today = date("2026-06-12T19:43:02.000Z")
         let day = 24.0 * 60 * 60
-        try writeLog(named: "ancient-20260101-1200.jsonl", in: root, modified: today - 90 * day)
-        try writeLog(named: "expired-20260510-1200.jsonl", in: root, modified: today - 31 * day)
-        try writeLog(named: "fresh-20260611-1200.jsonl", in: root, modified: today - 29 * day)
+        let retention = Double(DiagnosticsLog.retentionDays)
+        try writeLog(named: "ancient-20240101-1200.jsonl", in: root, modified: today - (retention + 60) * day)
+        try writeLog(named: "expired-20250611-1200.jsonl", in: root, modified: today - (retention + 1) * day)
+        try writeLog(named: "fresh-20250613-1200.jsonl", in: root, modified: today - (retention - 1) * day)
 
         let log = DiagnosticsLog(rootURL: root, now: { today })
         log.begin(filmTitle: "Dune")
 
         let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
-        #expect(Set(files) == ["fresh-20260611-1200.jsonl"])
+        #expect(Set(files) == ["fresh-20250613-1200.jsonl"])
+    }
+
+    @Test("retention keeps a 200-day-old log")
+    func retentionKeepsHalfYearOldLog() throws {
+        let root = makeTempRoot()
+        let today = date("2026-06-12T19:43:02.000Z")
+        try writeLog(named: "old-20251124-1200.jsonl", in: root, modified: today - 200 * 24 * 60 * 60)
+
+        let log = DiagnosticsLog(rootURL: root, now: { today })
+        log.begin(filmTitle: "Dune")
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
+        #expect(files == ["old-20251124-1200.jsonl"])
     }
 
     @Test("retention keeps a log that is exactly at the retention boundary")
@@ -169,20 +183,21 @@ struct DiagnosticsLogTests {
         let root = makeTempRoot()
         let today = date("2026-06-12T19:43:02.000Z")
         let day = 24.0 * 60 * 60
-        try writeLog(named: "boundary-20260513-1943.jsonl", in: root, modified: today - Double(DiagnosticsLog.retentionDays) * day)
+        try writeLog(named: "boundary-20250612-1943.jsonl", in: root, modified: today - Double(DiagnosticsLog.retentionDays) * day)
 
         let log = DiagnosticsLog(rootURL: root, now: { today })
         log.begin(filmTitle: "Dune")
 
         let files = try FileManager.default.contentsOfDirectory(atPath: diagnosticsDir(root).path)
-        #expect(files == ["boundary-20260513-1943.jsonl"])
+        #expect(files == ["boundary-20250612-1943.jsonl"])
     }
 
     @Test("retention never blocks the new screening's own log")
     func retentionDoesNotBlockLogging() throws {
         let root = makeTempRoot()
         let today = date("2026-06-12T19:43:02.000Z")
-        try writeLog(named: "expired-20260101-1200.jsonl", in: root, modified: today - 90 * 24 * 60 * 60)
+        let expiredAge = Double(DiagnosticsLog.retentionDays + 60) * 24 * 60 * 60
+        try writeLog(named: "expired-20250413-1200.jsonl", in: root, modified: today - expiredAge)
 
         let log = DiagnosticsLog(rootURL: root, now: { today })
         log.begin(filmTitle: "Dune")

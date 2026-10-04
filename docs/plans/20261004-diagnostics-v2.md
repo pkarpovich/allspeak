@@ -197,9 +197,9 @@ Type: `struct Hall: Identifiable, Equatable, Sendable { let key: String; let nam
 - Modify: `Allspeak/Diagnostics/DiagnosticsLog.swift`
 - Modify: `AllspeakTests/DiagnosticsLogTests.swift`
 
-- [ ] change `retentionDays` to 365.
-- [ ] update retention tests that hard-code day offsets to use `DiagnosticsLog.retentionDays`, and add a case where a 200-day-old log is kept.
-- [ ] run tests - must pass before task 3
+- [x] change `retentionDays` to 365.
+- [x] update retention tests that hard-code day offsets to use `DiagnosticsLog.retentionDays`, and add a case where a 200-day-old log is kept.
+- [x] run tests - must pass before task 3
 
 ### Task 3: Log positions, header, cue index and track switches in PlaybackCoordinator
 
