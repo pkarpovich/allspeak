@@ -210,14 +210,14 @@ Put the session behind a small protocol so tests can assert the exact calls and 
 - Create: `AllspeakTests/FingerprintMatchTests.swift`
 - Modify: `project.yml`
 
-- [ ] implement `FingerprintMatch`, `FingerprintMatch.make`, `FingerprintMatch.target`, `ListenEvent`, `ListenSource` and `CinemaListening` per Technical Details.
-- [ ] add the ShazamKit framework dependency to the `Allspeak` and `AllspeakWatch` targets in `project.yml`.
-- [ ] add `NSMicrophoneUsageDescription` to `Allspeak/Info.plist` and `AllspeakWatch/Info.plist`, using the text from Context.
-- [ ] write tests:
+- [x] implement `FingerprintMatch`, `FingerprintMatch.make`, `FingerprintMatch.target`, `ListenEvent`, `ListenSource` and `CinemaListening` per Technical Details.
+- [x] add the ShazamKit framework dependency to the `Allspeak` and `AllspeakWatch` targets in `project.yml`.
+- [x] add `NSMicrophoneUsageDescription` to `Allspeak/Info.plist` and `AllspeakWatch/Info.plist`, using the text from Context.
+- [x] write tests:
   - `make` with `abs_start=600` and offset 12.5 gives trackTime 612.5;
   - `make` with a missing or garbage subtitle gives nil;
   - `target` adds elapsed time and latency, and handles zero latency.
-- [ ] run tests - must pass before task 3
+- [x] run tests - must pass before task 3
 
 ### Task 3: Diagnostics `listen` event and `sync` source
 

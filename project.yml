@@ -28,6 +28,7 @@ targets:
     dependencies:
       - target: AllspeakWatch
         embed: true
+      - sdk: ShazamKit.framework
     configFiles:
       Debug: Allspeak/Signing.xcconfig
       Release: Allspeak/Signing.xcconfig
@@ -78,8 +79,10 @@ targets:
       - path: Allspeak/Watch/WatchTransportFormat.swift
       - path: Allspeak/Watch/ComplicationState.swift
       - path: Allspeak/Watch/ComplicationState+Metadata.swift
+      - path: Allspeak/Watch/FingerprintMatch.swift
     dependencies:
       - target: AllspeakWatchWidget
+      - sdk: ShazamKit.framework
     entitlements:
       path: AllspeakWatch/AllspeakWatch.entitlements
       properties:
