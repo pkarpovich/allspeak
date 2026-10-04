@@ -9,6 +9,7 @@ final class WatchSessionHost: NSObject {
     // One cue chunk is ~30KB of raw gzipped data; with the small dictionary
     // overhead it stays well under the 64KB sendMessage payload cap.
     static let cueChunkSize = 30_000
+    static let fingerprintChunkSize = 30_000
 
     private let coordinator: PlaybackCoordinator
     private let broadcastGate: SnapshotBroadcastGate
@@ -16,6 +17,10 @@ final class WatchSessionHost: NSObject {
     // The compressed cue bundle for the session/revision the watch is currently
     // pulling, cached so repeated chunk requests don't re-gzip the bundle.
     private var cueChunkCache: (sessionID: UUID, revision: Int, data: Data)?
+    private var fingerprintChunkCache: (sha256: String, data: Data)?
+    private var pendingListenUpdate: ListenUpdate?
+    private var latestListenUpdate: ListenUpdate?
+    private let incomingCommands: AsyncStream<IncomingCommand>.Continuation
 
     init(
         coordinator: PlaybackCoordinator = .shared,
@@ -23,7 +28,41 @@ final class WatchSessionHost: NSObject {
     ) {
         self.coordinator = coordinator
         self.broadcastGate = broadcastGate
+        let (stream, continuation) = AsyncStream<IncomingCommand>.makeStream()
+        incomingCommands = continuation
         super.init()
+        Task { [weak self] in
+            for await incoming in stream {
+                self?.process(incoming)
+            }
+        }
+    }
+
+    deinit {
+        incomingCommands.finish()
+    }
+
+    nonisolated func receive(_ command: WatchCommand, reply: @escaping @Sendable ([String: Any]) -> Void) {
+        incomingCommands.yield(IncomingCommand(command: command, reply: reply))
+    }
+
+    private func process(_ incoming: IncomingCommand) {
+        switch incoming.command {
+        case .requestCueChunk(let sessionID, let revision, let index):
+            incoming.reply(cueChunk(sessionID: sessionID, revision: revision, index: index)?.toPropertyList() ?? [:])
+        case .requestFingerprintChunk(let sha256, let index):
+            incoming.reply(fingerprintChunk(sha256: sha256, index: index)?.toPropertyList() ?? [:])
+        case .switchTrack:
+            Task {
+                incoming.reply(Self.payload(await dispatch(incoming.command)))
+            }
+        default:
+            incoming.reply(Self.payload(perform(incoming.command)))
+        }
+    }
+
+    private static func payload(_ snapshot: PlaybackSnapshot) -> [String: Any] {
+        (try? snapshot.toPropertyList()) ?? [:]
     }
 
     func activate() {
@@ -66,6 +105,9 @@ final class WatchSessionHost: NSObject {
 
     func broadcastSessionEnded() {
         cueChunkCache = nil
+        fingerprintChunkCache = nil
+        pendingListenUpdate = nil
+        latestListenUpdate = nil
         guard let session, session.activationState == .activated else { return }
         try? session.updateApplicationContext(SessionEndedSignal.propertyList())
     }
@@ -94,14 +136,49 @@ final class WatchSessionHost: NSObject {
         return CueChunkReply(sessionID: sessionID, revision: revision, index: index, totalChunks: total, data: slice)
     }
 
+    func fingerprintChunk(sha256: String, index: Int) -> FingerprintChunkReply? {
+        let file: Data
+        if let cached = fingerprintChunkCache, cached.sha256 == sha256 {
+            file = cached.data
+        } else {
+            guard let fingerprint = coordinator.fingerprint,
+                  fingerprint.sha256 == sha256,
+                  let data = try? Data(contentsOf: fingerprint.url) else { return nil }
+            file = data
+            fingerprintChunkCache = (sha256, data)
+        }
+        let size = Self.fingerprintChunkSize
+        let total = max(1, (file.count + size - 1) / size)
+        guard index >= 0, index < total else { return nil }
+        let start = index * size
+        let end = Swift.min(start + size, file.count)
+        return FingerprintChunkReply(sha256: sha256, index: index, totalChunks: total, data: file.subdata(in: start..<end))
+    }
+
     func dispatch(_ command: WatchCommand) async -> PlaybackSnapshot {
+        guard case .switchTrack(let id) = command else { return perform(command) }
+        try? await coordinator.switchTrack(to: id)
+        return coordinator.currentSnapshot()
+    }
+
+    private func perform(_ command: WatchCommand) -> PlaybackSnapshot {
         switch command {
-        case .switchTrack(let id):
-            try? await coordinator.switchTrack(to: id)
-        case .requestCueChunk:
-            // Served directly in didReceiveMessage with a CueChunkReply; never
+        case .switchTrack:
+            break
+        case .requestCueChunk, .requestFingerprintChunk:
+            // Served directly in process(_:) with a chunk reply; never
             // routed here.
             break
+        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
+            guard coordinator.applySync(
+                sessionID: sessionID,
+                trackTime: trackTime,
+                matchDate: matchDate,
+                source: source,
+                sha256: sha256
+            ) else {
+                return .empty
+            }
         default:
             coordinator.apply(command)
         }
@@ -149,6 +226,46 @@ final class WatchSessionHost: NSObject {
         send(payload)
         broadcastGate.recordBroadcast(now: now)
     }
+
+    func sendListenUpdate(_ update: ListenUpdate) {
+        sendListenUpdate(update, isReachable: isReachable, send: listenPayloadSender(for: update))
+    }
+
+    func sendListenUpdate(
+        _ update: ListenUpdate,
+        isReachable: Bool,
+        send: ([String: Any]) -> Void
+    ) {
+        latestListenUpdate = update
+        guard isReachable else {
+            pendingListenUpdate = update
+            return
+        }
+        pendingListenUpdate = nil
+        guard let payload = try? update.toPropertyList() else { return }
+        send(payload)
+    }
+
+    func listenSendFailed(_ update: ListenUpdate) {
+        guard update == latestListenUpdate else { return }
+        pendingListenUpdate = update
+    }
+
+    func resendPendingListenUpdate(isReachable: Bool, send: ([String: Any]) -> Void) {
+        guard let pendingListenUpdate else { return }
+        sendListenUpdate(pendingListenUpdate, isReachable: isReachable, send: send)
+    }
+
+    private func listenPayloadSender(for update: ListenUpdate) -> ([String: Any]) -> Void {
+        { [weak self] payload in
+            guard let self, let session, session.activationState == .activated else { return }
+            session.sendMessage(payload, replyHandler: nil) { [weak self] _ in
+                Task { @MainActor in
+                    self?.listenSendFailed(update)
+                }
+            }
+        }
+    }
 }
 
 extension WatchSessionHost: WCSessionDelegate {
@@ -181,6 +298,8 @@ extension WatchSessionHost: WCSessionDelegate {
             } else {
                 self.broadcastSessionEnded()
             }
+            guard let pending = self.pendingListenUpdate else { return }
+            self.resendPendingListenUpdate(isReachable: reachable, send: self.listenPayloadSender(for: pending))
         }
     }
 
@@ -197,20 +316,16 @@ extension WatchSessionHost: WCSessionDelegate {
             return
         }
         let sendableReply = SendablePayloadCallback(invoke: replyHandler)
-        Task { @MainActor in
-            if case .requestCueChunk(let sessionID, let revision, let index) = command {
-                let payload = self.cueChunk(sessionID: sessionID, revision: revision, index: index)?.toPropertyList() ?? [:]
-                sendableReply.invoke(payload)
-                return
-            }
-            let snapshot = await self.dispatch(command)
-            let payload = (try? snapshot.toPropertyList()) ?? [:]
-            sendableReply.invoke(payload)
-        }
+        receive(command) { sendableReply.invoke($0) }
     }
 }
 
 private struct SendablePayloadCallback: @unchecked Sendable {
     let invoke: ([String: Any]) -> Void
+}
+
+private struct IncomingCommand: Sendable {
+    let command: WatchCommand
+    let reply: @Sendable ([String: Any]) -> Void
 }
 #endif

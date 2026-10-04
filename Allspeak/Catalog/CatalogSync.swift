@@ -22,6 +22,8 @@ struct SyncPlan: Equatable, Sendable {
     let replaceSubtitle: CatalogSubtitle?
     let replaceClip: CatalogClip?
     let removeClip: Bool
+    let replaceFingerprint: CatalogFingerprint?
+    let removeFingerprint: Bool
     let addTracks: [CatalogTrack]
     let removeTrackIDs: [UUID]
     let downloadRequests: [CatalogFileRequest]
@@ -40,6 +42,8 @@ struct SyncPlan: Equatable, Sendable {
             || replaceSubtitle != nil
             || replaceClip != nil
             || removeClip
+            || replaceFingerprint != nil
+            || removeFingerprint
             || !addTracks.isEmpty
             || !removeTrackIDs.isEmpty
             || revisionChanged
@@ -61,12 +65,18 @@ struct SyncPlan: Equatable, Sendable {
         let clipChanged = manifest.clip?.sha256.lowercased() != sidecar.clip?.sha256.lowercased()
         let clip = clipChanged ? manifest.clip : nil
 
+        let fingerprintChanged = manifest.fingerprint?.sha256.lowercased() != sidecar.fingerprint?.sha256.lowercased()
+        let fingerprint = fingerprintChanged ? manifest.fingerprint : nil
+
         var requests = added.map { CatalogFileRequest(track: $0) }
         if let subtitle {
             requests.append(CatalogFileRequest(subtitle: subtitle))
         }
         if let clip {
             requests.append(CatalogFileRequest(clip: clip))
+        }
+        if let fingerprint {
+            requests.append(CatalogFileRequest(fingerprint: fingerprint))
         }
 
         var rows = orderedTracks.map { track in
@@ -82,11 +92,22 @@ struct SyncPlan: Equatable, Sendable {
         if let manifestClip = manifest.clip {
             rows.append(SyncFileRow(filename: manifestClip.filename, size: manifestClip.size, changed: clipChanged))
         }
+        if let manifestFingerprint = manifest.fingerprint {
+            rows.append(
+                SyncFileRow(
+                    filename: manifestFingerprint.filename,
+                    size: manifestFingerprint.size,
+                    changed: fingerprintChanged
+                )
+            )
+        }
 
         self.newTitle = manifest.title == currentTitle ? nil : manifest.title
         self.replaceSubtitle = subtitle
         self.replaceClip = clip
         self.removeClip = clipChanged && manifest.clip == nil
+        self.replaceFingerprint = fingerprint
+        self.removeFingerprint = fingerprintChanged && manifest.fingerprint == nil
         self.addTracks = added
         self.removeTrackIDs = removed
         self.downloadRequests = requests
@@ -154,6 +175,20 @@ struct CatalogSyncApplier: Sendable {
         if plan.replaceClip != nil || plan.removeClip, let old = sidecar.clip {
             try storage.removeClipFile(sessionID: sessionUUID, sha256: old.sha256, filename: old.filename)
         }
+        if let fingerprint = plan.replaceFingerprint {
+            try storage.copyIntoSession(
+                srcURL: staging.stagedURL(
+                    serverID: serverID, sha256: fingerprint.sha256, filename: fingerprint.filename
+                ),
+                sessionID: sessionUUID,
+                as: DocumentsStorage.fingerprintFilename(
+                    sha256: fingerprint.sha256, originalFilename: fingerprint.filename
+                )
+            )
+        }
+        if plan.replaceFingerprint != nil || plan.removeFingerprint, let old = sidecar.fingerprint {
+            try storage.removeFingerprintFile(sessionID: sessionUUID, sha256: old.sha256, filename: old.filename)
+        }
 
         for old in sidecar.tracks {
             let key = TrackKey(sha256: old.sha256, label: old.label)
@@ -199,7 +234,10 @@ struct CatalogSyncApplier: Sendable {
                 sha256: detail.subtitle.sha256.lowercased()
             ),
             tracks: sidecarTracks,
-            clip: detail.clip.map { CatalogSidecar.Clip(filename: $0.filename, sha256: $0.sha256.lowercased()) }
+            clip: detail.clip.map { CatalogSidecar.Clip(filename: $0.filename, sha256: $0.sha256.lowercased()) },
+            fingerprint: detail.fingerprint.map {
+                CatalogSidecar.Fingerprint(filename: $0.filename, sha256: $0.sha256.lowercased())
+            }
         )
         try newSidecar.save(to: storage.sessionDir(for: sessionUUID))
 

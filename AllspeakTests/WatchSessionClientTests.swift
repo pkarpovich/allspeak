@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import Allspeak
 
+private let testListenID = UUID(uuidString: "5E5E5E5E-0000-4000-8000-000000000001")!
+
 @Suite("WatchSessionClient", .serialized)
 @MainActor
 struct WatchSessionClientTests {
@@ -14,6 +16,8 @@ struct WatchSessionClientTests {
         // Computes a reply per outgoing message (used to serve cue chunks by
         // index). Takes precedence over nextReply when it returns non-nil.
         var replyProvider: (@Sendable ([String: Any]) -> [String: Any]?)?
+        var holdsReplies = false
+        var heldReplies: [(message: [String: Any], reply: @Sendable ([String: Any]) -> Void)] = []
 
         func send(
             message: [String: Any],
@@ -21,7 +25,9 @@ struct WatchSessionClientTests {
             errorHandler: @escaping @Sendable (Error) -> Void
         ) {
             sentMessages.append(message)
-            if let reply = replyProvider?(message) {
+            if holdsReplies {
+                heldReplies.append((message, replyHandler))
+            } else if let reply = replyProvider?(message) {
                 replyHandler(reply)
             } else if let nextReply {
                 replyHandler(nextReply)
@@ -1044,4 +1050,893 @@ struct WatchSessionClientTests {
         #expect(sender.sentMessages.count == 2)
     }
 
+    // MARK: - Fingerprint pull
+
+    private func makeFingerprintClient() throws -> (WatchSessionClient, MockSender, FingerprintCache, URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("client-fingerprint-\(UUID().uuidString)", isDirectory: true)
+        let cueCache = try CueCache(baseURL: dir.appendingPathComponent("cues", isDirectory: true))
+        let fingerprintCache = try FingerprintCache(baseURL: dir.appendingPathComponent("fingerprint", isDirectory: true))
+        let sender = MockSender()
+        let client = WatchSessionClient(sender: sender, cache: cueCache, fingerprintCache: fingerprintCache)
+        return (client, sender, fingerprintCache, dir)
+    }
+
+    private static let fingerprintData = Data((0..<70_000).map { UInt8(truncatingIfNeeded: $0 * 13) })
+
+    private static func fingerprintMeta(sessionID: UUID = UUID(), sha256: String?, size: Int? = nil) -> SessionMetadata {
+        SessionMetadata(
+            sessionID: sessionID,
+            revision: 1,
+            title: "Digger",
+            duration: 7200,
+            cueCount: 0,
+            isPlaying: false,
+            currentTime: 0,
+            fingerprintSHA: sha256,
+            fingerprintSize: size
+        )
+    }
+
+    private static func fingerprintChunkRequests(_ messages: [[String: Any]]) -> [Int] {
+        messages.compactMap { message in
+            guard let command = try? WatchCommand(propertyList: message),
+                  case .requestFingerprintChunk(_, let index) = command else { return nil }
+            return index
+        }
+    }
+
+    private static func serveFingerprint(_ data: Data, sha256: String) -> @Sendable ([String: Any]) -> [String: Any]? {
+        let size = 30_000
+        let total = (data.count + size - 1) / size
+        return { message in
+            guard let command = try? WatchCommand(propertyList: message),
+                  case .requestFingerprintChunk(let requested, let index) = command,
+                  requested == sha256,
+                  index < total else { return [:] }
+            let end = min((index + 1) * size, data.count)
+            return FingerprintChunkReply(
+                sha256: sha256,
+                index: index,
+                totalChunks: total,
+                data: data.subdata(in: (index * size)..<end)
+            ).toPropertyList()
+        }
+    }
+
+    @Test("a new fingerprint sha pulls every chunk and stores a file whose sha256 matches")
+    func fingerprintPullAssemblesFile() async throws {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha, size: Self.fingerprintData.count).toPropertyList())
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0, 1, 2])
+        let url = try #require(client.fingerprintURL)
+        #expect(client.hasFingerprint)
+        #expect(cache.url(sha256: sha) == url)
+        let stored = try Data(contentsOf: url)
+        #expect(FingerprintCache.sha256Hex(of: stored) == sha)
+    }
+
+    @Test("a cached fingerprint is used without any chunk request")
+    func fingerprintCacheHitSkipsPull() async throws {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        let url = try cache.save(Self.fingerprintData, sha256: sha)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+
+        #expect(client.fingerprintURL == url)
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages).isEmpty)
+    }
+
+    @Test("metadata without a fingerprint requests nothing and reports none")
+    func noFingerprintNoPull() async throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+
+        #expect(!client.hasFingerprint)
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("assembled data whose sha256 does not match is not stored")
+    func fingerprintShaMismatchIsDropped() async throws {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let claimedSHA = FingerprintCache.sha256Hex(of: Data("other".utf8))
+        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: claimedSHA)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: claimedSHA).toPropertyList())
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(!client.hasFingerprint)
+        #expect(cache.url(sha256: claimedSHA) == nil)
+    }
+
+    @Test("an error reply re-arms the fingerprint pull so a later context retries")
+    func fingerprintErrorReplyReArms() async throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        let meta = Self.fingerprintMeta(sha256: sha)
+
+        sender.nextReply = [:]
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!client.hasFingerprint)
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
+
+        sender.nextReply = nil
+        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(client.hasFingerprint)
+    }
+
+    @Test("a transport error re-arms the fingerprint pull so a later context retries")
+    func fingerprintTransportErrorReArms() async throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        let meta = Self.fingerprintMeta(sha256: sha)
+
+        sender.nextError = WatchMessageError.notReachable
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!client.hasFingerprint)
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
+
+        sender.nextError = nil
+        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(client.hasFingerprint)
+    }
+
+    @Test("an in-flight fingerprint pull is not restarted by a repeated context")
+    func fingerprintPullDeduplicates() async throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = Self.fingerprintMeta(sha256: "abc")
+
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
+    }
+
+    @Test("session end clears the fingerprint")
+    func sessionEndClearsFingerprint() async throws {
+        let (client, _, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        try cache.save(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        #expect(client.hasFingerprint)
+
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+
+        #expect(!client.hasFingerprint)
+    }
+
+    @Test("a session switch to one without a fingerprint hides the cached one")
+    func sessionSwitchDropsFingerprint() async throws {
+        let (client, _, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        try cache.save(Self.fingerprintData, sha256: sha)
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        #expect(client.hasFingerprint)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+
+        #expect(!client.hasFingerprint)
+        #expect(cache.url(sha256: sha) != nil)
+    }
+
+    @Test("snapshot updates keep the metadata fingerprint fields")
+    func snapshotKeepsFingerprintFields() async throws {
+        let (client, _, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sessionID = UUID()
+        let meta = Self.fingerprintMeta(sessionID: sessionID, sha256: "abc", size: 1234)
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        let snapshot = PlaybackSnapshot(
+            sessionID: sessionID,
+            revision: 1,
+            currentTime: 42,
+            duration: 7200,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        client.handleReceivedSnapshot(try snapshot.toPropertyList())
+
+        #expect(client.metadata?.currentTime == 42)
+        #expect(client.metadata?.fingerprintSHA == "abc")
+        #expect(client.metadata?.fingerprintSize == 1234)
+    }
+
+    // MARK: - Cinema listen
+
+    @MainActor
+    final class FakeListener: CinemaListening {
+        private(set) var onEvent: (@MainActor (ListenEvent) -> Void)?
+        private(set) var cancelCount = 0
+
+        func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
+            self.onEvent = onEvent
+            onEvent(ListenEvent(phase: .started, listenSeconds: 0))
+        }
+
+        func cancel() {
+            cancelCount += 1
+            send(.cancelled)
+        }
+
+        func send(_ phase: ListenEvent.Phase, seconds: Double = 1) {
+            let handler = onEvent
+            if phase != .started { onEvent = nil }
+            handler?(ListenEvent(phase: phase, listenSeconds: seconds))
+        }
+    }
+
+    private static func sentCommands(_ messages: [[String: Any]]) -> [WatchCommand] {
+        messages.compactMap { try? WatchCommand(propertyList: $0) }
+    }
+
+    private func makeListeningClient() throws -> (WatchSessionClient, MockSender, FakeListener, URL) {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        try cache.save(Self.fingerprintData, sha256: Self.listeningSHA)
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: Self.listeningSHA).toPropertyList())
+        let listener = FakeListener()
+        client.makeListener = { _ in listener }
+        client.makeListenID = { testListenID }
+        sender.sentMessages = []
+        return (client, sender, listener, dir)
+    }
+
+    private static let listeningSHA = FingerprintCache.sha256Hex(of: fingerprintData)
+
+    private static let listenMatch = FingerprintMatch(
+        trackTime: 612.5,
+        matchDate: Date(timeIntervalSince1970: 1_000_000),
+        chunkStart: 600
+    )
+
+    @Test("startListening sends the command, starts the watch listener and forwards its events")
+    func startListeningStartsBoth() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+
+        #expect(listener.onEvent != nil)
+        #expect(client.listenPanel.phase == .listening)
+        let commands = Self.sentCommands(sender.sentMessages)
+        #expect(commands.first == .startListening(listenID: testListenID))
+        #expect(commands.contains(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0))))
+    }
+
+    @Test("a watch match is shown and sent to the phone as a listenEvent")
+    func watchMatchForwarded() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch), seconds: 7)
+
+        #expect(client.listenPanel.shownMatch == ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch))
+        #expect(client.listenPanel.phone.isListening)
+        let expected = WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 7)))
+        #expect(Self.sentCommands(sender.sentMessages).contains(expected))
+    }
+
+    @Test("a listenUpdate payload updates the phone source")
+    func listenUpdateUpdatesPhone() throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let update = ListenUpdate(listenID: testListenID, source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try update.toPropertyList())
+
+        #expect(client.listenPanel.phone == .matched(Self.listenMatch))
+        #expect(client.listenPanel.shownMatch == ListenPanelState.ShownMatch(source: .phone, match: Self.listenMatch))
+        #expect(client.listenPanel.watch.isListening)
+    }
+
+    @Test("a listenUpdate from the watch source or without match fields is ignored")
+    func listenUpdateIgnoresWrongSource() throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let watchUpdate = ListenUpdate(listenID: testListenID, source: .watch, phase: .timeout, listenSeconds: 120)
+        client.handleReceivedMessage(try watchUpdate.toPropertyList())
+        let brokenMatch = ListenUpdate(listenID: testListenID, source: .phone, phase: .match, listenSeconds: 3)
+        client.handleReceivedMessage(try brokenMatch.toPropertyList())
+
+        #expect(client.listenPanel.phone.isListening)
+        #expect(client.listenPanel.shownMatch == nil)
+    }
+
+    @Test("a snapshot message still goes to the snapshot path")
+    func snapshotMessageStillRouted() throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = try #require(client.metadata)
+        let snapshot = PlaybackSnapshot(
+            sessionID: meta.sessionID, revision: meta.revision,
+            currentTime: 42, duration: 7200, currentIndex: 0,
+            isPlaying: true, serverDate: Date()
+        )
+
+        client.handleReceivedMessage(try snapshot.toPropertyList())
+
+        #expect(client.lastSnapshot?.currentTime == 42)
+    }
+
+    @Test("cancelListening cancels both listeners and resets the panel")
+    func cancelListeningStopsBoth() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        sender.sentMessages = []
+        client.cancelListening()
+
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel == ListenPanelState())
+        let commands = Self.sentCommands(sender.sentMessages)
+        #expect(commands.contains(.cancelListening(listenID: testListenID)))
+        #expect(commands.contains(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .cancel, listenSeconds: 1))))
+    }
+
+    private static func sessionReply(for client: WatchSessionClient) throws -> [String: Any] {
+        let snapshot = PlaybackSnapshot(
+            sessionID: try #require(client.metadata?.sessionID),
+            revision: 1,
+            currentTime: 600,
+            duration: 7200,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        return try snapshot.toPropertyList()
+    }
+
+    @Test("applyShownMatch sends applySync and stops the watch listener")
+    func applyShownMatchSendsApplySync() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let update = ListenUpdate(listenID: testListenID, source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try update.toPropertyList())
+        sender.sentMessages = []
+        sender.nextReply = try Self.sessionReply(for: client)
+        client.applyShownMatch()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let commands = Self.sentCommands(sender.sentMessages)
+        let apply = WatchCommand.applySync(
+            sessionID: try #require(client.metadata?.sessionID),
+            trackTime: 612.5,
+            matchDate: Self.listenMatch.matchDate,
+            source: .phone,
+            sha256: Self.listeningSHA
+        )
+        #expect(commands.contains(apply))
+        #expect(!commands.contains(.cancelListening(listenID: testListenID)))
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel.phase == .applied(ListenPanelState.ShownMatch(source: .phone, match: Self.listenMatch)))
+    }
+
+    @Test("applyShownMatch cancels a phone that is still listening before the apply")
+    func applyCancelsListeningPhoneFirst() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.sentMessages = []
+        client.applyShownMatch()
+
+        let commands = Self.sentCommands(sender.sentMessages)
+        let apply = WatchCommand.applySync(
+            sessionID: try #require(client.metadata?.sessionID),
+            trackTime: 612.5,
+            matchDate: Self.listenMatch.matchDate,
+            source: .watch,
+            sha256: Self.listeningSHA
+        )
+        let cancelIndex = try #require(commands.firstIndex(of: .cancelListening(listenID: testListenID)))
+        let applyIndex = try #require(commands.firstIndex(of: apply))
+        #expect(cancelIndex < applyIndex)
+        #expect(listener.cancelCount == 0)
+    }
+
+    @Test("applyShownMatch without a match sends nothing")
+    func applyWithoutMatchSendsNothing() throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        sender.sentMessages = []
+        client.applyShownMatch()
+
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("an apply the phone has not answered yet stays on the match card and ignores a second tap")
+    func pendingApplyStaysOnMatch() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.sentMessages = []
+        client.applyShownMatch()
+        client.applyShownMatch()
+
+        let shown = ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch)
+        #expect(client.listenPanel.applying)
+        #expect(client.listenPanel.phase == .match(shown))
+        let apply = WatchCommand.applySync(
+            sessionID: try #require(client.metadata?.sessionID),
+            trackTime: 612.5,
+            matchDate: Self.listenMatch.matchDate,
+            source: .watch,
+            sha256: Self.listeningSHA
+        )
+        #expect(Self.sentCommands(sender.sentMessages).filter { $0 == apply }.count == 1)
+    }
+
+    @Test("cancelListening after an apply sends nothing and returns the panel to idle")
+    func cancelAfterApplyReturnsToIdle() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.nextReply = try Self.sessionReply(for: client)
+        client.applyShownMatch()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(client.listenPanel.applied)
+        sender.sentMessages = []
+        client.cancelListening()
+
+        #expect(sender.sentMessages.isEmpty)
+        #expect(client.listenPanel.phase == .idle)
+        #expect(client.listenPanel == ListenPanelState())
+    }
+
+    @Test("without a fingerprint the watch source fails and the phone keeps listening")
+    func startWithoutFingerprintFailsWatch() throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        client.makeListenID = { testListenID }
+
+        client.startListening()
+
+        #expect(client.listenPanel.watch == .failed("no fingerprint"))
+        #expect(client.listenPanel.phone.isListening)
+        let failed = WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 0, error: "no fingerprint"))
+        #expect(Self.sentCommands(sender.sentMessages).contains(failed))
+    }
+
+    @Test("an unreachable phone marks the phone source failed")
+    func unreachablePhoneFails() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        sender.nextError = WatchMessageError.notReachable
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(50))
+
+        guard case .failed = client.listenPanel.phone else {
+            Issue.record("phone source is \(client.listenPanel.phone)")
+            return
+        }
+        #expect(client.listenPanel.watch.isListening)
+        #expect(listener.onEvent != nil)
+    }
+
+    @Test("a late send failure from a cancelled attempt leaves the next attempt listening")
+    func lateSendFailureFromOldAttemptIgnored() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        sender.nextError = WatchMessageError.notReachable
+        client.startListening()
+        sender.nextError = nil
+        client.cancelListening()
+        client.makeListenID = { UUID() }
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(client.listenPanel.phone.isListening)
+    }
+
+    @Test("a second startListening while listening is ignored")
+    func startWhileListeningIgnored() throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        let count = sender.sentMessages.count
+        client.startListening()
+
+        #expect(sender.sentMessages.count == count)
+    }
+
+    @Test("session end cancels the watch listener and resets the panel")
+    func sessionEndCancelsListening() throws {
+        let (client, _, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
+
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel == ListenPanelState())
+    }
+
+    @Test("a phone that never reports back times out on the watch")
+    func silentPhoneTimesOut() async throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        client.phoneListenTimeout = .milliseconds(20)
+
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(client.listenPanel.phone == .timedOut)
+        #expect(client.listenPanel.watch.isListening)
+    }
+
+    @Test("the phone timeout from a cancelled run does not touch the next run")
+    func cancelledRunTimeoutIgnored() async throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        client.phoneListenTimeout = .milliseconds(30)
+        client.startListening()
+        client.cancelListening()
+
+        client.phoneListenTimeout = .seconds(10)
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(client.listenPanel.phone.isListening)
+    }
+
+    @Test("a late phone cancel from a stopped run does not stop the restarted run")
+    func lateCancelAfterRestartIgnored() throws {
+        let (client, _, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        client.cancelListening()
+        client.startListening()
+        let lateCancel = ListenUpdate(listenID: testListenID, source: .phone, phase: .cancel, listenSeconds: 2)
+        client.handleReceivedMessage(try lateCancel.toPropertyList())
+
+        #expect(client.listenPanel.phone.isListening)
+        let match = ListenUpdate(listenID: testListenID, source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try match.toPropertyList())
+        #expect(client.listenPanel.shownMatch == ListenPanelState.ShownMatch(source: .phone, match: Self.listenMatch))
+    }
+
+    @Test("a delayed phone match from a previous attempt is ignored by the restarted one")
+    func staleAttemptMatchIgnored() throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let firstListenID = UUID()
+        let secondListenID = UUID()
+        var listenIDs = [firstListenID, secondListenID]
+        client.makeListenID = { listenIDs.removeFirst() }
+
+        client.startListening()
+        client.cancelListening()
+        client.startListening()
+        let staleMatch = ListenUpdate(listenID: firstListenID, source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try staleMatch.toPropertyList())
+
+        #expect(client.listenPanel.shownMatch == nil)
+        #expect(client.listenPanel.phone.isListening)
+        #expect(Self.sentCommands(sender.sentMessages).contains(.startListening(listenID: secondListenID)))
+        let currentMatch = ListenUpdate(listenID: secondListenID, source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try currentMatch.toPropertyList())
+        #expect(client.listenPanel.shownMatch == ListenPanelState.ShownMatch(source: .phone, match: Self.listenMatch))
+    }
+
+    @Test("metadata for a different session cancels listening")
+    func sessionSwitchCancelsListening() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+
+        #expect(client.listenPanel == ListenPanelState())
+        #expect(Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: testListenID)))
+    }
+
+    @Test("a same-session fingerprint replacement cancels listening")
+    func fingerprintReplacementCancelsListening() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sessionID = try #require(client.metadata?.sessionID)
+
+        client.startListening()
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sessionID: sessionID, sha256: "other").toPropertyList())
+
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel == ListenPanelState())
+        #expect(Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: testListenID)))
+    }
+
+    @Test("a same-session fingerprint removal cancels listening")
+    func fingerprintRemovalCancelsListening() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sessionID = try #require(client.metadata?.sessionID)
+
+        client.startListening()
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sessionID: sessionID, sha256: nil).toPropertyList())
+
+        #expect(listener.cancelCount == 1)
+        #expect(client.listenPanel == ListenPanelState())
+        #expect(Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: testListenID)))
+    }
+
+    @Test("a same-session context with the same fingerprint keeps listening")
+    func sameFingerprintKeepsListening() throws {
+        let (client, _, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = try #require(client.metadata)
+
+        client.startListening()
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        #expect(listener.cancelCount == 0)
+        #expect(client.listenPanel.isListening)
+    }
+
+    @Test("the first metadata does not send a cancel to the phone")
+    func firstMetadataSendsNoCancel() throws {
+        let (client, sender, _, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+
+        #expect(!Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: testListenID)))
+    }
+
+    @Test("an apply that fails to reach the phone returns to the match card")
+    func failedApplyReturnsToMatch() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.nextError = WatchMessageError.notReachable
+        client.applyShownMatch()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let shown = ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch)
+        #expect(client.listenPanel.phase == .match(shown))
+    }
+
+    @Test("cancelListening after a failed apply resends the unconfirmed phone cancel")
+    func cancelAfterFailedApplyResendsPhoneCancel() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.nextError = WatchMessageError.notReachable
+        client.applyShownMatch()
+        try await Task.sleep(for: .milliseconds(50))
+        sender.nextError = nil
+        sender.sentMessages = []
+        client.cancelListening()
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.cancelListening(listenID: testListenID)])
+        #expect(client.listenPanel == ListenPanelState())
+    }
+
+    @Test("a phone cancel that fails stays pending and is resent when the phone is reachable again")
+    func failedPhoneCancelRetriedOnReachability() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        sender.nextError = WatchMessageError.notReachable
+        client.cancelListening()
+        try await Task.sleep(for: .milliseconds(50))
+        sender.nextError = nil
+        sender.nextReply = try Self.sessionReply(for: client)
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.cancelListening(listenID: testListenID)])
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("a restart whose start fails keeps the older phone cancel pending and cancels the failed attempt too")
+    func failedRestartKeepsPhoneCancelPending() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let firstListenID = UUID()
+        let secondListenID = UUID()
+        var listenIDs = [firstListenID, secondListenID]
+        client.makeListenID = { listenIDs.removeFirst() }
+
+        client.startListening()
+        sender.nextError = WatchMessageError.notReachable
+        client.cancelListening()
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(50))
+        sender.nextError = nil
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+
+        let retried = Self.sentCommands(sender.sentMessages)
+        #expect(retried.count == 2)
+        #expect(retried.contains(.cancelListening(listenID: firstListenID)))
+        #expect(retried.contains(.cancelListening(listenID: secondListenID)))
+        sender.sentMessages = []
+        client.cancelListening()
+
+        #expect(Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: firstListenID)))
+    }
+
+    @Test("a restart the phone acknowledges confirms the pending phone cancel")
+    func acknowledgedRestartConfirmsPhoneCancel() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var listenIDs = [UUID(), UUID()]
+        client.makeListenID = { listenIDs.removeFirst() }
+
+        client.startListening()
+        sender.nextError = WatchMessageError.notReachable
+        client.cancelListening()
+        sender.nextError = nil
+        sender.nextReply = try Self.sessionReply(for: client)
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(50))
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("a cancel retry while a restart awaits its reply targets only the older attempt")
+    func cancelRetryDuringRestartTargetsOlderAttempt() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let firstListenID = UUID()
+        let secondListenID = UUID()
+        var listenIDs = [firstListenID, secondListenID]
+        client.makeListenID = { listenIDs.removeFirst() }
+
+        client.startListening()
+        sender.nextError = WatchMessageError.notReachable
+        client.cancelListening()
+        try await Task.sleep(for: .milliseconds(50))
+        sender.nextError = nil
+        sender.holdsReplies = true
+        client.startListening()
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.cancelListening(listenID: firstListenID)])
+        #expect(client.listenPanel.phone.isListening)
+    }
+
+    @Test("a start that fails to reach the phone keeps a cancel for that attempt pending")
+    func failedStartQueuesPhoneCancel() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        sender.nextError = WatchMessageError.notReachable
+        client.startListening()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(client.listenPanel.phone == .failed(WatchMessageError.notReachable.localizedDescription))
+        #expect(Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: testListenID)))
+        sender.nextError = nil
+        sender.nextReply = try Self.sessionReply(for: client)
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.cancelListening(listenID: testListenID)])
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("a late reply to an older phone cancel leaves a newer cancel pending")
+    func staleCancelReplyKeepsNewerCancelPending() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let firstListenID = UUID()
+        let secondListenID = UUID()
+        var listenIDs = [firstListenID, secondListenID]
+        client.makeListenID = { listenIDs.removeFirst() }
+
+        client.startListening()
+        sender.holdsReplies = true
+        client.cancelListening()
+        client.startListening()
+        let started = ListenUpdate(listenID: secondListenID, source: .phone, event: ListenEvent(phase: .started, listenSeconds: 0))
+        client.handleReceivedMessage(try started.toPropertyList())
+        sender.holdsReplies = false
+        sender.nextError = WatchMessageError.notReachable
+        client.cancelListening()
+        let staleCancel = try #require(sender.heldReplies.first { Self.sentCommands([$0.message]) == [.cancelListening(listenID: firstListenID)] })
+        staleCancel.reply(try Self.sessionReply(for: client))
+        try await Task.sleep(for: .milliseconds(50))
+        sender.nextError = nil
+        sender.sentMessages = []
+        client.retryPhoneCancelIfNeeded()
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.cancelListening(listenID: secondListenID)])
+    }
+
+    @Test("an apply the phone rejects with an empty snapshot returns to the match card")
+    func applyWithoutPhoneSessionReturnsToMatch() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        sender.nextReply = try PlaybackSnapshot.empty.toPropertyList()
+        client.applyShownMatch()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let shown = ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch)
+        #expect(client.listenPanel.phase == .match(shown))
+    }
+
+    @Test("an apply acknowledged with another session's snapshot returns to the match card")
+    func applyAckFromOtherSessionReturnsToMatch() async throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startListening()
+        listener.send(.matched(Self.listenMatch))
+        let otherSession = PlaybackSnapshot(
+            sessionID: UUID(),
+            revision: 1,
+            currentTime: 600,
+            duration: 7200,
+            currentIndex: 0,
+            isPlaying: true,
+            serverDate: Date()
+        )
+        sender.nextReply = try otherSession.toPropertyList()
+        client.applyShownMatch()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let shown = ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch)
+        #expect(client.listenPanel.phase == .match(shown))
+    }
 }

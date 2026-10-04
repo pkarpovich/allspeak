@@ -25,6 +25,8 @@ enum Tokens {
         static let skipBack          = "gobackward"
         static let skipForward       = "goforward"
         static let popcorn           = "popcorn.fill"
+        static let listen            = "waveform"
+        static let done              = "checkmark.circle.fill"
     }
 }
 

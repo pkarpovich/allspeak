@@ -89,6 +89,81 @@ struct CatalogSidecarTests {
         #expect(loaded.clip == nil)
     }
 
+    @Test("round-trips a sidecar carrying a fingerprint")
+    func roundTripWithFingerprint() throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionDir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let base = makeSidecar()
+        let sidecar = CatalogSidecar(
+            serverID: base.serverID, revision: base.revision, subtitle: base.subtitle, tracks: base.tracks,
+            fingerprint: .init(filename: "movie.shazamcatalog", sha256: "ff00ff")
+        )
+
+        try sidecar.save(to: sessionDir)
+        let loaded = try CatalogSidecar.load(from: sessionDir)
+
+        #expect(loaded == sidecar)
+        #expect(loaded.fingerprint?.filename == "movie.shazamcatalog")
+        #expect(loaded.clip == nil)
+    }
+
+    @Test("a sidecar written before fingerprints existed loads with no fingerprint")
+    func loadsLegacySidecarWithoutFingerprint() throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionDir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let legacy = """
+        {"serverID":"1B4E28BA-2FA1-11D2-883F-0016D3CCA427","revision":4,
+         "subtitle":{"filename":"movie.srt","sha256":"cc00cc"},
+         "tracks":[{"filename":"a.m4a","sha256":"aa00aa","label":"original","trackID":"2B4E28BA-2FA1-11D2-883F-0016D3CCA427"}],
+         "clip":{"filename":"first-line.mp4","sha256":"ee00ee"}}
+        """
+        try legacy.write(to: sessionDir.appendingPathComponent("server.json"), atomically: true, encoding: .utf8)
+
+        let loaded = try CatalogSidecar.load(from: sessionDir)
+
+        #expect(loaded.revision == 4)
+        #expect(loaded.clip?.filename == "first-line.mp4")
+        #expect(loaded.fingerprint == nil)
+    }
+
+    @Test("fingerprintURL resolves only when the fingerprint file is on disk")
+    func fingerprintURLRequiresFile() throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = DocumentsStorage(documentsURL: root)
+        let sessionID = UUID()
+        let base = makeSidecar()
+        let sidecar = CatalogSidecar(
+            serverID: base.serverID, revision: base.revision, subtitle: base.subtitle, tracks: base.tracks,
+            fingerprint: .init(filename: "movie.shazamcatalog", sha256: "FF00FF")
+        )
+        let expected = storage.sessionDir(for: sessionID).appendingPathComponent("fingerprint-ff00ff-movie.shazamcatalog")
+
+        #expect(sidecar.fingerprintURL(sessionID: sessionID, storage: storage) == nil)
+        #expect(base.fingerprintURL(sessionID: sessionID, storage: storage) == nil)
+
+        try FileManager.default.createDirectory(at: expected.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("v".utf8).write(to: expected)
+
+        #expect(sidecar.fingerprintURL(sessionID: sessionID, storage: storage) == expected)
+    }
+
+    @Test("reconciling keeps the fingerprint")
+    func reconcileKeepsFingerprint() {
+        let base = makeSidecar()
+        let sidecar = CatalogSidecar(
+            serverID: base.serverID, revision: base.revision, subtitle: base.subtitle, tracks: base.tracks,
+            fingerprint: .init(filename: "movie.shazamcatalog", sha256: "ff00ff")
+        )
+
+        let reconciled = sidecar.reconciled(liveTrackIDs: [])
+
+        #expect(reconciled.fingerprint == sidecar.fingerprint)
+    }
+
     @Test("clipURL resolves only when the clip file is on disk")
     func clipURLRequiresFile() throws {
         let root = makeTempRoot()

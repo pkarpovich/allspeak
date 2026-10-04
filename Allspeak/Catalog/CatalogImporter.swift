@@ -47,6 +47,17 @@ struct CatalogImporter: Sendable {
                 as: DocumentsStorage.clipFilename(sha256: clip.sha256, originalFilename: clip.filename)
             )
         }
+        if let fingerprint = detail.fingerprint {
+            try storage.copyIntoSession(
+                srcURL: staging.stagedURL(
+                    serverID: serverID, sha256: fingerprint.sha256, filename: fingerprint.filename
+                ),
+                sessionID: sessionUUID,
+                as: DocumentsStorage.fingerprintFilename(
+                    sha256: fingerprint.sha256, originalFilename: fingerprint.filename
+                )
+            )
+        }
         let sidecar = CatalogSidecar(
             serverID: serverID,
             revision: detail.revision,
@@ -55,7 +66,10 @@ struct CatalogImporter: Sendable {
                 sha256: detail.subtitle.sha256.lowercased()
             ),
             tracks: sidecarTracks,
-            clip: detail.clip.map { CatalogSidecar.Clip(filename: $0.filename, sha256: $0.sha256.lowercased()) }
+            clip: detail.clip.map { CatalogSidecar.Clip(filename: $0.filename, sha256: $0.sha256.lowercased()) },
+            fingerprint: detail.fingerprint.map {
+                CatalogSidecar.Fingerprint(filename: $0.filename, sha256: $0.sha256.lowercased())
+            }
         )
         try sidecar.save(to: storage.sessionDir(for: sessionUUID))
 

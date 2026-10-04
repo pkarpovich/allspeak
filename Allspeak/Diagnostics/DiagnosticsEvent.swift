@@ -4,6 +4,7 @@ enum DiagnosticsEvent: Sendable {
     enum Source: String, Sendable {
         case phone
         case watch
+        case sync
     }
 
     enum InterruptionPhase: String, Sendable {
@@ -33,6 +34,31 @@ enum DiagnosticsEvent: Sendable {
         var os: String
     }
 
+    enum ListenPhase: String, Sendable {
+        case start
+        case match
+        case nomatch
+        case timeout
+        case cancel
+        case interrupted
+        case failed
+        case apply
+    }
+
+    struct Listen: Sendable {
+        var source: ListenSource
+        var phase: ListenPhase
+        var trackTime: Double?
+        var pos: Double?
+        var delta: Double?
+        var latency: Double?
+        var listenSec: Double?
+        var chunk: Double?
+        var target: Double?
+        var elapsed: Double?
+        var error: String?
+    }
+
     case session(SessionHeader)
     case play(pos: Double)
     case pause(pos: Double)
@@ -45,6 +71,7 @@ enum DiagnosticsEvent: Sendable {
     case app(state: AppState, pos: Double)
     case watch(reachable: Bool, pos: Double)
     case hall(key: String, name: String, cinema: String, pos: Double)
+    case listen(Listen)
 
     var name: String {
         switch self {
@@ -60,6 +87,7 @@ enum DiagnosticsEvent: Sendable {
         case .app: return "app"
         case .watch: return "watch"
         case .hall: return "hall"
+        case .listen: return "listen"
         }
     }
 
@@ -124,6 +152,18 @@ enum DiagnosticsEvent: Sendable {
             builder.add("hallName", name)
             builder.add("cinema", cinema)
             builder.addPosition("pos", pos)
+        case let .listen(listen):
+            builder.add("source", listen.source.rawValue)
+            builder.add("phase", listen.phase.rawValue)
+            builder.addPosition("trackTime", listen.trackTime)
+            builder.addPosition("pos", listen.pos)
+            builder.addPosition("delta", listen.delta)
+            builder.add("latency", listen.latency)
+            builder.addPosition("listenSec", listen.listenSec)
+            builder.addPosition("chunk", listen.chunk)
+            builder.addPosition("target", listen.target)
+            builder.addPosition("elapsed", listen.elapsed)
+            builder.add("error", listen.error)
         }
         return builder.line()
     }
@@ -145,6 +185,11 @@ private struct JSONLineBuilder {
         parts.append(Self.encode(key) + ":" + Self.number(value))
     }
 
+    mutating func add(_ key: String, _ value: Double?) {
+        guard let value else { return }
+        add(key, value)
+    }
+
     mutating func add(_ key: String, _ value: Int) {
         parts.append(Self.encode(key) + ":" + String(value))
     }
@@ -160,6 +205,11 @@ private struct JSONLineBuilder {
 
     mutating func addPosition(_ key: String, _ value: Double) {
         add(key, (value * 1000).rounded() / 1000)
+    }
+
+    mutating func addPosition(_ key: String, _ value: Double?) {
+        guard let value else { return }
+        addPosition(key, value)
     }
 
     func line() -> String {

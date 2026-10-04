@@ -17,9 +17,12 @@ final class WatchSessionClient: NSObject {
     var lastSnapshot: PlaybackSnapshot?
     var isConnected: Bool = false
     var interpolationTick: UInt64 = 0
+    var fingerprintURL: URL?
+    var listenPanel = ListenPanelState()
 
     var tracks: [TrackInfo] { metadata?.tracks ?? [] }
     var activeTrackID: UUID? { metadata?.activeTrackID }
+    var hasFingerprint: Bool { fingerprintURL != nil }
 
     // An in-flight chunked cue-bundle pull. The watch requests slices 0..<total
     // over sendMessage (each a request/reply, so a dropped chunk is retried),
@@ -31,17 +34,31 @@ final class WatchSessionClient: NSObject {
         var chunks: [Int: Data]
     }
 
+    private struct FingerprintDownload {
+        let sha256: String
+        var chunks: [Int: Data]
+    }
+
     @ObservationIgnored var onMetadataChange: (@MainActor (SessionMetadata?) -> Void)?
+    @ObservationIgnored var makeListener: (@MainActor (URL) -> any CinemaListening)?
+    @ObservationIgnored var phoneListenTimeout: Duration = ListenEvent.timeout + .seconds(15)
+    @ObservationIgnored private var watchListener: (any CinemaListening)?
+    @ObservationIgnored var makeListenID: () -> UUID = UUID.init
+    @ObservationIgnored private var listenID: UUID?
+    @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
+    @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var interpolationTimer: Timer?
     @ObservationIgnored private var cueDownload: CueDownload?
+    @ObservationIgnored private let fingerprintCache: FingerprintCache?
+    @ObservationIgnored private var fingerprintDownload: FingerprintDownload?
     #if os(watchOS)
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
 
-    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil) {
+    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil, fingerprintCache: FingerprintCache? = nil) {
         self.sender = sender ?? DefaultWatchMessageSender.shared
         if let cache {
             self.cache = cache
@@ -49,6 +66,13 @@ final class WatchSessionClient: NSObject {
             self.cache = try? CueCache(baseURL: baseURL)
         } else {
             self.cache = nil
+        }
+        if let fingerprintCache {
+            self.fingerprintCache = fingerprintCache
+        } else if let baseURL = try? FingerprintCache.defaultBaseURL() {
+            self.fingerprintCache = try? FingerprintCache(baseURL: baseURL)
+        } else {
+            self.fingerprintCache = nil
         }
         super.init()
     }
@@ -161,6 +185,7 @@ final class WatchSessionClient: NSObject {
 
     private func sendCommand(
         _ command: WatchCommand,
+        snapshotReplyHandler: (@MainActor @Sendable (PlaybackSnapshot?) -> Void)? = nil,
         errorHandler: @escaping @Sendable (Error) -> Void
     ) {
         guard let payload = try? command.toPropertyList() else { return }
@@ -169,6 +194,8 @@ final class WatchSessionClient: NSObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.handleReceivedSnapshot(bridge.value)
+                guard let snapshotReplyHandler else { return }
+                snapshotReplyHandler(try? PlaybackSnapshot(propertyList: bridge.value))
             }
         }
         sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
@@ -192,10 +219,13 @@ final class WatchSessionClient: NSObject {
 
     func handleReceivedApplicationContext(_ context: [String: Any]) {
         if SessionEndedSignal.isSessionEnded(context) {
+            cancelListening()
             self.metadata = nil
             self.cues = []
             self.lastSnapshot = nil
             self.cueDownload = nil
+            self.fingerprintURL = nil
+            self.fingerprintDownload = nil
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
@@ -203,6 +233,10 @@ final class WatchSessionClient: NSObject {
         self.metadata = meta
         let sessionChanged = previous?.sessionID != meta.sessionID
         let revisionChanged = previous?.sessionID == meta.sessionID && previous?.revision != meta.revision
+        let fingerprintChanged = previous?.fingerprintSHA != meta.fingerprintSHA
+        if previous != nil, sessionChanged || fingerprintChanged {
+            cancelListening()
+        }
         if sessionChanged || revisionChanged {
             self.lastSnapshot = nil
             self.cueDownload = nil
@@ -215,6 +249,7 @@ final class WatchSessionClient: NSObject {
         if cues.isEmpty && meta.cueCount > 0 {
             startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
         }
+        refreshFingerprint()
     }
 
     // MARK: - Chunked cue-bundle pull
@@ -314,6 +349,222 @@ final class WatchSessionClient: NSObject {
         startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
     }
 
+    // MARK: - Chunked fingerprint pull
+
+    private func refreshFingerprint() {
+        guard let sha256 = metadata?.fingerprintSHA else {
+            fingerprintURL = nil
+            fingerprintDownload = nil
+            return
+        }
+        if let url = fingerprintCache?.url(sha256: sha256) {
+            if fingerprintURL != url {
+                fingerprintURL = url
+            }
+            fingerprintDownload = nil
+            return
+        }
+        fingerprintURL = nil
+        startFingerprintDownloadIfNeeded(sha256: sha256)
+    }
+
+    private func startFingerprintDownloadIfNeeded(sha256: String) {
+        guard fingerprintCache != nil else { return }
+        if fingerprintDownload?.sha256 == sha256 { return }
+        fingerprintDownload = FingerprintDownload(sha256: sha256, chunks: [:])
+        requestFingerprintChunk(sha256: sha256, index: 0)
+    }
+
+    private func requestFingerprintChunk(sha256: String, index: Int) {
+        guard let payload = try? WatchCommand.requestFingerprintChunk(sha256: sha256, index: index).toPropertyList() else {
+            return
+        }
+        let replyHandler: @Sendable ([String: Any]) -> Void = { [weak self] reply in
+            let bridge = SendableDictionary(value: reply)
+            Task { @MainActor in
+                self?.handleFingerprintChunkReply(bridge.value, requestedSHA: sha256)
+            }
+        }
+        let errorHandler: @Sendable (Error) -> Void = { [weak self] _ in
+            Task { @MainActor in
+                self?.failFingerprintDownload(sha256: sha256)
+            }
+        }
+        sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
+    }
+
+    private func handleFingerprintChunkReply(_ payload: [String: Any], requestedSHA: String) {
+        guard var download = fingerprintDownload, download.sha256 == requestedSHA else { return }
+        guard let reply = try? FingerprintChunkReply(propertyList: payload), reply.sha256 == download.sha256 else {
+            failFingerprintDownload(sha256: requestedSHA)
+            return
+        }
+        guard metadata?.fingerprintSHA == download.sha256 else {
+            fingerprintDownload = nil
+            return
+        }
+        download.chunks[reply.index] = reply.data
+        fingerprintDownload = download
+        if let next = (0..<reply.totalChunks).first(where: { download.chunks[$0] == nil }) {
+            requestFingerprintChunk(sha256: download.sha256, index: next)
+            return
+        }
+        assembleFingerprintDownload(download, totalChunks: reply.totalChunks)
+    }
+
+    private func assembleFingerprintDownload(_ download: FingerprintDownload, totalChunks: Int) {
+        fingerprintDownload = nil
+        let data = (0..<totalChunks).reduce(into: Data()) { result, index in
+            result.append(download.chunks[index] ?? Data())
+        }
+        guard let url = try? fingerprintCache?.save(data, sha256: download.sha256) else { return }
+        guard metadata?.fingerprintSHA == download.sha256 else { return }
+        fingerprintURL = url
+    }
+
+    private func failFingerprintDownload(sha256: String) {
+        guard fingerprintDownload?.sha256 == sha256 else { return }
+        fingerprintDownload = nil
+    }
+
+    private func retryFingerprintDownloadIfNeeded() {
+        guard fingerprintURL == nil, let sha256 = metadata?.fingerprintSHA else { return }
+        fingerprintDownload = nil
+        startFingerprintDownloadIfNeeded(sha256: sha256)
+    }
+
+    // MARK: - Cinema listen
+
+    func startListening() {
+        guard !listenPanel.isListening else { return }
+        let listenID = makeListenID()
+        self.listenID = listenID
+        let supersededCancels = unconfirmedPhoneCancels
+        listenPanel.start(now: Date())
+        sendCommand(.startListening(listenID: listenID), snapshotReplyHandler: { [weak self] _ in
+            self?.unconfirmedPhoneCancels.subtract(supersededCancels)
+        }, errorHandler: { [weak self] error in
+            let message = error.localizedDescription
+            Task { @MainActor in
+                guard let self else { return }
+                self.sendPhoneCancel(listenID: listenID)
+                guard self.listenID == listenID else { return }
+                self.receiveListenEvent(source: .phone, event: ListenEvent(phase: .failed(message), listenSeconds: 0))
+            }
+        })
+        startPhoneTimeout()
+        startWatchListener(listenID: listenID)
+    }
+
+    func cancelListening() {
+        if listenPanel.phone.isListening, let listenID {
+            unconfirmedPhoneCancels.insert(listenID)
+        }
+        retryPhoneCancelIfNeeded()
+        phoneTimeoutTask?.cancel()
+        phoneTimeoutTask = nil
+        watchListener?.cancel()
+        watchListener = nil
+        listenID = nil
+        listenPanel.dismiss()
+    }
+
+    func applyShownMatch() {
+        guard let shown = listenPanel.shownMatch,
+              let sessionID = metadata?.sessionID,
+              let sha256 = metadata?.fingerprintSHA,
+              !listenPanel.applying,
+              !listenPanel.applied else { return }
+        if listenPanel.phone.isListening, let listenID {
+            sendPhoneCancel(listenID: listenID)
+            receiveListenEvent(source: .phone, event: ListenEvent(phase: .cancelled, listenSeconds: 0))
+        }
+        phoneTimeoutTask?.cancel()
+        phoneTimeoutTask = nil
+        let command = WatchCommand.applySync(
+            sessionID: sessionID,
+            trackTime: shown.match.trackTime,
+            matchDate: shown.match.matchDate,
+            source: shown.source,
+            sha256: sha256
+        )
+        listenPanel.beginApply()
+        let supersededCancels = unconfirmedPhoneCancels
+        sendCommand(command, snapshotReplyHandler: { [weak self] snapshot in
+            guard snapshot?.sessionID == sessionID else {
+                self?.listenPanel.applyFailed(shown)
+                return
+            }
+            self?.unconfirmedPhoneCancels.subtract(supersededCancels)
+            self?.listenPanel.applySucceeded(shown)
+        }, errorHandler: { [weak self] _ in
+            Task { @MainActor in
+                self?.listenPanel.applyFailed(shown)
+            }
+        })
+        watchListener?.cancel()
+        watchListener = nil
+    }
+
+    func handleReceivedMessage(_ payload: [String: Any]) {
+        guard (payload[WirePayloadKey.kind] as? String) == WirePayloadKind.listenUpdate.rawValue else {
+            handleReceivedSnapshot(payload)
+            return
+        }
+        guard let update = try? ListenUpdate(propertyList: payload),
+              update.source == .phone,
+              update.listenID == listenID,
+              let event = update.event,
+              event.phase != .cancelled else { return }
+        receiveListenEvent(source: .phone, event: event)
+    }
+
+    func retryPhoneCancelIfNeeded() {
+        for listenID in unconfirmedPhoneCancels {
+            sendPhoneCancel(listenID: listenID)
+        }
+    }
+
+    private func sendPhoneCancel(listenID: UUID) {
+        unconfirmedPhoneCancels.insert(listenID)
+        sendCommand(.cancelListening(listenID: listenID), snapshotReplyHandler: { [weak self] _ in
+            self?.unconfirmedPhoneCancels.remove(listenID)
+        }, errorHandler: { _ in })
+    }
+
+    private func startPhoneTimeout() {
+        phoneTimeoutTask?.cancel()
+        let timeout = phoneListenTimeout
+        phoneTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            self?.receiveListenEvent(source: .phone, event: ListenEvent(phase: .timedOut, listenSeconds: 0))
+        }
+    }
+
+    private func startWatchListener(listenID: UUID) {
+        guard let url = fingerprintURL, let makeListener else {
+            handleWatchListenEvent(ListenEvent(phase: .failed("no fingerprint"), listenSeconds: 0), listenID: listenID)
+            return
+        }
+        let listener = makeListener(url)
+        watchListener = listener
+        listener.start { [weak self] event in
+            self?.handleWatchListenEvent(event, listenID: listenID)
+        }
+    }
+
+    private func handleWatchListenEvent(_ event: ListenEvent, listenID: UUID) {
+        receiveListenEvent(source: .watch, event: event)
+        send(.listenEvent(ListenUpdate(listenID: listenID, source: .watch, event: event)))
+        guard event.phase != .started else { return }
+        watchListener = nil
+    }
+
+    private func receiveListenEvent(source: ListenSource, event: ListenEvent) {
+        listenPanel.receive(source: source, event: event, now: Date())
+    }
+
     #if os(watchOS)
     func register(backgroundTask: WKWatchConnectivityRefreshBackgroundTask) {
         pendingBackgroundTasks.append(backgroundTask)
@@ -357,7 +608,9 @@ final class WatchSessionClient: NSObject {
             currentTime: snapshot.currentTime,
             tracks: current.tracks,
             activeTrackID: snapshot.activeTrackID ?? current.activeTrackID,
-            serverDate: snapshot.serverDate
+            serverDate: snapshot.serverDate,
+            fingerprintSHA: current.fingerprintSHA,
+            fingerprintSize: current.fingerprintSize
         )
     }
 }
@@ -373,6 +626,8 @@ extension WatchSessionClient: WCSessionDelegate {
             self.isConnected = reachable
             if reachable {
                 self.retryCueDownloadIfNeeded()
+                self.retryFingerprintDownloadIfNeeded()
+                self.retryPhoneCancelIfNeeded()
             }
         }
     }
@@ -383,6 +638,8 @@ extension WatchSessionClient: WCSessionDelegate {
             self.isConnected = reachable
             if reachable {
                 self.retryCueDownloadIfNeeded()
+                self.retryFingerprintDownloadIfNeeded()
+                self.retryPhoneCancelIfNeeded()
             }
         }
     }
@@ -390,7 +647,7 @@ extension WatchSessionClient: WCSessionDelegate {
     nonisolated func session(_: WCSession, didReceiveMessage message: [String: Any]) {
         let bridge = SendableDictionary(value: message)
         Task { @MainActor in
-            self.handleReceivedSnapshot(bridge.value)
+            self.handleReceivedMessage(bridge.value)
         }
     }
 

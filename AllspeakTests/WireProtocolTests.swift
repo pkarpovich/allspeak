@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import Allspeak
 
+private let testListenID = UUID(uuidString: "5E5E5E5E-0000-4000-8000-000000000001")!
+
 @Suite("WireProtocol")
 struct WireProtocolTests {
 
@@ -26,6 +28,23 @@ struct WireProtocolTests {
             revision: 7,
             index: 3
         ),
+        WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 0),
+        WatchCommand.requestFingerprintChunk(sha256: "ab12cd34", index: 33),
+        WatchCommand.startListening(listenID: testListenID),
+        WatchCommand.cancelListening(listenID: testListenID),
+        WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)),
+        WatchCommand.listenEvent(ListenUpdate(
+            listenID: testListenID,
+            source: .watch,
+            phase: .match,
+            trackTime: 612.5,
+            matchDate: Date(timeIntervalSince1970: 1_700_000_000.25),
+            chunkStart: 600,
+            listenSeconds: 14.5
+        )),
+        WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 2, error: "mic permission")),
+        WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000001")!, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000.25), source: .phone, sha256: "abc123"),
+        WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000002")!, trackTime: 30, matchDate: Date(timeIntervalSince1970: 1_700_000_000), source: .watch, sha256: "def456"),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()
@@ -189,6 +208,44 @@ struct WireProtocolTests {
         let decoded = try SessionMetadata(propertyList: plist)
         #expect(decoded.tracks.isEmpty)
         #expect(decoded.activeTrackID == nil)
+        #expect(decoded.fingerprintSHA == nil)
+        #expect(decoded.fingerprintSize == nil)
+    }
+
+    @Test("SessionMetadata round-trips the fingerprint fields")
+    func sessionMetadataFingerprintRoundTrip() throws {
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 3,
+            title: "Digger",
+            duration: 7200,
+            cueCount: 1500,
+            isPlaying: true,
+            currentTime: 12,
+            fingerprintSHA: "0f1e2d3c",
+            fingerprintSize: 1_048_576
+        )
+        let decoded = try SessionMetadata(propertyList: try meta.toPropertyList())
+        #expect(decoded == meta)
+        #expect(decoded.fingerprintSHA == "0f1e2d3c")
+        #expect(decoded.fingerprintSize == 1_048_576)
+    }
+
+    @Test("SessionMetadata without a fingerprint round-trips with nil fields")
+    func sessionMetadataWithoutFingerprintRoundTrip() throws {
+        let meta = SessionMetadata(
+            sessionID: UUID(),
+            revision: 1,
+            title: "Plain",
+            duration: 100,
+            cueCount: 5,
+            isPlaying: false,
+            currentTime: 0
+        )
+        let decoded = try SessionMetadata(propertyList: try meta.toPropertyList())
+        #expect(decoded == meta)
+        #expect(decoded.fingerprintSHA == nil)
+        #expect(decoded.fingerprintSize == nil)
     }
 
     @Test("SessionMetadata round-trips the serverDate anchor")
@@ -307,6 +364,56 @@ struct WireProtocolTests {
         }
     }
 
+    @Test("requestFingerprintChunk payload without sha256 fails to decode")
+    func requestFingerprintChunkMissingSHA() throws {
+        let payload = #"{"kind": "requestFingerprintChunk", "index": 0}"#
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.command.rawValue,
+            WirePayloadKey.payload: Data(payload.utf8),
+        ]
+        #expect(throws: DecodingError.self) {
+            _ = try WatchCommand(propertyList: plist)
+        }
+    }
+
+    @Test("FingerprintChunkReply round-trips via property list with raw Data")
+    func fingerprintChunkReplyRoundTrip() throws {
+        let reply = FingerprintChunkReply(
+            sha256: "deadbeef",
+            index: 4,
+            totalChunks: 35,
+            data: Data((0..<30_000).map { UInt8($0 % 256) })
+        )
+        let plist = reply.toPropertyList()
+        #expect((plist[FingerprintChunkKey.data] as? Data)?.count == 30_000)
+        let decoded = try FingerprintChunkReply(propertyList: plist)
+        #expect(decoded == reply)
+    }
+
+    @Test("FingerprintChunkReply rejects a cue chunk and an empty error reply")
+    func fingerprintChunkReplyRejectsOtherPayloads() throws {
+        let cueChunk = CueChunkReply(sessionID: UUID(), revision: 1, index: 0, totalChunks: 1, data: Data([1]))
+        #expect(throws: WireCodingError.kindMismatch) {
+            _ = try FingerprintChunkReply(propertyList: cueChunk.toPropertyList())
+        }
+        #expect(throws: WireCodingError.kindMismatch) {
+            _ = try FingerprintChunkReply(propertyList: [:])
+        }
+    }
+
+    @Test("FingerprintChunkReply rejects a payload missing the data field")
+    func fingerprintChunkReplyMissingData() throws {
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.fingerprintChunk.rawValue,
+            FingerprintChunkKey.sha256: "deadbeef",
+            FingerprintChunkKey.index: 0,
+            FingerprintChunkKey.totalChunks: 1,
+        ]
+        #expect(throws: WireCodingError.missingPayload) {
+            _ = try FingerprintChunkReply(propertyList: plist)
+        }
+    }
+
     @Test("PlaybackSnapshot payload is property-list safe")
     func playbackSnapshotPlistSafe() throws {
         let snapshot = PlaybackSnapshot(
@@ -331,5 +438,69 @@ struct WireProtocolTests {
         ) as? [String: Any]
         let restoredSnapshot = try PlaybackSnapshot(propertyList: try #require(restored))
         #expect(restoredSnapshot == snapshot)
+    }
+
+    private static let listenDate = Date(timeIntervalSince1970: 1_700_000_000.5)
+
+    @Test("ListenUpdate round-trips via property list with and without optional fields", arguments: [
+        ListenUpdate(listenID: testListenID, source: .phone, phase: .start, listenSeconds: 0),
+        ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 612.5, matchDate: listenDate, chunkStart: 600, listenSeconds: 23.25),
+        ListenUpdate(listenID: testListenID, source: .phone, phase: .timeout, listenSeconds: 120),
+        ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 1, error: "no built-in mic"),
+    ])
+    func listenUpdateRoundTrip(update: ListenUpdate) throws {
+        let plist = try update.toPropertyList()
+        #expect(plist[WirePayloadKey.kind] as? String == WirePayloadKind.listenUpdate.rawValue)
+        #expect(try ListenUpdate(propertyList: plist) == update)
+    }
+
+    @Test("ListenUpdate omits nil optional fields from the JSON payload")
+    func listenUpdateOmitsNilFields() throws {
+        let plist = try ListenUpdate(listenID: testListenID, source: .phone, phase: .cancel, listenSeconds: 3).toPropertyList()
+        let data = try #require(plist[WirePayloadKey.payload] as? Data)
+        let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(json.keys) == ["listenID", "source", "phase", "listenSeconds"])
+        #expect(json["phase"] as? String == "cancel")
+        #expect(json["source"] as? String == "phone")
+    }
+
+    @Test("ListenUpdate rejects a snapshot payload")
+    func listenUpdateRejectsWrongKind() throws {
+        let plist: [String: Any] = [
+            WirePayloadKey.kind: WirePayloadKind.snapshot.rawValue,
+            WirePayloadKey.payload: Data(),
+        ]
+        #expect(throws: WireCodingError.kindMismatch) {
+            _ = try ListenUpdate(propertyList: plist)
+        }
+    }
+
+    @Test("ListenUpdate maps every listener event to a phase and back", arguments: [
+        ListenEvent(phase: .started, listenSeconds: 0),
+        ListenEvent(phase: .matched(FingerprintMatch(trackTime: 612.5, matchDate: listenDate, chunkStart: 600)), listenSeconds: 12),
+        ListenEvent(phase: .noMatch, listenSeconds: 5),
+        ListenEvent(phase: .timedOut, listenSeconds: 120),
+        ListenEvent(phase: .cancelled, listenSeconds: 7),
+        ListenEvent(phase: .interrupted, listenSeconds: 9),
+        ListenEvent(phase: .failed("mic permission"), listenSeconds: 0),
+    ])
+    func listenUpdateEventMapping(event: ListenEvent) throws {
+        let update = ListenUpdate(listenID: testListenID, source: .watch, event: event)
+        #expect(update.source == .watch)
+        #expect(update.event == event)
+        let decoded = try ListenUpdate(propertyList: try update.toPropertyList())
+        #expect(decoded.event == event)
+    }
+
+    @Test("a match update without trackTime or matchDate has no event")
+    func listenUpdateMatchWithoutFields() {
+        #expect(ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 10, listenSeconds: 1).event == nil)
+        #expect(ListenUpdate(listenID: testListenID, source: .phone, phase: .match, matchDate: Self.listenDate, listenSeconds: 1).event == nil)
+    }
+
+    @Test("ListenUpdate phase raw values are the wire strings")
+    func listenUpdatePhaseStrings() {
+        let phases: [ListenUpdate.Phase] = [.start, .match, .nomatch, .timeout, .cancel, .interrupted, .failed]
+        #expect(phases.map(\.rawValue) == ["start", "match", "nomatch", "timeout", "cancel", "interrupted", "failed"])
     }
 }

@@ -20,6 +20,12 @@ extension CatalogFileRequest {
     init(clip: CatalogClip) {
         self.init(filename: clip.filename, size: clip.size, sha256: clip.sha256, url: clip.url)
     }
+
+    init(fingerprint: CatalogFingerprint) {
+        self.init(
+            filename: fingerprint.filename, size: fingerprint.size, sha256: fingerprint.sha256, url: fingerprint.url
+        )
+    }
 }
 
 enum DownloadTransportError: Error, Equatable {
@@ -175,6 +181,9 @@ final class SessionDownloader {
         urlBySHA[detail.subtitle.sha256.lowercased()] = detail.subtitle.url
         if let clip = detail.clip {
             urlBySHA[clip.sha256.lowercased()] = clip.url
+        }
+        if let fingerprint = detail.fingerprint {
+            urlBySHA[fingerprint.sha256.lowercased()] = fingerprint.url
         }
 
         return try remaining.map { file in

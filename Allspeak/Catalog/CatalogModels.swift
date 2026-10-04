@@ -18,6 +18,7 @@ struct CatalogSessionDetail: Codable, Equatable, Sendable, Identifiable {
     let tracks: [CatalogTrack]
     let subtitle: CatalogSubtitle
     let clip: CatalogClip?
+    let fingerprint: CatalogFingerprint?
     let urlsExpireAt: Date
 
     init(
@@ -29,6 +30,7 @@ struct CatalogSessionDetail: Codable, Equatable, Sendable, Identifiable {
         tracks: [CatalogTrack],
         subtitle: CatalogSubtitle,
         clip: CatalogClip? = nil,
+        fingerprint: CatalogFingerprint? = nil,
         urlsExpireAt: Date
     ) {
         self.id = id
@@ -39,6 +41,7 @@ struct CatalogSessionDetail: Codable, Equatable, Sendable, Identifiable {
         self.tracks = tracks
         self.subtitle = subtitle
         self.clip = clip
+        self.fingerprint = fingerprint
         self.urlsExpireAt = urlsExpireAt
     }
 }
@@ -61,6 +64,13 @@ struct CatalogSubtitle: Codable, Equatable, Sendable {
 }
 
 struct CatalogClip: Codable, Equatable, Sendable {
+    let filename: String
+    let size: Int64
+    let sha256: String
+    let url: URL
+}
+
+struct CatalogFingerprint: Codable, Equatable, Sendable {
     let filename: String
     let size: Int64
     let sha256: String

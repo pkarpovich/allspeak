@@ -159,6 +159,43 @@ struct CatalogClientTests {
         #expect(detail.subtitle.filename == "the-invite.srt")
         #expect(detail.subtitle.size == 41234)
         #expect(detail.clip == nil)
+        #expect(detail.fingerprint == nil)
+    }
+
+    @Test("decodes an optional fingerprint in the session detail and lists it for import after the clip")
+    func decodesSessionDetailFingerprint() async throws {
+        let json = sessionDetailJSON.replacingOccurrences(
+            of: "\"urlsExpireAt\"",
+            with: """
+            "clip": {
+              "filename": "the-invite.first-line.mp4",
+              "size": 6200000,
+              "sha256": "dddd0000000000000000000000000000000000000000000000000000000000dd",
+              "url": "https://r2.example.com/the-invite.first-line.mp4?sig=4"
+            },
+            "fingerprint": {
+              "filename": "the-invite.shazamcatalog",
+              "size": 1048576,
+              "sha256": "eeee0000000000000000000000000000000000000000000000000000000000ee",
+              "url": "https://r2.example.com/the-invite.shazamcatalog?sig=5"
+            },
+            "urlsExpireAt"
+            """
+        )
+        let transport = MockCatalogTransport(data: Data(json.utf8), statusCode: 200)
+        let client = makeClient(transport: transport)
+        let id = try #require(UUID(uuidString: "1B4E28BA-2FA1-11D2-883F-0016D3CCA427"))
+
+        let detail = try await client.fetchSession(id: id)
+
+        let fingerprint = try #require(detail.fingerprint)
+        #expect(fingerprint.filename == "the-invite.shazamcatalog")
+        #expect(fingerprint.size == 1048576)
+        #expect(fingerprint.sha256 == "eeee0000000000000000000000000000000000000000000000000000000000ee")
+        #expect(fingerprint.url == URL(string: "https://r2.example.com/the-invite.shazamcatalog?sig=5"))
+        #expect(detail.importFileRequests.map(\.filename) == [
+            "original.m4a", "ft.sidon.m4a", "the-invite.srt", "the-invite.first-line.mp4", "the-invite.shazamcatalog"
+        ])
     }
 
     @Test("decodes an optional clip in the session detail and lists it for import last")

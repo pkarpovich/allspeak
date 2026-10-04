@@ -51,6 +51,22 @@ struct DocumentsStorage: Sendable {
         }
     }
 
+    static func fingerprintFilename(sha256: String, originalFilename: String) -> String {
+        "fingerprint-\(sha256.lowercased())-\(originalFilename)"
+    }
+
+    func fingerprintURL(sessionID: UUID, sha256: String, filename: String) -> URL {
+        sessionDir(for: sessionID)
+            .appendingPathComponent(Self.fingerprintFilename(sha256: sha256, originalFilename: filename))
+    }
+
+    func removeFingerprintFile(sessionID: UUID, sha256: String, filename: String) throws {
+        let url = fingerprintURL(sessionID: sessionID, sha256: sha256, filename: filename)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     func removeTrackFile(sessionID: UUID, trackID: UUID, originalFilename: String) throws {
         let url = trackURL(sessionID: sessionID, trackID: trackID, originalFilename: originalFilename)
         if FileManager.default.fileExists(atPath: url.path) {
@@ -75,7 +91,8 @@ struct DocumentsStorage: Sendable {
     // Sessions imported by a pre-v5 build copied a ShazamKit catalog and a DTW map
     // into their session dir. The v5 model drops the columns that named them, so
     // nothing references the files any more and only the suffix identifies them.
-    // `server.json` (the catalog-import sidecar) does not match either suffix.
+    // `server.json` (the catalog-import sidecar) does not match either suffix, and
+    // the catalog-import fingerprint is kept by its `fingerprint-` prefix.
     static let legacySyncFileSuffixes = [".shazamcatalog", ".dtwmap.json"]
 
     func removeLegacySyncFiles() {
@@ -96,7 +113,8 @@ struct DocumentsStorage: Sendable {
     }
 
     static func isLegacySyncFile(_ filename: String) -> Bool {
-        legacySyncFileSuffixes.contains { filename.hasSuffix($0) }
+        guard !filename.hasPrefix("fingerprint-") else { return false }
+        return legacySyncFileSuffixes.contains { filename.hasSuffix($0) }
     }
 
     func removeSessionDir(_ id: UUID) throws {

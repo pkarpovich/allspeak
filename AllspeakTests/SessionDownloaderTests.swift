@@ -227,6 +227,48 @@ struct SessionDownloaderTests {
         #expect(staged)
     }
 
+    @Test("downloads the fingerprint and remaps its URL by sha256 after a 403")
+    @MainActor
+    func expiredFingerprintURLRefreshesAndRemaps() async throws {
+        let (staging, root) = makeStaging()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let serverID = UUID()
+
+        let data = Data("shazam-catalog".utf8)
+        let sha = sha256Hex(data)
+        let staleURL = URL(string: "https://r2.example.com/movie.shazamcatalog?sig=stale")!
+        let freshURL = URL(string: "https://r2.example.com/movie.shazamcatalog?sig=fresh")!
+        let request = CatalogFileRequest(
+            fingerprint: CatalogFingerprint(
+                filename: "movie.shazamcatalog", size: Int64(data.count), sha256: sha, url: staleURL
+            )
+        )
+
+        let transport = MockDownloadTransport([staleURL: .expired, freshURL: .data(data)])
+        let json = detailJSON(
+            trackSHA: String(repeating: "a", count: 64), trackURL: "https://r2.example.com/unused.m4a",
+            subtitleSHA: String(repeating: "d", count: 64), subtitleURL: "https://r2.example.com/unused.srt"
+        ).replacingOccurrences(
+            of: "\"urlsExpireAt\"",
+            with: """
+            "fingerprint": {
+              "filename": "movie.shazamcatalog", "size": \(data.count),
+              "sha256": "\(sha)", "url": "\(freshURL.absoluteString)"
+            },
+            "urlsExpireAt"
+            """
+        )
+        let downloader = SessionDownloader(client: makeClient(detailJSON: json), staging: staging, transport: transport)
+
+        try await downloader.start(serverID: serverID, files: [request])
+
+        #expect(downloader.isFinished)
+        let requested = await transport.requestedURLs
+        #expect(requested == [staleURL, freshURL])
+        let staged = await staging.isStaged(serverID: serverID, sha256: sha, filename: "movie.shazamcatalog")
+        #expect(staged)
+    }
+
     @Test("fails when the session detail refetch itself fails after a 403")
     @MainActor
     func refreshFailureLeavesDownloaderFailed() async throws {

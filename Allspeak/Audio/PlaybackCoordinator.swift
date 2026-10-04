@@ -27,6 +27,12 @@ final class PlaybackCoordinator {
         case loadFailed
     }
 
+    struct SessionFingerprint: Equatable, Sendable {
+        let sha256: String
+        let size: Int
+        let url: URL
+    }
+
     private(set) var controller: AudioController?
     private(set) var sessionID: NSManagedObjectID?
     private(set) var sessionUUID: UUID?
@@ -35,6 +41,7 @@ final class PlaybackCoordinator {
     private(set) var activeTrackID: UUID?
     private(set) var tracks: [TrackInfo] = []
     private(set) var selectedHallKey: String?
+    private(set) var fingerprint: SessionFingerprint?
     private var isInBackground: Bool = false
     private var isSwitching: Bool = false
     // Bumped by every startSession/endSession so an invocation resuming from
@@ -50,6 +57,20 @@ final class PlaybackCoordinator {
     var diagnostics: DiagnosticsLog = .shared
     private var monitor: DiagnosticsMonitor?
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
+    var routeReader: DiagnosticsMonitor.Route = {
+        let session = AVAudioSession.sharedInstance()
+        let output = session.currentRoute.outputs.first
+        return (output?.portType.rawValue ?? "", output?.portName ?? "", session.outputLatency)
+    }
+    var makeListener: @MainActor (URL) -> any CinemaListening = { PhoneCinemaListener(catalogURL: $0) }
+    var sendListenUpdate: @MainActor (ListenUpdate) -> Void = { update in
+        #if os(iOS)
+        WatchSessionHost.shared.sendListenUpdate(update)
+        #endif
+    }
+    var now: () -> Date = { Date() }
+    private var listener: (any CinemaListening)?
+    private var listenID = UUID()
 
     init() {}
 
@@ -180,6 +201,8 @@ final class PlaybackCoordinator {
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
         self.selectedHallKey = snap.hallKey
+        let sidecar = try? CatalogSidecar.load(from: dir)
+        self.fingerprint = Self.loadFingerprint(sidecar: sidecar, sessionUUID: snap.uuid, storage: storage)
         self.isInBackground = false
         self.repository = repository
         self.storage = storage
@@ -193,7 +216,7 @@ final class PlaybackCoordinator {
             trackLabel: selectedTrack?.label,
             trackFile: selectedTrack?.filename ?? snap.audioFilename,
             hallKey: snap.hallKey,
-            sidecar: try? CatalogSidecar.load(from: dir)
+            sidecar: sidecar
         )))
         startMonitor()
         #if os(iOS)
@@ -235,11 +258,7 @@ final class PlaybackCoordinator {
             snapshot: { [weak self] in
                 (self?.controller?.livePosition ?? 0, self?.controller?.isPlayerPlaying ?? false)
             },
-            route: {
-                let session = AVAudioSession.sharedInstance()
-                let output = session.currentRoute.outputs.first
-                return (output?.portType.rawValue ?? "", output?.portName ?? "", session.outputLatency)
-            },
+            route: routeReader,
             log: { [weak self] event in
                 self?.diagnostics.log(event)
             }
@@ -254,6 +273,19 @@ final class PlaybackCoordinator {
         return withUnsafeBytes(of: system.machine) { bytes in
             String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
         }
+    }
+
+    private static func loadFingerprint(
+        sidecar: CatalogSidecar?,
+        sessionUUID: UUID,
+        storage: DocumentsStorage
+    ) -> SessionFingerprint? {
+        guard let sidecar,
+              let sha256 = sidecar.fingerprint?.sha256,
+              let url = sidecar.fingerprintURL(sessionID: sessionUUID, storage: storage),
+              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        else { return nil }
+        return SessionFingerprint(sha256: sha256.lowercased(), size: size, url: url)
     }
 
     private static func resolveTrackURL(
@@ -295,6 +327,7 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.selectedHallKey = nil
+        self.fingerprint = nil
         self.isInBackground = false
         self.revision += 1
         diagnostics.begin(filmTitle: title)
@@ -417,6 +450,15 @@ final class PlaybackCoordinator {
         }
 
         let dir = storage.sessionDir(for: sessionUUID)
+        let previousFingerprint = fingerprint
+        fingerprint = Self.loadFingerprint(
+            sidecar: try? CatalogSidecar.load(from: dir),
+            sessionUUID: sessionUUID,
+            storage: storage
+        )
+        if fingerprint != previousFingerprint {
+            cancelListening()
+        }
         let srtURL = dir.appendingPathComponent(snap.srtFilename)
         var cuesChanged = false
         if let srtText = try? SRTParser.read(at: srtURL) {
@@ -452,10 +494,6 @@ final class PlaybackCoordinator {
         isSwitching = true
         defer { isSwitching = false }
 
-        let capturedTime = controller.livePosition
-        let wasPlaying = controller.isPlaying
-        let cues = controller.subtitles
-
         let filename: String
         if let repository, let sessionID {
             do {
@@ -480,6 +518,9 @@ final class PlaybackCoordinator {
             throw SwitchError.noActiveSession
         }
 
+        let capturedTime = controller.livePosition
+        let wasPlaying = controller.isPlaying
+        let cues = controller.subtitles
         let previousActiveTrackID = activeTrackID
         activeTrackID = trackID
         controller.pause()
@@ -531,6 +572,7 @@ final class PlaybackCoordinator {
     }
 
     func endSession() {
+        cancelListening()
         loadGeneration += 1
         monitor?.stop()
         monitor = nil
@@ -550,6 +592,7 @@ final class PlaybackCoordinator {
         self.tracks = []
         self.activeTrackID = nil
         self.selectedHallKey = nil
+        self.fingerprint = nil
         self.isInBackground = false
         self.repository = nil
         self.isSwitching = false
@@ -593,7 +636,9 @@ final class PlaybackCoordinator {
             currentTime: controller.livePosition,
             tracks: tracks,
             activeTrackID: activeTrackID,
-            serverDate: Date()
+            serverDate: Date(),
+            fingerprintSHA: fingerprint?.sha256,
+            fingerprintSize: fingerprint?.size
         )
     }
 
@@ -694,7 +739,6 @@ final class PlaybackCoordinator {
     }
 
     func apply(_ command: WatchCommand) {
-        guard let controller else { return }
         switch command {
         case .play:
             play()
@@ -711,9 +755,118 @@ final class PlaybackCoordinator {
                 try? await self?.switchTrack(to: id)
             }
         case .setVolume(let value):
-            controller.setVolume(value)
-        case .requestCueChunk:
+            controller?.setVolume(value)
+        case .requestCueChunk, .requestFingerprintChunk:
             break
+        case .startListening(let listenID):
+            startListening(listenID: listenID)
+        case .cancelListening(let listenID):
+            cancelListening(listenID: listenID)
+        case .listenEvent(let update):
+            noteWatchListenEvent(update)
+        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
+            applySync(sessionID: sessionID, trackTime: trackTime, matchDate: matchDate, source: source, sha256: sha256)
+        }
+    }
+
+    func startListening(listenID: UUID) {
+        guard listener == nil || self.listenID != listenID else { return }
+        listener?.cancel()
+        self.listenID = listenID
+        guard controller != nil else {
+            sendListenUpdate(ListenUpdate(listenID: listenID, source: .phone, phase: .failed, listenSeconds: 0, error: "no session"))
+            return
+        }
+        guard let fingerprint else {
+            let update = ListenUpdate(listenID: listenID, source: .phone, phase: .failed, listenSeconds: 0, error: "no fingerprint")
+            logListen(update, source: .phone)
+            sendListenUpdate(update)
+            return
+        }
+        let listener = makeListener(fingerprint.url)
+        self.listener = listener
+        listener.start { [weak self, weak listener] event in
+            guard let self, let listener, self.listener === listener else { return }
+            self.handlePhoneListenEvent(event)
+        }
+    }
+
+    func cancelListening() {
+        listener?.cancel()
+    }
+
+    func cancelListening(listenID: UUID) {
+        guard self.listenID == listenID else { return }
+        cancelListening()
+    }
+
+    func noteWatchListenEvent(_ update: ListenUpdate) {
+        logListen(update, source: .watch)
+    }
+
+    @discardableResult
+    func applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String) -> Bool {
+        cancelListening()
+        guard let controller, sessionUUID == sessionID, fingerprint?.sha256 == sha256 else { return false }
+        let now = self.now()
+        let latency = routeReader().latency
+        let elapsed = now.timeIntervalSince(matchDate)
+        let pos = controller.livePosition
+        let target = FingerprintMatch.target(trackTime: trackTime, matchDate: matchDate, now: now, outputLatency: latency)
+        diagnostics.log(.listen(DiagnosticsEvent.Listen(
+            source: source,
+            phase: .apply,
+            trackTime: trackTime,
+            pos: pos,
+            delta: trackTime + elapsed - pos,
+            latency: latency,
+            target: target,
+            elapsed: elapsed
+        )))
+        seek(to: target, source: .sync)
+        return true
+    }
+
+    private func handlePhoneListenEvent(_ event: ListenEvent) {
+        switch event.phase {
+        case .started, .noMatch:
+            break
+        case .matched, .timedOut, .cancelled, .interrupted, .failed:
+            listener = nil
+        }
+        let update = ListenUpdate(listenID: listenID, source: .phone, event: event)
+        logListen(update, source: .phone)
+        sendListenUpdate(update)
+    }
+
+    private func logListen(_ update: ListenUpdate, source: ListenSource) {
+        guard let controller else { return }
+        let pos = controller.livePosition
+        var listen = DiagnosticsEvent.Listen(
+            source: source,
+            phase: Self.diagnosticsPhase(update.phase),
+            pos: pos,
+            listenSec: update.listenSeconds,
+            chunk: update.chunkStart,
+            error: update.error
+        )
+        if let trackTime = update.trackTime, let matchDate = update.matchDate {
+            listen.trackTime = trackTime
+            listen.delta = trackTime + now().timeIntervalSince(matchDate) - pos
+            listen.latency = routeReader().latency
+        }
+        diagnostics.log(.listen(listen))
+    }
+
+    private static func diagnosticsPhase(_ phase: ListenUpdate.Phase) -> DiagnosticsEvent.ListenPhase {
+        switch phase {
+        case .start: return .start
+        case .match: return .match
+        case .nomatch: return .nomatch
+        case .timeout: return .timeout
+        case .cancel: return .cancel
+        case .interrupted: return .interrupted
+        case .failed: return .failed
         }
     }
 

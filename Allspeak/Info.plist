@@ -49,6 +49,8 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Allspeak listens briefly to the cinema audio so it can sync the dub track to what's playing on screen.</string>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

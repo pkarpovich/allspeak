@@ -4,6 +4,8 @@ import Foundation
 import Testing
 @testable import Allspeak
 
+private let testListenID = UUID(uuidString: "5E5E5E5E-0000-4000-8000-000000000001")!
+
 #if os(iOS)
 
 @Suite("WatchSessionHost", .tags(.audio), .serialized)
@@ -415,13 +417,17 @@ struct WatchSessionHostTests {
     private struct MultiTrackFixture {
         let coordinator: PlaybackCoordinator
         let host: WatchSessionHost
+        let sessionID: NSManagedObjectID
+        let storage: DocumentsStorage
         let sessionUUID: UUID
         let track1UUID: UUID
         let track2UUID: UUID
         let root: URL
     }
 
-    private func makeMultiTrackFixture() async throws -> MultiTrackFixture {
+    private func makeMultiTrackFixture(
+        fingerprint: (sha256: String, data: Data?)? = nil
+    ) async throws -> MultiTrackFixture {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("allspeak-host-multi-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -457,6 +463,9 @@ struct WatchSessionHostTests {
         let silenceB = try Self.makeSilenceFile(seconds: 5)
         try FileManager.default.moveItem(at: silenceA, to: t1URL)
         try FileManager.default.moveItem(at: silenceB, to: t2URL)
+        if let fingerprint {
+            try Self.writeFingerprint(fingerprint, storage: storage, sessionUUID: sessionUUID)
+        }
 
         let coordinator = PlaybackCoordinator()
         coordinator.endSession()
@@ -465,11 +474,344 @@ struct WatchSessionHostTests {
         return MultiTrackFixture(
             coordinator: coordinator,
             host: host,
+            sessionID: sessionID,
+            storage: storage,
             sessionUUID: sessionUUID,
             track1UUID: t1Snap.trackID,
             track2UUID: t2Snap.trackID,
             root: root
         )
+    }
+
+    private static func writeFingerprint(
+        _ fingerprint: (sha256: String, data: Data?),
+        storage: DocumentsStorage,
+        sessionUUID: UUID
+    ) throws {
+        let sidecar = CatalogSidecar(
+            serverID: UUID(),
+            revision: 2,
+            subtitle: .init(filename: "subs.srt", sha256: "srt-sha"),
+            tracks: [],
+            fingerprint: .init(filename: "film.shazamcatalog", sha256: fingerprint.sha256)
+        )
+        try sidecar.save(to: storage.sessionDir(for: sessionUUID))
+        guard let data = fingerprint.data else { return }
+        let url = storage.fingerprintURL(sessionID: sessionUUID, sha256: fingerprint.sha256, filename: "film.shazamcatalog")
+        try data.write(to: url)
+    }
+
+    private static let fingerprintData = Data((0..<75_000).map { UInt8(truncatingIfNeeded: $0 * 7) })
+    private static let fingerprintSHA = "ABCDEF0123"
+
+    @Test("currentMetadata carries the session fingerprint sha (lowercased) and file size")
+    func metadataCarriesFingerprint() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let metadata = try #require(fixture.coordinator.currentMetadata())
+        #expect(metadata.fingerprintSHA == "abcdef0123")
+        #expect(metadata.fingerprintSize == Self.fingerprintData.count)
+    }
+
+    @Test("currentMetadata has no fingerprint without a sidecar or when the file is missing")
+    func metadataWithoutFingerprint() async throws {
+        let plain = try await makeMultiTrackFixture()
+        defer {
+            plain.coordinator.endSession()
+            try? FileManager.default.removeItem(at: plain.root)
+        }
+        let plainMeta = try #require(plain.coordinator.currentMetadata())
+        #expect(plainMeta.fingerprintSHA == nil)
+        #expect(plainMeta.fingerprintSize == nil)
+        #expect(plain.host.fingerprintChunk(sha256: "abcdef0123", index: 0) == nil)
+
+        let missing = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, nil))
+        defer {
+            missing.coordinator.endSession()
+            try? FileManager.default.removeItem(at: missing.root)
+        }
+        let missingMeta = try #require(missing.coordinator.currentMetadata())
+        #expect(missingMeta.fingerprintSHA == nil)
+        #expect(missing.host.fingerprintChunk(sha256: "abcdef0123", index: 0) == nil)
+    }
+
+    @Test("refreshing the active session picks up a fingerprint added by a catalog sync")
+    func refreshPicksUpFingerprint() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        #expect(fixture.coordinator.currentMetadata()?.fingerprintSHA == nil)
+
+        try Self.writeFingerprint((Self.fingerprintSHA, Self.fingerprintData), storage: fixture.storage, sessionUUID: fixture.sessionUUID)
+        await fixture.coordinator.refreshIfActive(sessionID: fixture.sessionID)
+
+        let metadata = try #require(fixture.coordinator.currentMetadata())
+        #expect(metadata.fingerprintSHA == "abcdef0123")
+        #expect(metadata.fingerprintSize == Self.fingerprintData.count)
+    }
+
+    @Test("fingerprintChunk slices the first, middle and last chunk and they reassemble")
+    func fingerprintChunkSlices() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let size = WatchSessionHost.fingerprintChunkSize
+        let first = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 0))
+        let middle = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 1))
+        let last = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 2))
+
+        #expect(first.totalChunks == 3)
+        #expect(first.sha256 == "abcdef0123")
+        #expect(first.index == 0)
+        #expect(first.data == Self.fingerprintData.subdata(in: 0..<size))
+        #expect(middle.index == 1)
+        #expect(middle.data == Self.fingerprintData.subdata(in: size..<(2 * size)))
+        #expect(last.index == 2)
+        #expect(last.data == Self.fingerprintData.subdata(in: (2 * size)..<Self.fingerprintData.count))
+        #expect(first.data + middle.data + last.data == Self.fingerprintData)
+    }
+
+    @Test("fingerprintChunk returns nil for a bad index or an unknown sha")
+    func fingerprintChunkRejectsBadRequests() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: -1) == nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 3) == nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "ffff", index: 0) == nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 0) != nil)
+        #expect(fixture.host.fingerprintChunk(sha256: "ffff", index: 0) == nil)
+    }
+
+    @Test("sendListenUpdate pushes a listenUpdate payload only when reachable")
+    func sendListenUpdateRespectsReachability() throws {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let update = ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000), chunkStart: 600, listenSeconds: 9)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(update, isReachable: false) { sends.append($0) }
+        #expect(sends.isEmpty)
+
+        host.sendListenUpdate(update, isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        let payload = try #require(sends.first)
+        #expect(try ListenUpdate(propertyList: payload) == update)
+    }
+
+    @Test("the latest update held back while unreachable is sent once the watch is reachable again")
+    func pendingListenUpdateResentOnReachable() throws {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let started = ListenUpdate(listenID: testListenID, source: .phone, phase: .start, listenSeconds: 0)
+        let matched = ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000), chunkStart: 600, listenSeconds: 9)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(started, isReachable: false) { sends.append($0) }
+        host.sendListenUpdate(matched, isReachable: false) { sends.append($0) }
+        host.resendPendingListenUpdate(isReachable: false) { sends.append($0) }
+        #expect(sends.isEmpty)
+
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+        #expect(try ListenUpdate(propertyList: try #require(sends.first)) == matched)
+
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+    }
+
+    @Test("a delivered update clears the held one and session end drops it")
+    func pendingListenUpdateClearedBySendAndSessionEnd() {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let update = ListenUpdate(listenID: testListenID, source: .phone, phase: .timeout, listenSeconds: 120)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(update, isReachable: false) { sends.append($0) }
+        host.sendListenUpdate(update, isReachable: true) { sends.append($0) }
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+
+        host.sendListenUpdate(update, isReachable: false) { sends.append($0) }
+        host.broadcastSessionEnded()
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+        #expect(sends.count == 1)
+    }
+
+    @Test("an update whose send failed is held and resent once the watch is reachable again")
+    func failedListenUpdateResentOnReachable() throws {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let matched = ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000), chunkStart: 600, listenSeconds: 9)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(matched, isReachable: true) { sends.append($0) }
+        host.listenSendFailed(matched)
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+
+        #expect(sends.count == 2)
+        #expect(try ListenUpdate(propertyList: try #require(sends.last)) == matched)
+    }
+
+    @Test("a failed send is not held once a newer update has been sent")
+    func failedStaleListenUpdateDropped() {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let started = ListenUpdate(listenID: testListenID, source: .phone, phase: .start, listenSeconds: 0)
+        let matched = ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000), chunkStart: 600, listenSeconds: 9)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(started, isReachable: true) { sends.append($0) }
+        host.sendListenUpdate(matched, isReachable: true) { sends.append($0) }
+        host.listenSendFailed(started)
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+
+        #expect(sends.count == 2)
+    }
+
+    @Test("a failed send after session end is not held")
+    func failedListenUpdateAfterSessionEndDropped() {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+        let update = ListenUpdate(listenID: testListenID, source: .phone, phase: .timeout, listenSeconds: 120)
+        var sends: [[String: Any]] = []
+
+        host.sendListenUpdate(update, isReachable: true) { sends.append($0) }
+        host.broadcastSessionEnded()
+        host.listenSendFailed(update)
+        host.resendPendingListenUpdate(isReachable: true) { sends.append($0) }
+
+        #expect(sends.count == 1)
+    }
+
+    @Test("dispatch routes startListening, cancelListening and applySync to the coordinator")
+    func dispatchRoutesListenCommands() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let listener = HostFakeListener()
+        var catalogURLs: [URL] = []
+        var updates: [ListenUpdate] = []
+        fixture.coordinator.makeListener = { url in
+            catalogURLs.append(url)
+            return listener
+        }
+        fixture.coordinator.sendListenUpdate = { updates.append($0) }
+        fixture.coordinator.routeReader = { ("Speaker", "Speaker", 0) }
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        fixture.coordinator.now = { now }
+
+        _ = await fixture.host.dispatch(.startListening(listenID: testListenID))
+        #expect(listener.startCount == 1)
+        #expect(catalogURLs.map(\.lastPathComponent) == ["fingerprint-abcdef0123-film.shazamcatalog"])
+        #expect(updates.map(\.phase) == [.start])
+
+        _ = await fixture.host.dispatch(.cancelListening(listenID: testListenID))
+        #expect(listener.cancelCount == 1)
+        #expect(updates.map(\.phase) == [.start, .cancel])
+
+        let snapshot = await fixture.host.dispatch(.applySync(
+            sessionID: fixture.sessionUUID,
+            trackTime: 1.0,
+            matchDate: now.addingTimeInterval(-1),
+            source: .phone,
+            sha256: Self.fingerprintSHA.lowercased()
+        ))
+        #expect(abs(snapshot.currentTime - 2.0) < 0.01)
+    }
+
+    @Test("received commands run one at a time in arrival order and each gets its reply")
+    func receivedCommandsRunInOrder() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let listener = HostFakeListener()
+        var updates: [ListenUpdate] = []
+        fixture.coordinator.makeListener = { _ in listener }
+        fixture.coordinator.sendListenUpdate = { updates.append($0) }
+
+        let (replies, continuation) = AsyncStream<Bool>.makeStream()
+        fixture.host.receive(.startListening(listenID: testListenID)) { continuation.yield((try? PlaybackSnapshot(propertyList: $0)) != nil) }
+        fixture.host.receive(.cancelListening(listenID: testListenID)) { continuation.yield((try? PlaybackSnapshot(propertyList: $0)) != nil) }
+        var received: [Bool] = []
+        for await reply in replies {
+            received.append(reply)
+            if received.count == 2 { break }
+        }
+
+        #expect(received == [true, true])
+        #expect(listener.startCount == 1)
+        #expect(listener.cancelCount == 1)
+        #expect(updates.map(\.phase) == [.start, .cancel])
+    }
+
+    @Test("dispatch(.applySync) for another fingerprint replies with the empty snapshot and does not seek")
+    func dispatchApplySyncRejectsOtherFingerprint() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        fixture.coordinator.now = { now }
+
+        let snapshot = await fixture.host.dispatch(.applySync(
+            sessionID: fixture.sessionUUID,
+            trackTime: 1.0,
+            matchDate: now.addingTimeInterval(-1),
+            source: .phone,
+            sha256: "0000000000"
+        ))
+
+        #expect(snapshot == .empty)
+        #expect(fixture.coordinator.currentSnapshot().currentTime == 0)
+    }
+
+    @Test("dispatch(.applySync) from another session replies with the empty snapshot and does not seek")
+    func dispatchApplySyncRejectsOtherSession() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        fixture.coordinator.now = { now }
+
+        let snapshot = await fixture.host.dispatch(.applySync(
+            sessionID: UUID(),
+            trackTime: 1.0,
+            matchDate: now.addingTimeInterval(-1),
+            source: .phone,
+            sha256: Self.fingerprintSHA.lowercased()
+        ))
+
+        #expect(snapshot == .empty)
+        #expect(fixture.coordinator.currentSnapshot().currentTime == 0)
+    }
+
+    @Test("dispatch(.listenEvent) logs the watch phase without starting a phone listener")
+    func dispatchListenEventDoesNotStartListener() async throws {
+        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let listener = HostFakeListener()
+        fixture.coordinator.makeListener = { _ in listener }
+        var updates: [ListenUpdate] = []
+        fixture.coordinator.sendListenUpdate = { updates.append($0) }
+
+        _ = await fixture.host.dispatch(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)))
+
+        #expect(listener.startCount == 0)
+        #expect(updates.isEmpty)
     }
 
     @Test("dispatch(.switchTrack) updates activeTrackID and snapshot reflects it")
@@ -593,6 +935,26 @@ struct WatchSessionHostTests {
         #expect(sends.count == 1)
     }
 
+}
+
+@MainActor
+private final class HostFakeListener: CinemaListening {
+    private(set) var startCount = 0
+    private(set) var cancelCount = 0
+    private var onEvent: (@MainActor (ListenEvent) -> Void)?
+
+    func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
+        startCount += 1
+        self.onEvent = onEvent
+        onEvent(ListenEvent(phase: .started, listenSeconds: 0))
+    }
+
+    func cancel() {
+        cancelCount += 1
+        let onEvent = onEvent
+        self.onEvent = nil
+        onEvent?(ListenEvent(phase: .cancelled, listenSeconds: 1))
+    }
 }
 
 #endif
