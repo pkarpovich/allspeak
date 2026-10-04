@@ -81,6 +81,7 @@ final class PlaybackCoordinator {
             let srtFilename: String
             let lastPosition: Double?
             let activeTrackID: UUID?
+            let hallKey: String?
             let tracks: [TrackSnap]
         }
 
@@ -94,6 +95,7 @@ final class PlaybackCoordinator {
                 let srt = (object.value(forKey: "srtFilename") as? String) ?? ""
                 let pos = object.value(forKey: "lastPositionSeconds") as? Double
                 let activeID = object.value(forKey: "activeTrackID") as? UUID
+                let hallKey = object.value(forKey: "hallKey") as? String
                 let raw = (object.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
                 let trackSnaps: [TrackSnap] = raw.compactMap { obj in
                     guard let id = obj.value(forKey: "id") as? UUID,
@@ -111,6 +113,7 @@ final class PlaybackCoordinator {
                     srtFilename: srt,
                     lastPosition: pos,
                     activeTrackID: activeID,
+                    hallKey: hallKey,
                     tracks: trackSnaps
                 )
             }
@@ -176,7 +179,7 @@ final class PlaybackCoordinator {
         self.sessionTitle = snap.name
         self.tracks = snap.tracks.map { TrackInfo(id: $0.trackID, label: $0.label) }
         self.activeTrackID = selectedTrack?.trackID
-        self.selectedHallKey = nil
+        self.selectedHallKey = snap.hallKey
         self.isInBackground = false
         self.repository = repository
         self.storage = storage
@@ -189,6 +192,7 @@ final class PlaybackCoordinator {
             trackID: selectedTrack?.trackID,
             trackLabel: selectedTrack?.label,
             trackFile: selectedTrack?.filename ?? snap.audioFilename,
+            hallKey: snap.hallKey,
             sidecar: try? CatalogSidecar.load(from: dir)
         )))
         startMonitor()
@@ -203,8 +207,10 @@ final class PlaybackCoordinator {
         trackID: UUID?,
         trackLabel: String?,
         trackFile: String,
+        hallKey: String?,
         sidecar: CatalogSidecar?
     ) -> DiagnosticsEvent.SessionHeader {
+        let hall = Hall.manufaktura.first { $0.key == hallKey }
         let info = Bundle.main.infoDictionary ?? [:]
         return DiagnosticsEvent.SessionHeader(
             sessionID: sessionID,
@@ -215,6 +221,8 @@ final class PlaybackCoordinator {
             trackSHA: sidecar?.tracks.first { $0.trackID == trackID }?.sha256,
             catalogID: sidecar?.serverID,
             catalogRev: sidecar?.revision,
+            hall: hall?.key,
+            hallName: hall?.name,
             app: info["CFBundleShortVersionString"] as? String ?? "",
             build: info["CFBundleVersion"] as? String ?? "",
             device: deviceModel(),
@@ -296,6 +304,7 @@ final class PlaybackCoordinator {
             trackID: nil,
             trackLabel: nil,
             trackFile: audio.lastPathComponent,
+            hallKey: nil,
             sidecar: nil
         )))
         startMonitor()
@@ -678,6 +687,10 @@ final class PlaybackCoordinator {
         guard let controller else { return }
         selectedHallKey = hall.key
         diagnostics.log(.hall(key: hall.key, name: hall.name, cinema: Hall.manufakturaCinemaID, pos: controller.livePosition))
+        guard let repository, let sessionID else { return }
+        Task {
+            try? await repository.setHall(sessionID: sessionID, hallKey: hall.key)
+        }
     }
 
     func apply(_ command: WatchCommand) {

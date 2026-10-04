@@ -125,7 +125,8 @@ seconds: `pos`, or `from` / `to` for skips and `from` for seeks. Booleans are
 written as `1` / `0`. Event types:
 
 - `session` - first line: session, title, track (id, label, file, SHA), catalog
-  id and revision, app version, build, device and OS.
+  id and revision, the session's saved hall (`hall`, `hallName`), app version,
+  build, device and OS.
 - `play` / `pause` - user transport.
 - `skip` - `seconds` and `source` (phone or watch), position before and after.
 - `seek` - target `time`, `source`, position before, and the subtitle `cue`
@@ -142,8 +143,10 @@ written as `1` / `0`. Event types:
 - `hall` - cinema hall picked in the player.
 
 The player's title capsule is a menu with the Cinema City Łódź Manufaktura hall
-list (IMAX, Sala 1-14). Picking a hall logs a `hall` event and shows the hall
-name under the title for the rest of the session.
+list (IMAX, Sala 1-14). The hall is saved on the session, so it can be picked
+at home before going to the cinema: every later log of that session carries it
+in the `session` header, and the hall name shows under the title. Changing it
+logs a `hall` event.
 
 Logs older than 365 days are deleted when the next session starts.
 
@@ -298,8 +301,9 @@ the protocol summary.
   lightweight migration carries pre-multitrack sessions forward by
   back-filling a single `AudioTrack(label: "Original", isDefault: true)`
   from the legacy `Session.audioFilename` field. The current model version is
-  `Allspeak v5`, which drops the two optional `Session` fields that carried the
-  removed cinema-sync files (`catalogFilename`, added in v3, and
+  `Allspeak v6`, which adds the optional `Session.hallKey` (the cinema hall
+  saved for diagnostics). v5 dropped the two optional `Session` fields that
+  carried the removed cinema-sync files (`catalogFilename`, added in v3, and
   `dtwMapFilename`, added in v4). Every migration in the chain is lightweight
   and inferred, so a store written by any earlier build opens in place with its
   sessions intact. File payloads (audio + srt) are not stored in Core Data —
