@@ -1122,6 +1122,48 @@ struct WatchSessionClientTests {
         #expect(FingerprintCache.sha256Hex(of: stored) == sha)
     }
 
+    @Test("a fingerprint file transfer stores the file and stops the chunk pull")
+    func fingerprintFileTransferCompletesDownload() async throws {
+        let (client, sender, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        client.handleReceivedFingerprintFile(Self.fingerprintData, sha256: sha)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let url = try #require(client.fingerprintURL)
+        #expect(cache.url(sha256: sha) == url)
+        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
+    }
+
+    @Test("a fingerprint file for another sha than the session's is ignored")
+    func fingerprintFileTransferForOtherSHAIsIgnored() async throws {
+        let (client, _, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+        let otherData = Data("other".utf8)
+        let otherSHA = FingerprintCache.sha256Hex(of: otherData)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        client.handleReceivedFingerprintFile(otherData, sha256: otherSHA)
+
+        #expect(!client.hasFingerprint)
+        #expect(cache.url(sha256: otherSHA) == nil)
+    }
+
+    @Test("a fingerprint file whose content does not match its sha is not stored")
+    func fingerprintFileTransferShaMismatchIsDropped() async throws {
+        let (client, _, cache, dir) = try makeFingerprintClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+
+        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        client.handleReceivedFingerprintFile(Data("corrupt".utf8), sha256: sha)
+
+        #expect(cache.url(sha256: sha) == nil)
+    }
+
     @Test("a cached fingerprint is used without any chunk request")
     func fingerprintCacheHitSkipsPull() async throws {
         let (client, sender, cache, dir) = try makeFingerprintClient()

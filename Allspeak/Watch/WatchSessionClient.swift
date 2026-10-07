@@ -422,6 +422,14 @@ final class WatchSessionClient: NSObject {
         fingerprintURL = url
     }
 
+    func handleReceivedFingerprintFile(_ data: Data, sha256: String) {
+        guard fingerprintURL == nil else { return }
+        guard metadata?.fingerprintSHA?.lowercased() == sha256.lowercased() else { return }
+        guard let url = try? fingerprintCache?.save(data, sha256: sha256) else { return }
+        fingerprintDownload = nil
+        fingerprintURL = url
+    }
+
     private func failFingerprintDownload(sha256: String) {
         guard fingerprintDownload?.sha256 == sha256 else { return }
         fingerprintDownload = nil
@@ -648,6 +656,14 @@ extension WatchSessionClient: WCSessionDelegate {
         let bridge = SendableDictionary(value: message)
         Task { @MainActor in
             self.handleReceivedMessage(bridge.value)
+        }
+    }
+
+    nonisolated func session(_: WCSession, didReceive file: WCSessionFile) {
+        guard let sha256 = file.metadata?[FingerprintFileTransfer.sha256Key] as? String,
+              let data = try? Data(contentsOf: file.fileURL) else { return }
+        Task { @MainActor in
+            self.handleReceivedFingerprintFile(data, sha256: sha256)
         }
     }
 

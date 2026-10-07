@@ -72,7 +72,7 @@ struct PlayerTopBar: View {
 
     private var hallMenu: some View {
         Menu {
-            Picker("Зал", selection: hallSelection) {
+            Picker("Hall", selection: hallSelection) {
                 ForEach(Hall.manufaktura) { hall in
                     Text(hall.name).tag(Optional(hall.key))
                 }
