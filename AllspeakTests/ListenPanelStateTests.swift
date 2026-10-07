@@ -243,14 +243,14 @@ struct ListenPanelStateTests {
     @Test(
         "offset text has a sign and one decimal",
         arguments: [
-            (2.44, "+2.4 с"),
-            (2.45, "+2.5 с"),
-            (-1.8, "-1.8 с"),
-            (-1.75, "-1.8 с"),
-            (0, "+0.0 с"),
-            (-0.04, "+0.0 с"),
-            (0.04, "+0.0 с"),
-            (12.0, "+12.0 с"),
+            (2.44, "+2.4 s"),
+            (2.45, "+2.5 s"),
+            (-1.8, "-1.8 s"),
+            (-1.75, "-1.8 s"),
+            (0, "+0.0 s"),
+            (-0.04, "+0.0 s"),
+            (0.04, "+0.0 s"),
+            (12.0, "+12.0 s"),
         ]
     )
     func offsetText(delta: Double, expected: String) {
@@ -260,25 +260,25 @@ struct ListenPanelStateTests {
     @Test("listening status shows elapsed minutes and seconds")
     func listeningStatusText() {
         let state = listening()
-        #expect(state.statusText(for: .phone, interpolatedPosition: 0, now: start.addingTimeInterval(23.7)) == "слушаю 0:23")
-        #expect(state.statusText(for: .watch, interpolatedPosition: 0, now: start.addingTimeInterval(83)) == "слушаю 1:23")
+        #expect(state.statusText(for: .phone, interpolatedPosition: 0, now: start.addingTimeInterval(23.7)) == "listening 0:23")
+        #expect(state.statusText(for: .watch, interpolatedPosition: 0, now: start.addingTimeInterval(83)) == "listening 1:23")
     }
 
     @Test("matched status shows the offset")
     func matchedStatusText() {
         var state = listening()
         state.receive(source: .watch, event: event(.matched(match(trackTime: 612.5, at: 4))), now: start)
-        #expect(state.statusText(for: .watch, interpolatedPosition: 611, now: start.addingTimeInterval(5)) == "нашёл +2.5 с")
+        #expect(state.statusText(for: .watch, interpolatedPosition: 611, now: start.addingTimeInterval(5)) == "found +2.5 s")
     }
 
     @Test(
         "terminal statuses have their display strings",
         arguments: [
-            (ListenEvent.Phase.interrupted, "прервано"),
-            (.noMatch, "нет совпадения"),
-            (.timedOut, "нет совпадения"),
-            (.cancelled, "остановлено"),
-            (.failed("mic permission"), "ошибка: mic permission"),
+            (ListenEvent.Phase.interrupted, "interrupted"),
+            (.noMatch, "no match"),
+            (.timedOut, "no match"),
+            (.cancelled, "stopped"),
+            (.failed("mic permission"), "error: mic permission"),
         ]
     )
     func terminalStatusText(phase: ListenEvent.Phase, expected: String) {

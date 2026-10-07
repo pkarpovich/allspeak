@@ -51,6 +51,9 @@ final class WatchSessionHost: NSObject {
         case .requestCueChunk(let sessionID, let revision, let index):
             incoming.reply(cueChunk(sessionID: sessionID, revision: revision, index: index)?.toPropertyList() ?? [:])
         case .requestFingerprintChunk(let sha256, let index):
+            if index == 0 {
+                transferFingerprintFile(sha256: sha256)
+            }
             incoming.reply(fingerprintChunk(sha256: sha256, index: index)?.toPropertyList() ?? [:])
         case .switchTrack:
             Task {
@@ -153,6 +156,16 @@ final class WatchSessionHost: NSObject {
         let start = index * size
         let end = Swift.min(start + size, file.count)
         return FingerprintChunkReply(sha256: sha256, index: index, totalChunks: total, data: file.subdata(in: start..<end))
+    }
+
+    private func transferFingerprintFile(sha256: String) {
+        guard let session, session.activationState == .activated, session.isWatchAppInstalled else { return }
+        guard let fingerprint = coordinator.fingerprint, fingerprint.sha256 == sha256 else { return }
+        let alreadyQueued = session.outstandingFileTransfers.contains { transfer in
+            transfer.file.metadata?[FingerprintFileTransfer.sha256Key] as? String == sha256
+        }
+        if alreadyQueued { return }
+        session.transferFile(fingerprint.url, metadata: [FingerprintFileTransfer.sha256Key: sha256])
     }
 
     func dispatch(_ command: WatchCommand) async -> PlaybackSnapshot {

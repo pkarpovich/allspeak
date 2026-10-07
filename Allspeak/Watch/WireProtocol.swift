@@ -491,6 +491,10 @@ enum FingerprintChunkKey {
     static let data = "data"
 }
 
+enum FingerprintFileTransfer {
+    static let sha256Key = "fingerprintSHA256"
+}
+
 enum SessionEndedSignal {
     static func propertyList() -> [String: Any] {
         [WirePayloadKey.kind: WirePayloadKind.sessionEnded.rawValue]

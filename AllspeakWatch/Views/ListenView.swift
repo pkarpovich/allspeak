@@ -48,7 +48,7 @@ struct ListenView: View {
     private var idleView: some View {
         VStack(spacing: 10) {
             Button(action: handleStart) {
-                Label("Слушать", systemImage: Tokens.Icon.listen)
+                Label("Listen", systemImage: Tokens.Icon.listen)
                     .font(Tokens.Font.bodyEmphasized)
                     .foregroundStyle(Tokens.text)
                     .frame(maxWidth: .infinity)
@@ -69,7 +69,7 @@ struct ListenView: View {
         VStack(spacing: 10) {
             statusLines(showsHint: panel.watch.isListening)
             Button(action: handleStop) {
-                Text("Стоп")
+                Text("Stop")
                     .font(Tokens.Font.bodyEmphasized)
                     .foregroundStyle(Tokens.text)
                     .frame(maxWidth: .infinity)
@@ -84,7 +84,7 @@ struct ListenView: View {
                 statusLine(.phone, at: context.date)
                 statusLine(.watch, at: context.date)
                 if showsHint {
-                    Text("держи руку поднятой")
+                    Text("Keep your wrist raised")
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(Tokens.text3)
                 }
@@ -111,7 +111,7 @@ struct ListenView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Tokens.text2)
             Button(action: handleApply) {
-                Text("Применить")
+                Text("Apply")
                     .font(Tokens.Font.bodyEmphasized)
                     .foregroundStyle(Tokens.onAccent)
                     .frame(maxWidth: .infinity)
@@ -120,7 +120,7 @@ struct ListenView: View {
             .tint(Tokens.accent)
             .disabled(panel.applying)
             Button(action: handleStop) {
-                Text("Отмена")
+                Text("Cancel")
                     .font(Tokens.Font.bodyEmphasized)
                     .foregroundStyle(Tokens.text)
                     .frame(maxWidth: .infinity)
@@ -135,7 +135,7 @@ struct ListenView: View {
             Image(systemName: Tokens.Icon.done)
                 .font(.system(size: 34, weight: .semibold))
                 .foregroundStyle(Tokens.accent)
-            Text("Готово")
+            Text("Done")
                 .font(Tokens.Font.subtitleCurrent)
                 .foregroundStyle(Tokens.text)
             Text(sourceLabel(shown.source))
@@ -163,8 +163,8 @@ struct ListenView: View {
 
     private func sourceLabel(_ source: ListenSource) -> String {
         switch source {
-        case .phone: "Телефон"
-        case .watch: "Часы"
+        case .phone: "Phone"
+        case .watch: "Watch"
         }
     }
 

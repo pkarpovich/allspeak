@@ -95,18 +95,18 @@ struct ListenPanelState: Equatable, Sendable {
         case .idle:
             return ""
         case .listening(let since):
-            return "слушаю \(Self.elapsedText(now.timeIntervalSince(since)))"
+            return "listening \(Self.elapsedText(now.timeIntervalSince(since)))"
         case .matched(let match):
             let delta = Self.delta(match: match, interpolatedPosition: interpolatedPosition, now: now)
-            return "нашёл \(Self.offsetText(delta))"
+            return "found \(Self.offsetText(delta))"
         case .noMatch, .timedOut:
-            return "нет совпадения"
+            return "no match"
         case .interrupted:
-            return "прервано"
+            return "interrupted"
         case .failed(let message):
-            return "ошибка: \(message)"
+            return "error: \(message)"
         case .cancelled:
-            return "остановлено"
+            return "stopped"
         }
     }
 
@@ -117,7 +117,7 @@ struct ListenPanelState: Equatable, Sendable {
     static func offsetText(_ delta: Double) -> String {
         let rounded = (delta * 10).rounded() / 10
         let normalized = rounded == 0 ? 0 : rounded
-        return String(format: "%+.1f с", normalized)
+        return String(format: "%+.1f s", normalized)
     }
 
     static func elapsedText(_ seconds: TimeInterval) -> String {

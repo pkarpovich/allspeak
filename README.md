@@ -121,38 +121,38 @@ sound, see below.
 A catalog session can carry an optional ShazamKit fingerprint (a
 `.shazamcatalog` built on the Mac from the music and effects of the same RU
 track, in 600 s chunks with 30 s overlap; each chunk's media item has
-`subtitle = "abs_start=<seconds>"`). When it does, the watch shows a `Слушать`
+`subtitle = "abs_start=<seconds>"`). When it does, the watch shows a `Listen`
 page right after the transport page. There is no listening UI on the phone and
 no automatic or background listening.
 
-- One tap on `Слушать` starts two independent listeners at once: the phone's
+- One tap on `Listen` starts two independent listeners at once: the phone's
   built-in mic and the watch mic. The page shows a status line per source
-  (`Телефон: слушаю 0:23`, `Часы: нет совпадения`, `прервано`, `ошибка: ...`),
-  a `Стоп` button, and a hint to keep the wrist raised.
+  (`Phone: listening 0:23`, `Watch: no match`, `interrupted`, `error: ...`),
+  a `Stop` button, and a hint to keep the wrist raised.
 - The first match from either source shows a card with the offset
-  (`+2.4 с`), the source, and `Применить` / `Отмена`, with a click haptic. The
+  (`+2.4 s`), the source, and `Apply` / `Cancel`, with a click haptic. The
   watch computes the offset as `(trackTime + (now - matchDate)) - position`,
   where `trackTime = abs_start + predictedCurrentMatchOffset`.
-- `Применить` stops both listeners and sends
+- `Apply` stops both listeners and sends
   `applySync(sessionID:trackTime:matchDate:source:sha256:)`. The phone seeks to
   `trackTime + (now - matchDate) + outputLatency` with the `sync` source only
   while `sessionID` is still the active session and `sha256` its fingerprint,
-  and replies with an empty snapshot otherwise; the watch shows `Готово` only
+  and replies with an empty snapshot otherwise; the watch shows `Done` only
   when the reply snapshot belongs to the same session.
-- Each listener stops on its first match, after 120 s, or on `Стоп`. The watch
+- Each listener stops on its first match, after 120 s, or on `Stop`. The watch
   listener (`SHManagedSession`) waits for the app to become active after the
   first microphone prompt and stops as `interrupted` when the watch app leaves
   the active phase (wrist down); the phone listener stops as
   `interrupted` when an audio interruption (a call, Siri) begins.
 - A phone result that arrives while the watch is unreachable (wrist down) is
   held on the phone and re-sent when the watch becomes reachable again. If the
-  phone never answers, the watch marks it `нет совпадения` 15 s after the
-  phone's own timeout. If `Применить` cannot reach the phone, the card returns
+  phone never answers, the watch marks it `no match` 15 s after the
+  phone's own timeout. If `Apply` cannot reach the phone, the card returns
   so it can be retried.
-- Both apps ask for microphone access the first time `Слушать` is tapped. The
+- Both apps ask for microphone access the first time `Listen` is tapped. The
   phone is usually locked in a pocket at that point, so do the first tap at
   home with Allspeak open on the phone and grant both prompts. A refused
-  permission shows as `ошибка: mic permission` for that source.
+  permission shows as `error: mic permission` for that source.
 - The phone listener uses `SHSession` with its own `AVAudioEngine` input tap.
   While listening the audio session is `.playAndRecord` / `.default` with
   options exactly `[.allowBluetoothA2DP]` and the built-in mic as preferred
@@ -327,7 +327,7 @@ listener as a second source.
   direction, turning the Crown **down** raises the volume. Rapid rotation
   coalesces into a single trailing-edge command.
 - **Listen page** (swipe up, only when the session has a fingerprint):
-  `Слушать` resyncs from the hall's sound, see
+  `Listen` resyncs from the hall's sound, see
   [Cinema listen](#cinema-listen).
 - **Cue list** (swipe up): scrollable list of all cues with the current line
   highlighted; tap any line to seek the iPhone audio to that timestamp.
