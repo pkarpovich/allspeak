@@ -41,10 +41,9 @@ struct WatchSessionClientTests {
 
     private func makeClient() throws -> (WatchSessionClient, MockSender, URL) {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("client-cache-\(UUID().uuidString)", isDirectory: true)
-        let cache = try CueCache(baseURL: dir)
+            .appendingPathComponent("client-\(UUID().uuidString)", isDirectory: true)
         let sender = MockSender()
-        let client = WatchSessionClient(sender: sender, cache: cache)
+        let client = WatchSessionClient(sender: sender)
         return (client, sender, dir)
     }
 
@@ -143,31 +142,7 @@ struct WatchSessionClientTests {
         #expect(client.metadata == meta)
     }
 
-    @Test("handleReceivedApplicationContext loads cached cues when revision matches")
-    func receiveApplicationContextHydratesFromCache() async throws {
-        let (client, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let cache = try CueCache(baseURL: dir)
-        try cache.save(CueBundle(sessionID: sessionID, revision: 5, cues: Self.cues))
-
-        let cachedClient = WatchSessionClient(sender: MockSender(), cache: cache)
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: 5,
-            title: "Cached",
-            duration: 1,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        cachedClient.handleReceivedApplicationContext(try meta.toPropertyList())
-        #expect(cachedClient.cues == Self.cues)
-        _ = client
-    }
-
-    @Test("handleReceivedApplicationContext clears cues and snapshot when sessionID changes with cache miss")
+    @Test("handleReceivedApplicationContext clears cues and snapshot when sessionID changes")
     func receiveApplicationContextClearsOnSessionChange() async throws {
         let (client, sender, dir) = try makeClient()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -183,8 +158,6 @@ struct WatchSessionClientTests {
             currentTime: 5
         )
         client.handleReceivedApplicationContext(try metaA.toPropertyList())
-        try CueCache(baseURL: dir).save(CueBundle(sessionID: sessionA, revision: 1, cues: Self.cues))
-        client.loadCachedCues()
 
         let snapshotA = PlaybackSnapshot(
             sessionID: sessionA,
@@ -198,7 +171,6 @@ struct WatchSessionClientTests {
         sender.nextReply = try snapshotA.toPropertyList()
         client.send(.play)
         try await Task.sleep(for: .milliseconds(50))
-        #expect(client.cues == Self.cues)
         #expect(client.lastSnapshot != nil)
 
         let metaB = SessionMetadata(
@@ -215,82 +187,6 @@ struct WatchSessionClientTests {
         #expect(client.cues == [])
         #expect(client.lastSnapshot == nil)
         #expect(client.metadata?.sessionID == metaB.sessionID)
-    }
-
-    @Test("handleReceivedApplicationContext clears cues on revision bump when cache misses")
-    func receiveApplicationContextClearsCuesOnRevisionBumpCacheMiss() async throws {
-        let (client, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let metaR1 = SessionMetadata(
-            sessionID: sessionID,
-            revision: 1,
-            title: "Stable",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try metaR1.toPropertyList())
-        try CueCache(baseURL: dir).save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
-        client.loadCachedCues()
-        #expect(client.cues == Self.cues)
-
-        let metaR2 = SessionMetadata(
-            sessionID: sessionID,
-            revision: 2,
-            title: "Stable",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
-
-        #expect(client.cues == [])
-        #expect(client.metadata?.revision == 2)
-    }
-
-    @Test("handleReceivedApplicationContext loads cached cues on revision bump when cache hits")
-    func receiveApplicationContextLoadsCachedCuesOnRevisionBump() async throws {
-        let (client, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let metaR1 = SessionMetadata(
-            sessionID: sessionID,
-            revision: 1,
-            title: "Stable",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try metaR1.toPropertyList())
-        try CueCache(baseURL: dir).save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
-        client.loadCachedCues()
-
-        let r2Cues: [Subtitle] = [
-            Subtitle(index: 1, start: 0, end: 1, text: "r2-first"),
-            Subtitle(index: 2, start: 1, end: 2, text: "r2-second"),
-        ]
-        try CueCache(baseURL: dir).save(CueBundle(sessionID: sessionID, revision: 2, cues: r2Cues))
-        client.loadCachedCues()
-
-        let metaR2 = SessionMetadata(
-            sessionID: sessionID,
-            revision: 2,
-            title: "Stable",
-            duration: 60,
-            cueCount: r2Cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try metaR2.toPropertyList())
-
-        #expect(client.cues == r2Cues)
-        #expect(client.metadata?.revision == 2)
     }
 
     @Test("handleReceivedApplicationContext clears lastSnapshot on revision bump for same session")
@@ -354,90 +250,13 @@ struct WatchSessionClientTests {
             currentTime: 5
         )
         client.handleReceivedApplicationContext(try activeMeta.toPropertyList())
-        try CueCache(baseURL: dir).save(CueBundle(sessionID: activeID, revision: 1, cues: Self.cues))
-        client.loadCachedCues()
         #expect(client.metadata != nil)
-        #expect(client.cues == Self.cues)
 
         client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
 
         #expect(client.metadata == nil)
         #expect(client.cues == [])
         #expect(client.lastSnapshot == nil)
-    }
-
-    @Test("loadCachedCues populates cues when metadata matches cached bundle")
-    func loadCachedCuesHappyPath() async throws {
-        let (client, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let cache = try CueCache(baseURL: dir)
-        let sessionID = UUID()
-        try cache.save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
-
-        let warmClient = WatchSessionClient(sender: MockSender(), cache: cache)
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: 1,
-            title: "Warm",
-            duration: 1,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        warmClient.handleReceivedApplicationContext(try meta.toPropertyList())
-        warmClient.cues = []
-        warmClient.loadCachedCues()
-        #expect(warmClient.cues == Self.cues)
-        _ = client
-    }
-
-    @Test("loadCachedCues no-ops when cache is empty")
-    func loadCachedCuesEmpty() async throws {
-        let (client, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        client.loadCachedCues()
-        #expect(client.cues == [])
-    }
-
-    @Test("loadCachedCues ignores stale cache when metadata does not match")
-    func loadCachedCuesIgnoresStaleSession() async throws {
-        let (client, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let cache = try CueCache(baseURL: dir)
-        try cache.save(CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues))
-
-        let warmClient = WatchSessionClient(sender: MockSender(), cache: cache)
-        let meta = SessionMetadata(
-            sessionID: UUID(),
-            revision: 1,
-            title: "Different",
-            duration: 1,
-            cueCount: 0,
-            isPlaying: false,
-            currentTime: 0
-        )
-        warmClient.handleReceivedApplicationContext(try meta.toPropertyList())
-        warmClient.loadCachedCues()
-        #expect(warmClient.cues == [])
-        _ = client
-    }
-
-    @Test("loadCachedCues does not resurrect cues after sessionEnded")
-    func loadCachedCuesAfterSessionEnded() async throws {
-        let (client, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let cache = try CueCache(baseURL: dir)
-        try cache.save(CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues))
-
-        let warmClient = WatchSessionClient(sender: MockSender(), cache: cache)
-        warmClient.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
-        warmClient.loadCachedCues()
-        #expect(warmClient.cues == [])
-        _ = client
     }
 
     @Test("handleReceivedSnapshot stores snapshot when sessionID matches metadata")
@@ -571,9 +390,6 @@ struct WatchSessionClientTests {
             currentTime: 0
         )
         client.handleReceivedApplicationContext(try metaR1.toPropertyList())
-        try CueCache(baseURL: dir).save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
-        client.loadCachedCues()
-        #expect(client.cues == Self.cues)
 
         let aheadR2 = PlaybackSnapshot(
             sessionID: sessionID,
@@ -588,7 +404,6 @@ struct WatchSessionClientTests {
 
         #expect(client.lastSnapshot == nil)
         #expect(client.metadata?.revision == 1)
-        #expect(client.cues == Self.cues)
     }
 
     @Test("send reply rejects stale-revision snapshot for same session")
@@ -777,17 +592,6 @@ struct WatchSessionClientTests {
         #expect(client.lastSnapshot == nil)
     }
 
-    @Test("stale cache hit returns nil for mismatched session ID")
-    func staleCacheMissOnDifferentSession() async throws {
-        let (_, _, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let cache = try CueCache(baseURL: dir)
-        try cache.save(CueBundle(sessionID: UUID(), revision: 1, cues: Self.cues))
-
-        #expect(cache.load(sessionID: UUID(), revision: 1) == nil)
-    }
-
     @Test("tracks and activeTrackID reflect received metadata")
     func tracksAndActiveTrackIDReflectMetadata() async throws {
         let (client, _, dir) = try makeClient()
@@ -865,430 +669,171 @@ struct WatchSessionClientTests {
         #expect(decoded == .switchTrack(id: trackID))
     }
 
-    @Test("handleReceivedApplicationContext sends requestCueChunk(index:0) on cache miss")
-    func receiveApplicationContextRequestsBundleOnCacheMiss() async throws {
-        let (client, sender, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
+    // MARK: - Catalog files
 
-        let sessionID = UUID()
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: 7,
-            title: "Missing",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-
-        #expect(client.cues == [])
-        #expect(sender.sentMessages.count == 1)
-        let decoded = try WatchCommand(propertyList: sender.sentMessages[0])
-        #expect(decoded == .requestCueChunk(sessionID: sessionID, revision: 7, index: 0))
-    }
-
-    @Test("handleReceivedApplicationContext does not request bundle when cueCount is zero")
-    func receiveApplicationContextSkipsRequestForEmptyCueCount() async throws {
-        let (client, sender, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let meta = SessionMetadata(
-            sessionID: UUID(),
-            revision: 1,
-            title: "No cues",
-            duration: 60,
-            cueCount: 0,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-
-        #expect(sender.sentMessages.isEmpty)
-    }
-
-    @Test("handleReceivedApplicationContext does not request bundle when cache hits")
-    func receiveApplicationContextSkipsRequestWhenCacheHits() async throws {
-        let (_, sender, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let cache = try CueCache(baseURL: dir)
-        try cache.save(CueBundle(sessionID: sessionID, revision: 1, cues: Self.cues))
-
-        let warmClient = WatchSessionClient(sender: sender, cache: cache)
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: 1,
-            title: "Cached",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        warmClient.handleReceivedApplicationContext(try meta.toPropertyList())
-
-        #expect(warmClient.cues == Self.cues)
-        #expect(sender.sentMessages.isEmpty)
-    }
-
-    @Test("handleReceivedApplicationContext deduplicates requests for the same revision")
-    func receiveApplicationContextDeduplicatesRequest() async throws {
-        let (client, sender, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: 3,
-            title: "Missing",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-
-        #expect(sender.sentMessages.count == 1)
-    }
-
-    @Test("requestCueChunk send error clears the download so a later context retries")
-    func requestCueBundleErrorClearsDedupKey() async throws {
-        let (client, sender, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: 4,
-            title: "Missing",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-
-        sender.nextError = WatchMessageError.notReachable
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        #expect(sender.sentMessages.count == 1)
-
-        try await Task.sleep(for: .milliseconds(50))
-
-        sender.nextError = nil
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-
-        #expect(sender.sentMessages.count == 2)
-        let decoded = try WatchCommand(propertyList: sender.sentMessages[1])
-        #expect(decoded == .requestCueChunk(sessionID: sessionID, revision: 4, index: 0))
-    }
-
-    @Test("pulls every chunk over sendMessage and reassembles the cue bundle")
-    func chunkedDownloadAssemblesBundle() async throws {
-        let (client, sender, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let revision = 5
-        let bundle = CueBundle(sessionID: sessionID, revision: revision, cues: Self.cues)
-        let compressed = try bundle.compressed()
-        let mid = compressed.count / 2
-        let slices = [compressed.subdata(in: 0..<mid), compressed.subdata(in: mid..<compressed.count)]
-        sender.replyProvider = { message in
-            guard let command = try? WatchCommand(propertyList: message),
-                  case .requestCueChunk(_, _, let index) = command,
-                  index < slices.count else { return nil }
-            return CueChunkReply(
-                sessionID: sessionID,
-                revision: revision,
-                index: index,
-                totalChunks: slices.count,
-                data: slices[index]
-            ).toPropertyList()
-        }
-
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: revision,
-            title: "Chunked",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        try await Task.sleep(for: .milliseconds(100))
-
-        #expect(client.cues == Self.cues)
-        #expect(sender.sentMessages.count == slices.count)
-    }
-
-    @Test("an unservable chunk reply re-arms the download so a later context retries")
-    func chunkedDownloadEmptyReplyReArms() async throws {
-        let (client, sender, dir) = try makeClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sessionID = UUID()
-        let meta = SessionMetadata(
-            sessionID: sessionID,
-            revision: 2,
-            title: "X",
-            duration: 60,
-            cueCount: Self.cues.count,
-            isPlaying: false,
-            currentTime: 0
-        )
-
-        sender.nextReply = [:]
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(client.cues == [])
-        #expect(sender.sentMessages.count == 1)
-
-        sender.nextReply = nil
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        #expect(sender.sentMessages.count == 2)
-    }
-
-    // MARK: - Fingerprint pull
-
-    private func makeFingerprintClient() throws -> (WatchSessionClient, MockSender, FingerprintCache, URL) {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("client-fingerprint-\(UUID().uuidString)", isDirectory: true)
-        let cueCache = try CueCache(baseURL: dir.appendingPathComponent("cues", isDirectory: true))
-        let fingerprintCache = try FingerprintCache(baseURL: dir.appendingPathComponent("fingerprint", isDirectory: true))
-        let sender = MockSender()
-        let client = WatchSessionClient(sender: sender, cache: cueCache, fingerprintCache: fingerprintCache)
-        return (client, sender, fingerprintCache, dir)
-    }
-
+    private static let catalogID = UUID(uuidString: "C0C0C0C0-0000-4000-8000-000000000001")!
     private static let fingerprintData = Data((0..<70_000).map { UInt8(truncatingIfNeeded: $0 * 13) })
+    private static let subtitleData = Data("1\n00:00:00,000 --> 00:00:01,000\nfirst\n\n2\n00:00:01,000 --> 00:00:02,000\nsecond\n".utf8)
 
-    private static func fingerprintMeta(sessionID: UUID = UUID(), sha256: String?, size: Int? = nil) -> SessionMetadata {
+    private struct CatalogClientFixture {
+        let client: WatchSessionClient
+        let sender: MockSender
+        let server: FakeCatalogServer
+        let caches: [WatchDownloadEvent.Kind: CatalogFileCache]
+        let dir: URL
+    }
+
+    private func makeCatalogClient() throws -> CatalogClientFixture {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("client-catalog-\(UUID().uuidString)", isDirectory: true)
+        let caches: [WatchDownloadEvent.Kind: CatalogFileCache] = [
+            .subtitle: try CatalogFileCache(baseURL: dir.appendingPathComponent("subtitles"), fileExtension: "srt"),
+            .fingerprint: try CatalogFileCache(baseURL: dir.appendingPathComponent("fingerprint"), fileExtension: "shazamcatalog"),
+        ]
+        let server = FakeCatalogServer()
+        let downloader = WatchCatalogDownloader(client: server.client, transport: server, caches: caches, sleep: { _ in })
+        let sender = MockSender()
+        let client = WatchSessionClient(sender: sender, downloader: downloader)
+        return CatalogClientFixture(client: client, sender: sender, server: server, caches: caches, dir: dir)
+    }
+
+    private static func catalogMeta(
+        sessionID: UUID = UUID(),
+        catalogID: UUID? = catalogID,
+        subtitleSHA: String? = nil,
+        fingerprintSHA: String?
+    ) -> SessionMetadata {
         SessionMetadata(
             sessionID: sessionID,
             revision: 1,
             title: "Digger",
             duration: 7200,
-            cueCount: 0,
+            cueCount: 2,
             isPlaying: false,
             currentTime: 0,
-            fingerprintSHA: sha256,
-            fingerprintSize: size
+            fingerprintSHA: fingerprintSHA,
+            catalogID: catalogID,
+            subtitleSHA: subtitleSHA
         )
     }
 
-    private static func fingerprintChunkRequests(_ messages: [[String: Any]]) -> [Int] {
-        messages.compactMap { message in
-            guard let command = try? WatchCommand(propertyList: message),
-                  case .requestFingerprintChunk(_, let index) = command else { return nil }
-            return index
+    private static func downloadEvents(_ messages: [[String: Any]]) -> [WatchDownloadEvent] {
+        sentCommands(messages).compactMap { command in
+            guard case .watchDownload(let event) = command else { return nil }
+            return event
         }
     }
 
-    private static func serveFingerprint(_ data: Data, sha256: String) -> @Sendable ([String: Any]) -> [String: Any]? {
-        let size = 30_000
-        let total = (data.count + size - 1) / size
-        return { message in
-            guard let command = try? WatchCommand(propertyList: message),
-                  case .requestFingerprintChunk(let requested, let index) = command,
-                  requested == sha256,
-                  index < total else { return [:] }
-            let end = min((index + 1) * size, data.count)
-            return FingerprintChunkReply(
-                sha256: sha256,
-                index: index,
-                totalChunks: total,
-                data: data.subdata(in: (index * size)..<end)
-            ).toPropertyList()
+    private func waitForFiles(_ client: WatchSessionClient) async throws {
+        for _ in 0..<200 where client.cues.isEmpty || !client.hasFingerprint {
+            try await Task.sleep(for: .milliseconds(5))
         }
     }
 
-    @Test("a new fingerprint sha pulls every chunk and stores a file whose sha256 matches")
-    func fingerprintPullAssemblesFile() async throws {
-        let (client, sender, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
-        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
+    @Test("a catalog session downloads the subtitle and the fingerprint and reports it to the phone")
+    func catalogFilesDownloaded() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        let shas = fixture.server.publish(catalogID: Self.catalogID, subtitle: Self.subtitleData, fingerprint: Self.fingerprintData)
 
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha, size: Self.fingerprintData.count).toPropertyList())
-        try await Task.sleep(for: .milliseconds(100))
+        fixture.client.handleReceivedApplicationContext(
+            try Self.catalogMeta(subtitleSHA: shas.subtitleSHA, fingerprintSHA: shas.fingerprintSHA).toPropertyList()
+        )
+        try await waitForFiles(fixture.client)
 
-        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0, 1, 2])
-        let url = try #require(client.fingerprintURL)
-        #expect(client.hasFingerprint)
-        #expect(cache.url(sha256: sha) == url)
-        let stored = try Data(contentsOf: url)
-        #expect(FingerprintCache.sha256Hex(of: stored) == sha)
+        #expect(fixture.client.cues.map(\.text) == ["first", "second"])
+        #expect(fixture.client.hasFingerprint)
+        let done = Self.downloadEvents(fixture.sender.sentMessages).filter { $0.phase == .done }
+        #expect(Set(done.map(\.kind)) == [.subtitle, .fingerprint])
     }
 
-    @Test("a fingerprint file transfer stores the file and stops the chunk pull")
-    func fingerprintFileTransferCompletesDownload() async throws {
-        let (client, sender, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+    @Test("cached files are used at once without a download")
+    func catalogCacheHit() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        let subtitleSHA = CatalogFileCache.sha256Hex(of: Self.subtitleData)
+        let fingerprintSHA = CatalogFileCache.sha256Hex(of: Self.fingerprintData)
+        try #require(fixture.caches[.subtitle]).save(Self.subtitleData, sha256: subtitleSHA)
+        try #require(fixture.caches[.fingerprint]).save(Self.fingerprintData, sha256: fingerprintSHA)
 
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
-        client.handleReceivedFingerprintFile(Self.fingerprintData, sha256: sha)
-        try await Task.sleep(for: .milliseconds(100))
+        fixture.client.handleReceivedApplicationContext(
+            try Self.catalogMeta(subtitleSHA: subtitleSHA, fingerprintSHA: fingerprintSHA).toPropertyList()
+        )
 
-        let url = try #require(client.fingerprintURL)
-        #expect(cache.url(sha256: sha) == url)
-        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
+        #expect(fixture.client.cues.count == 2)
+        #expect(fixture.client.hasFingerprint)
+        #expect(fixture.server.requests.isEmpty)
     }
 
-    @Test("a fingerprint file for another sha than the session's is ignored")
-    func fingerprintFileTransferForOtherSHAIsIgnored() async throws {
-        let (client, _, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
-        let otherData = Data("other".utf8)
-        let otherSHA = FingerprintCache.sha256Hex(of: otherData)
+    @Test("a repeated context neither re-downloads nor drops the loaded files")
+    func catalogRepeatedContextKeepsFiles() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        let shas = fixture.server.publish(catalogID: Self.catalogID, subtitle: Self.subtitleData, fingerprint: Self.fingerprintData)
+        let meta = Self.catalogMeta(subtitleSHA: shas.subtitleSHA, fingerprintSHA: shas.fingerprintSHA)
+        fixture.client.handleReceivedApplicationContext(try meta.toPropertyList())
+        try await waitForFiles(fixture.client)
+        let requests = fixture.server.requests.count
 
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
-        client.handleReceivedFingerprintFile(otherData, sha256: otherSHA)
+        fixture.client.handleReceivedApplicationContext(try meta.toPropertyList())
 
-        #expect(!client.hasFingerprint)
-        #expect(cache.url(sha256: otherSHA) == nil)
+        #expect(fixture.server.requests.count == requests)
+        #expect(fixture.client.cues.count == 2)
+        #expect(fixture.client.hasFingerprint)
     }
 
-    @Test("a fingerprint file whose content does not match its sha is not stored")
-    func fingerprintFileTransferShaMismatchIsDropped() async throws {
-        let (client, _, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
+    @Test("metadata without a catalog id loads nothing and sends nothing")
+    func noCatalogIDLoadsNothing() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
 
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
-        client.handleReceivedFingerprintFile(Data("corrupt".utf8), sha256: sha)
+        fixture.client.handleReceivedApplicationContext(
+            try Self.catalogMeta(catalogID: nil, subtitleSHA: "abc", fingerprintSHA: "def").toPropertyList()
+        )
+        try await Task.sleep(for: .milliseconds(20))
 
-        #expect(cache.url(sha256: sha) == nil)
+        #expect(fixture.client.cues.isEmpty)
+        #expect(!fixture.client.hasFingerprint)
+        #expect(fixture.server.requests.isEmpty)
+        #expect(fixture.sender.sentMessages.isEmpty)
     }
 
-    @Test("a cached fingerprint is used without any chunk request")
-    func fingerprintCacheHitSkipsPull() async throws {
-        let (client, sender, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
-        let url = try cache.save(Self.fingerprintData, sha256: sha)
+    @Test("session end clears the subtitles and the fingerprint")
+    func sessionEndClearsCatalogFiles() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        let fingerprintSHA = CatalogFileCache.sha256Hex(of: Self.fingerprintData)
+        try #require(fixture.caches[.fingerprint]).save(Self.fingerprintData, sha256: fingerprintSHA)
+        fixture.client.handleReceivedApplicationContext(try Self.catalogMeta(fingerprintSHA: fingerprintSHA).toPropertyList())
+        #expect(fixture.client.hasFingerprint)
 
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
+        fixture.client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
 
-        #expect(client.fingerprintURL == url)
-        #expect(Self.fingerprintChunkRequests(sender.sentMessages).isEmpty)
-    }
-
-    @Test("metadata without a fingerprint requests nothing and reports none")
-    func noFingerprintNoPull() async throws {
-        let (client, sender, _, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
-
-        #expect(!client.hasFingerprint)
-        #expect(sender.sentMessages.isEmpty)
-    }
-
-    @Test("assembled data whose sha256 does not match is not stored")
-    func fingerprintShaMismatchIsDropped() async throws {
-        let (client, sender, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let claimedSHA = FingerprintCache.sha256Hex(of: Data("other".utf8))
-        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: claimedSHA)
-
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: claimedSHA).toPropertyList())
-        try await Task.sleep(for: .milliseconds(100))
-
-        #expect(!client.hasFingerprint)
-        #expect(cache.url(sha256: claimedSHA) == nil)
-    }
-
-    @Test("an error reply re-arms the fingerprint pull so a later context retries")
-    func fingerprintErrorReplyReArms() async throws {
-        let (client, sender, _, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
-        let meta = Self.fingerprintMeta(sha256: sha)
-
-        sender.nextReply = [:]
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(!client.hasFingerprint)
-        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
-
-        sender.nextReply = nil
-        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(client.hasFingerprint)
-    }
-
-    @Test("a transport error re-arms the fingerprint pull so a later context retries")
-    func fingerprintTransportErrorReArms() async throws {
-        let (client, sender, _, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
-        let meta = Self.fingerprintMeta(sha256: sha)
-
-        sender.nextError = WatchMessageError.notReachable
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(!client.hasFingerprint)
-        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
-
-        sender.nextError = nil
-        sender.replyProvider = Self.serveFingerprint(Self.fingerprintData, sha256: sha)
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(client.hasFingerprint)
-    }
-
-    @Test("an in-flight fingerprint pull is not restarted by a repeated context")
-    func fingerprintPullDeduplicates() async throws {
-        let (client, sender, _, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let meta = Self.fingerprintMeta(sha256: "abc")
-
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-        client.handleReceivedApplicationContext(try meta.toPropertyList())
-
-        #expect(Self.fingerprintChunkRequests(sender.sentMessages) == [0])
-    }
-
-    @Test("session end clears the fingerprint")
-    func sessionEndClearsFingerprint() async throws {
-        let (client, _, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
-        try cache.save(Self.fingerprintData, sha256: sha)
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
-        #expect(client.hasFingerprint)
-
-        client.handleReceivedApplicationContext(SessionEndedSignal.propertyList())
-
-        #expect(!client.hasFingerprint)
+        #expect(!fixture.client.hasFingerprint)
+        #expect(fixture.client.cues.isEmpty)
     }
 
     @Test("a session switch to one without a fingerprint hides the cached one")
     func sessionSwitchDropsFingerprint() async throws {
-        let (client, _, cache, dir) = try makeFingerprintClient()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let sha = FingerprintCache.sha256Hex(of: Self.fingerprintData)
-        try cache.save(Self.fingerprintData, sha256: sha)
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: sha).toPropertyList())
-        #expect(client.hasFingerprint)
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        let fingerprintSHA = CatalogFileCache.sha256Hex(of: Self.fingerprintData)
+        try #require(fixture.caches[.fingerprint]).save(Self.fingerprintData, sha256: fingerprintSHA)
+        fixture.client.handleReceivedApplicationContext(try Self.catalogMeta(fingerprintSHA: fingerprintSHA).toPropertyList())
+        #expect(fixture.client.hasFingerprint)
 
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+        fixture.client.handleReceivedApplicationContext(try Self.catalogMeta(fingerprintSHA: nil).toPropertyList())
 
-        #expect(!client.hasFingerprint)
-        #expect(cache.url(sha256: sha) != nil)
+        #expect(!fixture.client.hasFingerprint)
+        #expect(fixture.caches[.fingerprint]?.url(sha256: fingerprintSHA) != nil)
     }
 
-    @Test("snapshot updates keep the metadata fingerprint fields")
-    func snapshotKeepsFingerprintFields() async throws {
-        let (client, _, _, dir) = try makeFingerprintClient()
+    @Test("snapshot updates keep the metadata fingerprint and catalog fields")
+    func snapshotKeepsCatalogFields() async throws {
+        let (client, _, dir) = try makeClient()
         defer { try? FileManager.default.removeItem(at: dir) }
         let sessionID = UUID()
-        let meta = Self.fingerprintMeta(sessionID: sessionID, sha256: "abc", size: 1234)
+        let meta = Self.catalogMeta(sessionID: sessionID, subtitleSHA: "srt", fingerprintSHA: "abc")
         client.handleReceivedApplicationContext(try meta.toPropertyList())
 
         let snapshot = PlaybackSnapshot(
@@ -1304,7 +849,8 @@ struct WatchSessionClientTests {
 
         #expect(client.metadata?.currentTime == 42)
         #expect(client.metadata?.fingerprintSHA == "abc")
-        #expect(client.metadata?.fingerprintSize == 1234)
+        #expect(client.metadata?.catalogID == Self.catalogID)
+        #expect(client.metadata?.subtitleSHA == "srt")
     }
 
     // MARK: - Cinema listen
@@ -1336,17 +882,17 @@ struct WatchSessionClientTests {
     }
 
     private func makeListeningClient() throws -> (WatchSessionClient, MockSender, FakeListener, URL) {
-        let (client, sender, cache, dir) = try makeFingerprintClient()
-        try cache.save(Self.fingerprintData, sha256: Self.listeningSHA)
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: Self.listeningSHA).toPropertyList())
+        let fixture = try makeCatalogClient()
+        try #require(fixture.caches[.fingerprint]).save(Self.fingerprintData, sha256: Self.listeningSHA)
+        fixture.client.handleReceivedApplicationContext(try Self.catalogMeta(fingerprintSHA: Self.listeningSHA).toPropertyList())
         let listener = FakeListener()
-        client.makeListener = { _ in listener }
-        client.makeListenID = { testListenID }
-        sender.sentMessages = []
-        return (client, sender, listener, dir)
+        fixture.client.makeListener = { _ in listener }
+        fixture.client.makeListenID = { testListenID }
+        fixture.sender.sentMessages = []
+        return (fixture.client, fixture.sender, listener, fixture.dir)
     }
 
-    private static let listeningSHA = FingerprintCache.sha256Hex(of: fingerprintData)
+    private static let listeningSHA = CatalogFileCache.sha256Hex(of: fingerprintData)
 
     private static let listenMatch = FingerprintMatch(
         trackTime: 612.5,
@@ -1598,7 +1144,7 @@ struct WatchSessionClientTests {
 
     @Test("without a fingerprint the watch source fails and the phone keeps listening")
     func startWithoutFingerprintFailsWatch() throws {
-        let (client, sender, _, dir) = try makeFingerprintClient()
+        let (client, sender, dir) = try makeClient()
         defer { try? FileManager.default.removeItem(at: dir) }
         client.makeListenID = { testListenID }
 
@@ -1742,7 +1288,7 @@ struct WatchSessionClientTests {
 
         client.startListening()
         listener.send(.matched(Self.listenMatch))
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+        client.handleReceivedApplicationContext(try Self.catalogMeta(fingerprintSHA: nil).toPropertyList())
 
         #expect(client.listenPanel == ListenPanelState())
         #expect(Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: testListenID)))
@@ -1755,7 +1301,7 @@ struct WatchSessionClientTests {
         let sessionID = try #require(client.metadata?.sessionID)
 
         client.startListening()
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sessionID: sessionID, sha256: "other").toPropertyList())
+        client.handleReceivedApplicationContext(try Self.catalogMeta(sessionID: sessionID, fingerprintSHA: "other").toPropertyList())
 
         #expect(listener.cancelCount == 1)
         #expect(client.listenPanel == ListenPanelState())
@@ -1769,7 +1315,7 @@ struct WatchSessionClientTests {
         let sessionID = try #require(client.metadata?.sessionID)
 
         client.startListening()
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sessionID: sessionID, sha256: nil).toPropertyList())
+        client.handleReceivedApplicationContext(try Self.catalogMeta(sessionID: sessionID, fingerprintSHA: nil).toPropertyList())
 
         #expect(listener.cancelCount == 1)
         #expect(client.listenPanel == ListenPanelState())
@@ -1791,10 +1337,10 @@ struct WatchSessionClientTests {
 
     @Test("the first metadata does not send a cancel to the phone")
     func firstMetadataSendsNoCancel() throws {
-        let (client, sender, _, dir) = try makeFingerprintClient()
+        let (client, sender, dir) = try makeClient()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        client.handleReceivedApplicationContext(try Self.fingerprintMeta(sha256: nil).toPropertyList())
+        client.handleReceivedApplicationContext(try Self.catalogMeta(fingerprintSHA: nil).toPropertyList())
 
         #expect(!Self.sentCommands(sender.sentMessages).contains(.cancelListening(listenID: testListenID)))
     }

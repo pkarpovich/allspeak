@@ -117,6 +117,11 @@ struct DocumentsStorage: Sendable {
         return legacySyncFileSuffixes.contains { filename.hasSuffix($0) }
     }
 
+    func hasCatalogSidecar(sessionID: UUID) -> Bool {
+        let url = sessionDir(for: sessionID).appendingPathComponent(CatalogSidecar.filename)
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
     func removeSessionDir(_ id: UUID) throws {
         let dir = sessionDir(for: id)
         if FileManager.default.fileExists(atPath: dir.path) {

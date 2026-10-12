@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import Allspeak
 
-@Suite("FingerprintCache", .tags(.storage))
+@Suite("CatalogFileCache", .tags(.storage))
 @MainActor
-struct FingerprintCacheTests {
+struct CatalogFileCacheTests {
 
     private func makeDir() -> URL {
         FileManager.default.temporaryDirectory
-            .appendingPathComponent("fingerprint-cache-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("catalog-file-cache-\(UUID().uuidString)", isDirectory: true)
     }
 
     private static func sample(_ seed: UInt8, count: Int = 4096) -> Data {
@@ -19,9 +19,9 @@ struct FingerprintCacheTests {
     func saveAndLookup() throws {
         let dir = makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let cache = try FingerprintCache(baseURL: dir)
+        let cache = try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog")
         let data = Self.sample(1)
-        let sha = FingerprintCache.sha256Hex(of: data)
+        let sha = CatalogFileCache.sha256Hex(of: data)
 
         let saved = try cache.save(data, sha256: sha)
 
@@ -34,9 +34,9 @@ struct FingerprintCacheTests {
     func shaCaseInsensitive() throws {
         let dir = makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let cache = try FingerprintCache(baseURL: dir)
+        let cache = try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog")
         let data = Self.sample(2)
-        let sha = FingerprintCache.sha256Hex(of: data)
+        let sha = CatalogFileCache.sha256Hex(of: data)
 
         try cache.save(data, sha256: sha.uppercased())
 
@@ -48,11 +48,11 @@ struct FingerprintCacheTests {
     func evictsPrevious() throws {
         let dir = makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let cache = try FingerprintCache(baseURL: dir)
+        let cache = try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog")
         let first = Self.sample(3)
         let second = Self.sample(4)
-        let firstSHA = FingerprintCache.sha256Hex(of: first)
-        let secondSHA = FingerprintCache.sha256Hex(of: second)
+        let firstSHA = CatalogFileCache.sha256Hex(of: first)
+        let secondSHA = CatalogFileCache.sha256Hex(of: second)
 
         try cache.save(first, sha256: firstSHA)
         try cache.save(second, sha256: secondSHA)
@@ -68,10 +68,10 @@ struct FingerprintCacheTests {
         let dir = makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let data = Self.sample(5)
-        let sha = FingerprintCache.sha256Hex(of: data)
-        try FingerprintCache(baseURL: dir).save(data, sha256: sha)
+        let sha = CatalogFileCache.sha256Hex(of: data)
+        try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog").save(data, sha256: sha)
 
-        let reloaded = try FingerprintCache(baseURL: dir)
+        let reloaded = try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog")
 
         let url = try #require(reloaded.url(sha256: sha))
         #expect(try Data(contentsOf: url) == data)
@@ -81,11 +81,11 @@ struct FingerprintCacheTests {
     func rejectsShaMismatch() throws {
         let dir = makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let cache = try FingerprintCache(baseURL: dir)
+        let cache = try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog")
         let data = Self.sample(6)
-        let wrongSHA = FingerprintCache.sha256Hex(of: Self.sample(7))
+        let wrongSHA = CatalogFileCache.sha256Hex(of: Self.sample(7))
 
-        #expect(throws: FingerprintCache.CacheError.shaMismatch) {
+        #expect(throws: CatalogFileCache.CacheError.shaMismatch) {
             try cache.save(data, sha256: wrongSHA)
         }
         #expect(cache.url(sha256: wrongSHA) == nil)
@@ -94,6 +94,6 @@ struct FingerprintCacheTests {
 
     @Test("sha256Hex matches the known digest of an empty input")
     func knownDigest() {
-        #expect(FingerprintCache.sha256Hex(of: Data()) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        #expect(CatalogFileCache.sha256Hex(of: Data()) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
     }
 }

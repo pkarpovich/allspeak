@@ -10,9 +10,6 @@ struct SessionsView: View {
     @State private var repository = SessionRepository()
     @State private var catalogStore: CatalogStore
     @State private var renameTarget: RenameTarget?
-    @State private var isPresentingCreate = false
-    @State private var editTarget: EditTarget?
-    @State private var tracksTarget: TracksTarget?
     @State private var syncTarget: SyncTarget?
 
     init(catalogStore: CatalogStore = .live()) {
@@ -29,25 +26,8 @@ struct SessionsView: View {
             .task { await catalogStore.loadCatalogIfNeeded() }
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Add session", systemImage: Icons.plus) {
-                        isPresentingCreate = true
-                    }
-                    .tint(Tokens.accent)
-                }
-            }
             .navigationDestination(for: NSManagedObjectID.self) { id in
                 PlayerView(sessionID: id)
-            }
-            .sheet(isPresented: $isPresentingCreate) {
-                CreateSessionView(mode: .new, repository: repository)
-            }
-            .sheet(item: $editTarget) { target in
-                CreateSessionView(mode: .edit(target.id), repository: repository)
-            }
-            .sheet(item: $tracksTarget) { target in
-                SessionEditView(sessionID: target.id, repository: repository)
             }
             .sheet(item: $syncTarget) { target in
                 CatalogSyncSheet(
@@ -94,7 +74,7 @@ struct SessionsView: View {
                 .font(.system(size: 17))
                 .kerning(-0.3)
                 .foregroundStyle(Tokens.text3)
-            Text("Tap + to add one before the screening")
+            Text("Add one from the Catalog tab")
                 .font(.system(size: 13))
                 .foregroundStyle(Tokens.text4)
                 .padding(.top, 4)
@@ -126,16 +106,6 @@ struct SessionsView: View {
                         .tint(Tokens.danger)
                     }
                     .contextMenu {
-                        Button {
-                            editTarget = EditTarget(id: id)
-                        } label: {
-                            Label("Edit", systemImage: Icons.pencil)
-                        }
-                        Button {
-                            tracksTarget = TracksTarget(id: id)
-                        } label: {
-                            Label("Tracks", systemImage: Icons.trackPicker)
-                        }
                         Button {
                             renameTarget = RenameTarget(id: id, draft: currentName)
                         } label: {
@@ -232,12 +202,4 @@ private struct SyncTarget: Identifiable {
 private struct RenameTarget: Identifiable {
     let id: NSManagedObjectID
     var draft: String
-}
-
-private struct EditTarget: Identifiable {
-    let id: NSManagedObjectID
-}
-
-private struct TracksTarget: Identifiable {
-    let id: NSManagedObjectID
 }

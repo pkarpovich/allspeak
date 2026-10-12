@@ -30,6 +30,10 @@
 	<false/>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
+	<key>AllspeakCatalogURL</key>
+	<string>$(ALLSPEAK_CATALOG_URL)</string>
+	<key>AllspeakCatalogReadToken</key>
+	<string>$(ALLSPEAK_CATALOG_READ_TOKEN)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allspeak listens briefly to the cinema audio so it can sync the dub track to what's playing on screen.</string>
 </dict>

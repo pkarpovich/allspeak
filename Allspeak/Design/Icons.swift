@@ -1,7 +1,6 @@
 import SwiftUI
 
 enum Icons {
-    static let plus           = "plus"
     static let chevronLeft    = "chevron.backward"
     static let chevronRight   = "chevron.right"
     static let chevronDown    = "chevron.down"

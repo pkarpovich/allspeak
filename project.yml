@@ -70,7 +70,6 @@ targets:
       - path: Allspeak/Models/Subtitle.swift
       - path: Allspeak/Watch/WireProtocol.swift
       - path: Allspeak/Watch/PlaybackSnapshot.swift
-      - path: Allspeak/Watch/CueCache.swift
       - path: Allspeak/Watch/WatchMessageSender.swift
       - path: Allspeak/Watch/WatchSessionClient.swift
       - path: Allspeak/Watch/WatchHaptics.swift
@@ -80,7 +79,12 @@ targets:
       - path: Allspeak/Watch/ComplicationState.swift
       - path: Allspeak/Watch/ComplicationState+Metadata.swift
       - path: Allspeak/Watch/FingerprintMatch.swift
-      - path: Allspeak/Watch/FingerprintCache.swift
+      - path: Allspeak/Watch/CatalogFileCache.swift
+      - path: Allspeak/Watch/WatchCatalogDownloader.swift
+      - path: Allspeak/Catalog/CatalogClient.swift
+      - path: Allspeak/Catalog/CatalogConfig.swift
+      - path: Allspeak/Catalog/CatalogModels.swift
+      - path: Allspeak/Models/SRTParser.swift
       - path: Allspeak/Watch/ListenPanelState.swift
     dependencies:
       - target: AllspeakWatchWidget

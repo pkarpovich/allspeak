@@ -223,68 +223,6 @@ struct WatchSessionHostTests {
         ))
     }
 
-    @Test("currentCueBundle reflects loaded subtitles")
-    func cueBundleFromCoordinator() throws {
-        let (coordinator, _, audio) = try makeRunningSession()
-        defer {
-            coordinator.endSession()
-            try? FileManager.default.removeItem(at: audio)
-        }
-        guard let bundle = coordinator.currentCueBundle() else {
-            Issue.record("expected cue bundle after startSession")
-            return
-        }
-        #expect(bundle.cues == Self.cues)
-        #expect(bundle.revision == coordinator.revision)
-    }
-
-    @Test("cueChunk slices reassemble into the full cue bundle")
-    func cueChunkReassembles() throws {
-        let (coordinator, host, audio) = try makeRunningSession()
-        defer {
-            coordinator.endSession()
-            try? FileManager.default.removeItem(at: audio)
-        }
-        let bundle = try #require(coordinator.currentCueBundle())
-        let first = try #require(host.cueChunk(sessionID: bundle.sessionID, revision: bundle.revision, index: 0))
-        #expect(first.totalChunks >= 1)
-
-        var data = Data()
-        for index in 0..<first.totalChunks {
-            let chunk = try #require(host.cueChunk(sessionID: bundle.sessionID, revision: bundle.revision, index: index))
-            #expect(chunk.data.count <= WatchSessionHost.cueChunkSize)
-            #expect(chunk.totalChunks == first.totalChunks)
-            data.append(chunk.data)
-        }
-        let decoded = try CueBundle(compressed: data)
-        #expect(decoded == bundle)
-    }
-
-    @Test("cueChunk returns nil for an unknown session or revision")
-    func cueChunkRejectsUnknownSession() throws {
-        let (coordinator, host, audio) = try makeRunningSession()
-        defer {
-            coordinator.endSession()
-            try? FileManager.default.removeItem(at: audio)
-        }
-        let bundle = try #require(coordinator.currentCueBundle())
-        #expect(host.cueChunk(sessionID: UUID(), revision: bundle.revision, index: 0) == nil)
-        #expect(host.cueChunk(sessionID: bundle.sessionID, revision: bundle.revision + 1, index: 0) == nil)
-    }
-
-    @Test("cueChunk returns nil for an out-of-range index")
-    func cueChunkRejectsOutOfRange() throws {
-        let (coordinator, host, audio) = try makeRunningSession()
-        defer {
-            coordinator.endSession()
-            try? FileManager.default.removeItem(at: audio)
-        }
-        let bundle = try #require(coordinator.currentCueBundle())
-        let first = try #require(host.cueChunk(sessionID: bundle.sessionID, revision: bundle.revision, index: 0))
-        #expect(host.cueChunk(sessionID: bundle.sessionID, revision: bundle.revision, index: first.totalChunks) == nil)
-        #expect(host.cueChunk(sessionID: bundle.sessionID, revision: bundle.revision, index: -1) == nil)
-    }
-
     @Test("broadcasts on inactive WCSession are silent no-ops")
     func broadcastWithoutActivationIsNoOp() throws {
         let (coordinator, host, audio) = try makeRunningSession()
@@ -504,7 +442,7 @@ struct WatchSessionHostTests {
     private static let fingerprintData = Data((0..<75_000).map { UInt8(truncatingIfNeeded: $0 * 7) })
     private static let fingerprintSHA = "ABCDEF0123"
 
-    @Test("currentMetadata carries the session fingerprint sha (lowercased) and file size")
+    @Test("currentMetadata carries the session fingerprint sha lowercased")
     func metadataCarriesFingerprint() async throws {
         let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
         defer {
@@ -513,7 +451,6 @@ struct WatchSessionHostTests {
         }
         let metadata = try #require(fixture.coordinator.currentMetadata())
         #expect(metadata.fingerprintSHA == "abcdef0123")
-        #expect(metadata.fingerprintSize == Self.fingerprintData.count)
     }
 
     @Test("currentMetadata has no fingerprint without a sidecar or when the file is missing")
@@ -525,8 +462,6 @@ struct WatchSessionHostTests {
         }
         let plainMeta = try #require(plain.coordinator.currentMetadata())
         #expect(plainMeta.fingerprintSHA == nil)
-        #expect(plainMeta.fingerprintSize == nil)
-        #expect(plain.host.fingerprintChunk(sha256: "abcdef0123", index: 0) == nil)
 
         let missing = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, nil))
         defer {
@@ -535,7 +470,6 @@ struct WatchSessionHostTests {
         }
         let missingMeta = try #require(missing.coordinator.currentMetadata())
         #expect(missingMeta.fingerprintSHA == nil)
-        #expect(missing.host.fingerprintChunk(sha256: "abcdef0123", index: 0) == nil)
     }
 
     @Test("refreshing the active session picks up a fingerprint added by a catalog sync")
@@ -552,44 +486,6 @@ struct WatchSessionHostTests {
 
         let metadata = try #require(fixture.coordinator.currentMetadata())
         #expect(metadata.fingerprintSHA == "abcdef0123")
-        #expect(metadata.fingerprintSize == Self.fingerprintData.count)
-    }
-
-    @Test("fingerprintChunk slices the first, middle and last chunk and they reassemble")
-    func fingerprintChunkSlices() async throws {
-        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        let size = WatchSessionHost.fingerprintChunkSize
-        let first = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 0))
-        let middle = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 1))
-        let last = try #require(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 2))
-
-        #expect(first.totalChunks == 3)
-        #expect(first.sha256 == "abcdef0123")
-        #expect(first.index == 0)
-        #expect(first.data == Self.fingerprintData.subdata(in: 0..<size))
-        #expect(middle.index == 1)
-        #expect(middle.data == Self.fingerprintData.subdata(in: size..<(2 * size)))
-        #expect(last.index == 2)
-        #expect(last.data == Self.fingerprintData.subdata(in: (2 * size)..<Self.fingerprintData.count))
-        #expect(first.data + middle.data + last.data == Self.fingerprintData)
-    }
-
-    @Test("fingerprintChunk returns nil for a bad index or an unknown sha")
-    func fingerprintChunkRejectsBadRequests() async throws {
-        let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))
-        defer {
-            fixture.coordinator.endSession()
-            try? FileManager.default.removeItem(at: fixture.root)
-        }
-        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: -1) == nil)
-        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 3) == nil)
-        #expect(fixture.host.fingerprintChunk(sha256: "ffff", index: 0) == nil)
-        #expect(fixture.host.fingerprintChunk(sha256: "abcdef0123", index: 0) != nil)
-        #expect(fixture.host.fingerprintChunk(sha256: "ffff", index: 0) == nil)
     }
 
     @Test("sendListenUpdate pushes a listenUpdate payload only when reachable")

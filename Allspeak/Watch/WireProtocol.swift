@@ -6,9 +6,8 @@ import Foundation
 // watchOS remote (`AllspeakWatch`). The types and their property-list
 // encodings MUST stay binary-compatible between the two targets that share
 // this source file — if you change a type here, both apps need to be
-// reinstalled together. Bumping the in-payload `revision` field on
-// SessionMetadata / CueBundle is how we signal that cached cues are stale
-// and should be replaced.
+// reinstalled together. The in-payload `revision` field on SessionMetadata
+// orders snapshots against the metadata they belong to.
 //
 // Commands (Watch -> iPhone):
 //
@@ -21,21 +20,6 @@ import Foundation
 //   .setVolume(Float)                 watch Digital Crown -> AVAudioPlayer
 //                                     volume (0...1, clamped); throttled
 //                                     trailing-edge on the watch side
-//   .requestCueChunk(sessionID:,      watch-initiated pull of one slice of the
-//                    revision:,       gzipped cue bundle (see the CueBundle
-//                    index:)          transport note below). The watch loops
-//                                     index 0..<totalChunks; the host replies
-//                                     with a CueChunkReply instead of a
-//                                     PlaybackSnapshot. A cache miss on the
-//                                     watch (app reset / Application Support
-//                                     cleanup) or a revision bump re-pulls.
-//   .requestFingerprintChunk(sha256:, watch-initiated pull of one slice of the
-//                            index:)  session's ShazamKit catalog file, keyed
-//                                     by the sha256 announced in metadata. The
-//                                     host replies with a FingerprintChunkReply
-//                                     (or an empty dict for an unknown sha or a
-//                                     missing file); the watch loops
-//                                     0..<totalChunks and caches the file.
 //   .startListening(listenID:)        start the phone listener for the active
 //                                     session's fingerprint; the phone then
 //                                     pushes ListenUpdates (see below) tagged
@@ -50,6 +34,9 @@ import Foundation
 //              matchDate:, source:,   outputLatency and seeks with the sync
 //              sha256:)               source, only when sessionID is still the
 //                                     active session and sha256 its fingerprint
+//   .watchDownload(WatchDownloadEvent) a phase of the watch's catalog download
+//                                     (subtitle or fingerprint); the phone only
+//                                     logs it
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -61,9 +48,14 @@ import Foundation
 //                                          progress extrapolation; decodeIfPresent,
 //                                          nil from older builds without an anchor)
 //   SessionMetadata.fingerprintSHA: String?  (sha256 of the session's ShazamKit
-//   SessionMetadata.fingerprintSize: Int?     catalog; decodeIfPresent, nil when
+//                                             catalog; decodeIfPresent, nil when
 //                                             the session has none or the build
 //                                             predates cinema listen)
+//   SessionMetadata.catalogID: UUID?         (allspeak-catalog session id and the
+//   SessionMetadata.subtitleSHA: String?      sha256 of its subtitle; the watch
+//                                             downloads the subtitle and the
+//                                             fingerprint from the catalog by
+//                                             these, see WatchCatalogDownloader)
 //
 // Transports (one-way arrows reflect actual reachability semantics):
 //
@@ -73,23 +65,6 @@ import Foundation
 //       sync with the iPhone-side selection, and on playback state changes
 //       (play/pause/seek/skip) so the latest-wins serverDate anchor is
 //       fresh on the watch's next wake.
-//
-//   Watch  <--sendMessage (reply)------- iPhone  CueBundle (gzipped, chunked)
-//       the watch PULLS the bundle: it sends requestCueChunk(index:) and the
-//       phone replies with a CueChunkReply slice (~30KB raw Data, under the
-//       64KB sendMessage cap). The watch concatenates 0..<totalChunks, runs
-//       CueBundle(compressed:), and caches the result under Application
-//       Support so a watch restart does not re-pull. sendMessage is the only
-//       channel that works in BOTH the Simulator and on device; transferFile
-//       is unreliable in the Simulator and stalls in the device FIFO queue.
-//       Tracks are NOT in the bundle — switching tracks does not invalidate
-//       the cue cache (subtitle timeline is shared across all tracks).
-//
-//   Watch  <--sendMessage (reply)------- iPhone  fingerprint file (chunked)
-//       the same pull as the cue bundle: requestFingerprintChunk(index:) is
-//       answered with a FingerprintChunkReply slice (~30KB raw Data). The watch
-//       concatenates 0..<totalChunks, checks the sha256 and keeps only the
-//       latest file in FingerprintCache (Application Support).
 //
 //   iPhone --sendMessage (no reply)-----> Watch   PlaybackSnapshot
 //       fire-and-forget, 1Hz while reachable + playing; dropped silently
@@ -104,8 +79,8 @@ import Foundation
 //       when nil, so older and newer builds decode each other.
 //
 //   Watch  --sendMessage (with reply)---> iPhone  WatchCommand
-//       reply payload is a PlaybackSnapshot (or a CueChunkReply for
-//       requestCueChunk, a FingerprintChunkReply for requestFingerprintChunk) so the watch stays fresh after every user action;
+//       reply payload is a PlaybackSnapshot so the watch stays fresh after
+//       every user action;
 //       applySync replies with PlaybackSnapshot.empty when it did not seek
 //       this is the only path that wakes the iOS app from background
 //
@@ -116,9 +91,9 @@ import Foundation
 // The JSON-inside-Data wrapper exists because WCSession dictionaries are
 // property-list-only (no nested Codable), and a single discriminator key
 // lets the receiver route to the correct decoder without sniffing fields.
-// CueChunkReply and FingerprintChunkReply do not use this wrapper — they are
-// flat property-list dicts carrying the raw slice as `Data` (no base64
-// inflation).
+//
+// Files (subtitle, fingerprint) never travel over WatchConnectivity: the watch
+// downloads them from allspeak-catalog with URLSession.
 //
 // Adding a new command:
 //   1. Add a case to `WatchCommand` + its `Kind` discriminator.
@@ -138,12 +113,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case seek(time: Double)
     case switchTrack(id: UUID)
     case setVolume(Float)
-    case requestCueChunk(sessionID: UUID, revision: Int, index: Int)
-    case requestFingerprintChunk(sha256: String, index: Int)
     case startListening(listenID: UUID)
     case cancelListening(listenID: UUID)
     case listenEvent(ListenUpdate)
     case applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String)
+    case watchDownload(WatchDownloadEvent)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -152,14 +126,13 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case trackID
         case volume
         case sessionID
-        case revision
-        case index
         case sha256
         case update
         case trackTime
         case matchDate
         case source
         case listenID
+        case download
     }
 
     private enum Kind: String, Codable {
@@ -170,12 +143,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case seek
         case switchTrack
         case setVolume
-        case requestCueChunk
-        case requestFingerprintChunk
         case startListening
         case cancelListening
         case listenEvent
         case applySync
+        case watchDownload
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -199,15 +171,6 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .setVolume(let volume):
             try container.encode(Kind.setVolume, forKey: .kind)
             try container.encode(volume, forKey: .volume)
-        case .requestCueChunk(let sessionID, let revision, let index):
-            try container.encode(Kind.requestCueChunk, forKey: .kind)
-            try container.encode(sessionID, forKey: .sessionID)
-            try container.encode(revision, forKey: .revision)
-            try container.encode(index, forKey: .index)
-        case .requestFingerprintChunk(let sha256, let index):
-            try container.encode(Kind.requestFingerprintChunk, forKey: .kind)
-            try container.encode(sha256, forKey: .sha256)
-            try container.encode(index, forKey: .index)
         case .startListening(let listenID):
             try container.encode(Kind.startListening, forKey: .kind)
             try container.encode(listenID, forKey: .listenID)
@@ -224,6 +187,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
             try container.encode(matchDate, forKey: .matchDate)
             try container.encode(source, forKey: .source)
             try container.encode(sha256, forKey: .sha256)
+        case .watchDownload(let event):
+            try container.encode(Kind.watchDownload, forKey: .kind)
+            try container.encode(event, forKey: .download)
         }
     }
 
@@ -245,17 +211,6 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .switchTrack(id: try container.decode(UUID.self, forKey: .trackID))
         case .setVolume:
             self = .setVolume(try container.decode(Float.self, forKey: .volume))
-        case .requestCueChunk:
-            self = .requestCueChunk(
-                sessionID: try container.decode(UUID.self, forKey: .sessionID),
-                revision: try container.decode(Int.self, forKey: .revision),
-                index: try container.decode(Int.self, forKey: .index)
-            )
-        case .requestFingerprintChunk:
-            self = .requestFingerprintChunk(
-                sha256: try container.decode(String.self, forKey: .sha256),
-                index: try container.decode(Int.self, forKey: .index)
-            )
         case .startListening:
             self = .startListening(listenID: try container.decode(UUID.self, forKey: .listenID))
         case .cancelListening:
@@ -270,6 +225,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
                 source: try container.decode(ListenSource.self, forKey: .source),
                 sha256: try container.decode(String.self, forKey: .sha256)
             )
+        case .watchDownload:
+            self = .watchDownload(try container.decode(WatchDownloadEvent.self, forKey: .download))
         }
     }
 }
@@ -291,7 +248,8 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let activeTrackID: UUID?
     let serverDate: Date?
     let fingerprintSHA: String?
-    let fingerprintSize: Int?
+    let catalogID: UUID?
+    let subtitleSHA: String?
 
     init(
         sessionID: UUID,
@@ -305,7 +263,8 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         activeTrackID: UUID? = nil,
         serverDate: Date? = nil,
         fingerprintSHA: String? = nil,
-        fingerprintSize: Int? = nil
+        catalogID: UUID? = nil,
+        subtitleSHA: String? = nil
     ) {
         self.sessionID = sessionID
         self.revision = revision
@@ -318,12 +277,13 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.activeTrackID = activeTrackID
         self.serverDate = serverDate
         self.fingerprintSHA = fingerprintSHA
-        self.fingerprintSize = fingerprintSize
+        self.catalogID = catalogID
+        self.subtitleSHA = subtitleSHA
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionID, revision, title, duration, cueCount, isPlaying, currentTime, tracks, activeTrackID, serverDate
-        case fingerprintSHA, fingerprintSize
+        case fingerprintSHA, catalogID, subtitleSHA
     }
 
     init(from decoder: any Decoder) throws {
@@ -339,29 +299,40 @@ struct SessionMetadata: Codable, Equatable, Sendable {
         self.activeTrackID = try container.decodeIfPresent(UUID.self, forKey: .activeTrackID)
         self.serverDate = try container.decodeIfPresent(Date.self, forKey: .serverDate)
         self.fingerprintSHA = try container.decodeIfPresent(String.self, forKey: .fingerprintSHA)
-        self.fingerprintSize = try container.decodeIfPresent(Int.self, forKey: .fingerprintSize)
+        self.catalogID = try container.decodeIfPresent(UUID.self, forKey: .catalogID)
+        self.subtitleSHA = try container.decodeIfPresent(String.self, forKey: .subtitleSHA)
     }
 }
 
-struct CueBundle: Codable, Equatable, Sendable {
-    let sessionID: UUID
-    let revision: Int
-    let cues: [Subtitle]
-}
+struct WatchDownloadEvent: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case subtitle
+        case fingerprint
+    }
 
-// One slice of a gzipped CueBundle, sent as the reply to requestCueChunk. The
-// watch pulls index 0..<totalChunks over sendMessage (each a request/reply, so
-// a lost chunk is naturally retried), concatenates the raw slices in order, and
-// reconstructs the bundle with CueBundle(compressed:). transferFile is not used
-// for cues - it is unreliable in the Simulator and stalls in the FIFO queue on
-// device. `data` rides the property list as raw Data (no base64 inflation); the
-// 30KB chunk size keeps each reply well under the 64KB sendMessage cap.
-struct CueChunkReply: Equatable, Sendable {
-    let sessionID: UUID
-    let revision: Int
-    let index: Int
-    let totalChunks: Int
-    let data: Data
+    enum Phase: String, Codable, Sendable {
+        case start
+        case done
+        case failed
+    }
+
+    let kind: Kind
+    let phase: Phase
+    let sha256: String
+    let attempt: Int
+    let bytes: Int?
+    let seconds: Double?
+    let error: String?
+
+    init(kind: Kind, phase: Phase, sha256: String, attempt: Int, bytes: Int? = nil, seconds: Double? = nil, error: String? = nil) {
+        self.kind = kind
+        self.phase = phase
+        self.sha256 = sha256
+        self.attempt = attempt
+        self.bytes = bytes
+        self.seconds = seconds
+        self.error = error
+    }
 }
 
 struct ListenUpdate: Codable, Equatable, Sendable {
@@ -454,13 +425,6 @@ struct ListenUpdate: Codable, Equatable, Sendable {
     }
 }
 
-struct FingerprintChunkReply: Equatable, Sendable {
-    let sha256: String
-    let index: Int
-    let totalChunks: Int
-    let data: Data
-}
-
 enum WirePayloadKey {
     static let payload = "payload"
     static let kind = "kind"
@@ -471,28 +435,7 @@ enum WirePayloadKind: String {
     case snapshot
     case metadata
     case sessionEnded
-    case cueChunk
-    case fingerprintChunk
     case listenUpdate
-}
-
-enum CueChunkKey {
-    static let sessionID = "sessionID"
-    static let revision = "revision"
-    static let index = "index"
-    static let totalChunks = "totalChunks"
-    static let data = "data"
-}
-
-enum FingerprintChunkKey {
-    static let sha256 = "sha256"
-    static let index = "index"
-    static let totalChunks = "totalChunks"
-    static let data = "data"
-}
-
-enum FingerprintFileTransfer {
-    static let sha256Key = "fingerprintSHA256"
 }
 
 enum SessionEndedSignal {
@@ -622,69 +565,3 @@ extension ListenUpdate {
     }
 }
 
-extension CueChunkReply {
-    func toPropertyList() -> [String: Any] {
-        [
-            WirePayloadKey.kind: WirePayloadKind.cueChunk.rawValue,
-            CueChunkKey.sessionID: sessionID.uuidString,
-            CueChunkKey.revision: revision,
-            CueChunkKey.index: index,
-            CueChunkKey.totalChunks: totalChunks,
-            CueChunkKey.data: data,
-        ]
-    }
-
-    init(propertyList: [String: Any]) throws {
-        guard (propertyList[WirePayloadKey.kind] as? String) == WirePayloadKind.cueChunk.rawValue else {
-            throw WireCodingError.kindMismatch
-        }
-        guard let sessionIDString = propertyList[CueChunkKey.sessionID] as? String,
-              let sessionID = UUID(uuidString: sessionIDString),
-              let revision = propertyList[CueChunkKey.revision] as? Int,
-              let index = propertyList[CueChunkKey.index] as? Int,
-              let totalChunks = propertyList[CueChunkKey.totalChunks] as? Int,
-              let data = propertyList[CueChunkKey.data] as? Data
-        else {
-            throw WireCodingError.missingPayload
-        }
-        self.init(sessionID: sessionID, revision: revision, index: index, totalChunks: totalChunks, data: data)
-    }
-}
-
-extension FingerprintChunkReply {
-    func toPropertyList() -> [String: Any] {
-        [
-            WirePayloadKey.kind: WirePayloadKind.fingerprintChunk.rawValue,
-            FingerprintChunkKey.sha256: sha256,
-            FingerprintChunkKey.index: index,
-            FingerprintChunkKey.totalChunks: totalChunks,
-            FingerprintChunkKey.data: data,
-        ]
-    }
-
-    init(propertyList: [String: Any]) throws {
-        guard (propertyList[WirePayloadKey.kind] as? String) == WirePayloadKind.fingerprintChunk.rawValue else {
-            throw WireCodingError.kindMismatch
-        }
-        guard let sha256 = propertyList[FingerprintChunkKey.sha256] as? String,
-              let index = propertyList[FingerprintChunkKey.index] as? Int,
-              let totalChunks = propertyList[FingerprintChunkKey.totalChunks] as? Int,
-              let data = propertyList[FingerprintChunkKey.data] as? Data
-        else {
-            throw WireCodingError.missingPayload
-        }
-        self.init(sha256: sha256, index: index, totalChunks: totalChunks, data: data)
-    }
-}
-
-extension CueBundle {
-    func compressed() throws -> Data {
-        let json = try wireJSONEncoder.encode(self)
-        return try (json as NSData).compressed(using: .zlib) as Data
-    }
-
-    init(compressed data: Data) throws {
-        let json = try (data as NSData).decompressed(using: .zlib) as Data
-        self = try wireJSONDecoder.decode(CueBundle.self, from: json)
-    }
-}

@@ -1548,6 +1548,31 @@ struct PlaybackCoordinatorTests {
         try readJSONLines(try #require(log.currentFileURL)).filter { $0["event"] as? String == "listen" }
     }
 
+    @Test("currentMetadata carries the catalog id and subtitle sha from the sidecar")
+    func currentMetadataCarriesCatalogSource() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        let sessionUUID = try #require(fixture.coordinator.sessionUUID)
+        let sidecar = try CatalogSidecar.load(from: fixture.storage.sessionDir(for: sessionUUID))
+
+        let meta = try #require(fixture.coordinator.currentMetadata())
+
+        #expect(meta.catalogID == sidecar.serverID)
+        #expect(meta.subtitleSHA == "srt-sha")
+        #expect(meta.fingerprintSHA == "abc123")
+    }
+
+    @Test("currentMetadata has no catalog identity for a session without a sidecar")
+    func currentMetadataWithoutSidecar() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: false)
+        defer { Self.tearDown(fixture) }
+
+        let meta = try #require(fixture.coordinator.currentMetadata())
+
+        #expect(meta.catalogID == nil)
+        #expect(meta.subtitleSHA == nil)
+    }
+
     @Test("startListening logs start, and a phone match logs trackTime, pos, delta and latency")
     func startListeningLogsStartAndMatch() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)
@@ -1929,6 +1954,22 @@ struct PlaybackCoordinatorTests {
         #expect(controller.livePosition == 0)
         let records = try fixture.log.currentFileURL.map { try Self.readTransportLines($0) } ?? []
         #expect(records.isEmpty)
+    }
+
+    @Test("a watch download event is logged as a download line with the track position")
+    func watchDownloadEventLogged() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.controller?.seek(to: 1.0)
+
+        fixture.coordinator.apply(.watchDownload(WatchDownloadEvent(kind: .subtitle, phase: .done, sha256: "srt-sha", attempt: 1, bytes: 120, seconds: 0.5)))
+
+        let logURL = try #require(fixture.log.currentFileURL)
+        let line = try #require(try Self.readJSONLines(logURL).last)
+        #expect(line["event"] as? String == "download")
+        #expect(line["kind"] as? String == "subtitle")
+        #expect(line["phase"] as? String == "done")
+        #expect(line["pos"] as? Double == 1.0)
     }
 
     @Test("watch listen events are logged with the watch source and not echoed back")

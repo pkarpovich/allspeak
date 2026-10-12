@@ -20,8 +20,7 @@ enum ListenSmoke {
             isPlaying: true,
             currentTime: 1800,
             serverDate: Date(),
-            fingerprintSHA: "smoke",
-            fingerprintSize: 0
+            fingerprintSHA: "smoke"
         )
         client.fingerprintURL = URL(fileURLWithPath: "/dev/null")
         client.makeListener = { [weak client] _ in

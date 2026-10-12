@@ -6,18 +6,9 @@ import Foundation
 final class WatchSessionHost: NSObject {
     static let shared = WatchSessionHost()
 
-    // One cue chunk is ~30KB of raw gzipped data; with the small dictionary
-    // overhead it stays well under the 64KB sendMessage payload cap.
-    static let cueChunkSize = 30_000
-    static let fingerprintChunkSize = 30_000
-
     private let coordinator: PlaybackCoordinator
     private let broadcastGate: SnapshotBroadcastGate
     private var session: WCSession?
-    // The compressed cue bundle for the session/revision the watch is currently
-    // pulling, cached so repeated chunk requests don't re-gzip the bundle.
-    private var cueChunkCache: (sessionID: UUID, revision: Int, data: Data)?
-    private var fingerprintChunkCache: (sha256: String, data: Data)?
     private var pendingListenUpdate: ListenUpdate?
     private var latestListenUpdate: ListenUpdate?
     private let incomingCommands: AsyncStream<IncomingCommand>.Continuation
@@ -48,13 +39,6 @@ final class WatchSessionHost: NSObject {
 
     private func process(_ incoming: IncomingCommand) {
         switch incoming.command {
-        case .requestCueChunk(let sessionID, let revision, let index):
-            incoming.reply(cueChunk(sessionID: sessionID, revision: revision, index: index)?.toPropertyList() ?? [:])
-        case .requestFingerprintChunk(let sha256, let index):
-            if index == 0 {
-                transferFingerprintFile(sha256: sha256)
-            }
-            incoming.reply(fingerprintChunk(sha256: sha256, index: index)?.toPropertyList() ?? [:])
         case .switchTrack:
             Task {
                 incoming.reply(Self.payload(await dispatch(incoming.command)))
@@ -107,65 +91,10 @@ final class WatchSessionHost: NSObject {
     }
 
     func broadcastSessionEnded() {
-        cueChunkCache = nil
-        fingerprintChunkCache = nil
         pendingListenUpdate = nil
         latestListenUpdate = nil
         guard let session, session.activationState == .activated else { return }
         try? session.updateApplicationContext(SessionEndedSignal.propertyList())
-    }
-
-    // Returns the requested slice of the current session's gzipped cue bundle,
-    // or nil when the request does not match the active session/revision (the
-    // watch treats an empty reply as a failure and retries).
-    func cueChunk(sessionID: UUID, revision: Int, index: Int) -> CueChunkReply? {
-        let compressed: Data
-        if let cached = cueChunkCache, cached.sessionID == sessionID, cached.revision == revision {
-            compressed = cached.data
-        } else {
-            guard let bundle = coordinator.currentCueBundle(),
-                  bundle.sessionID == sessionID,
-                  bundle.revision == revision,
-                  let data = try? bundle.compressed() else { return nil }
-            compressed = data
-            cueChunkCache = (sessionID, revision, data)
-        }
-        let size = Self.cueChunkSize
-        let total = max(1, (compressed.count + size - 1) / size)
-        guard index >= 0, index < total else { return nil }
-        let start = index * size
-        let end = Swift.min(start + size, compressed.count)
-        let slice = compressed.subdata(in: start..<end)
-        return CueChunkReply(sessionID: sessionID, revision: revision, index: index, totalChunks: total, data: slice)
-    }
-
-    func fingerprintChunk(sha256: String, index: Int) -> FingerprintChunkReply? {
-        let file: Data
-        if let cached = fingerprintChunkCache, cached.sha256 == sha256 {
-            file = cached.data
-        } else {
-            guard let fingerprint = coordinator.fingerprint,
-                  fingerprint.sha256 == sha256,
-                  let data = try? Data(contentsOf: fingerprint.url) else { return nil }
-            file = data
-            fingerprintChunkCache = (sha256, data)
-        }
-        let size = Self.fingerprintChunkSize
-        let total = max(1, (file.count + size - 1) / size)
-        guard index >= 0, index < total else { return nil }
-        let start = index * size
-        let end = Swift.min(start + size, file.count)
-        return FingerprintChunkReply(sha256: sha256, index: index, totalChunks: total, data: file.subdata(in: start..<end))
-    }
-
-    private func transferFingerprintFile(sha256: String) {
-        guard let session, session.activationState == .activated, session.isWatchAppInstalled else { return }
-        guard let fingerprint = coordinator.fingerprint, fingerprint.sha256 == sha256 else { return }
-        let alreadyQueued = session.outstandingFileTransfers.contains { transfer in
-            transfer.file.metadata?[FingerprintFileTransfer.sha256Key] as? String == sha256
-        }
-        if alreadyQueued { return }
-        session.transferFile(fingerprint.url, metadata: [FingerprintFileTransfer.sha256Key: sha256])
     }
 
     func dispatch(_ command: WatchCommand) async -> PlaybackSnapshot {
@@ -177,10 +106,6 @@ final class WatchSessionHost: NSObject {
     private func perform(_ command: WatchCommand) -> PlaybackSnapshot {
         switch command {
         case .switchTrack:
-            break
-        case .requestCueChunk, .requestFingerprintChunk:
-            // Served directly in process(_:) with a chunk reply; never
-            // routed here.
             break
         case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
             guard coordinator.applySync(

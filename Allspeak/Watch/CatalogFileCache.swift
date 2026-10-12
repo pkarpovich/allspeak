@@ -2,31 +2,33 @@ import CryptoKit
 import Foundation
 
 @MainActor
-final class FingerprintCache {
+final class CatalogFileCache {
     enum CacheError: Error, Equatable {
         case shaMismatch
     }
 
     let baseURL: URL
+    private let fileExtension: String
     private let fileManager: FileManager
 
-    init(baseURL: URL, fileManager: FileManager = .default) throws {
+    init(baseURL: URL, fileExtension: String, fileManager: FileManager = .default) throws {
         self.baseURL = baseURL
+        self.fileExtension = fileExtension
         self.fileManager = fileManager
         try fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
     }
 
-    static func defaultBaseURL(fileManager: FileManager = .default) throws -> URL {
+    static func defaultBaseURL(directory: String, fileManager: FileManager = .default) throws -> URL {
         let appSupport = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
         )
-        return appSupport.appendingPathComponent("fingerprint", isDirectory: true)
+        return appSupport.appendingPathComponent(directory, isDirectory: true)
     }
 
-    static func sha256Hex(of data: Data) -> String {
+    nonisolated static func sha256Hex(of data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -46,7 +48,7 @@ final class FingerprintCache {
     }
 
     private func fileURL(sha256: String) -> URL {
-        baseURL.appendingPathComponent("\(sha256).shazamcatalog")
+        baseURL.appendingPathComponent("\(sha256).\(fileExtension)")
     }
 
     private func evictStale(keeping filename: String) {
