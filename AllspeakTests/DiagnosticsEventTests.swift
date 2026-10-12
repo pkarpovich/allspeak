@@ -226,6 +226,24 @@ struct DiagnosticsEventTests {
         )
     }
 
+    @Test("download done logs kind, phase, sha, attempt, bytes, seconds and position")
+    func downloadDone() {
+        let event = WatchDownloadEvent(kind: .fingerprint, phase: .done, sha256: "885815be", attempt: 2, bytes: 3_220_498, seconds: 4.5)
+        #expect(
+            DiagnosticsEvent.download(event, pos: 61.25).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"download","kind":"fingerprint","phase":"done","sha":"885815be","attempt":2,"bytes":3220498,"seconds":4.5,"pos":61.25}"#
+        )
+    }
+
+    @Test("download failed logs the error and omits bytes and seconds")
+    func downloadFailed() {
+        let event = WatchDownloadEvent(kind: .subtitle, phase: .failed, sha256: "c6534d42", attempt: 1, error: "offline")
+        #expect(
+            DiagnosticsEvent.download(event, pos: 0).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"download","kind":"subtitle","phase":"failed","sha":"c6534d42","attempt":1,"error":"offline","pos":0}"#
+        )
+    }
+
     @Test("listen start logs source and position")
     func listenStart() {
         #expect(

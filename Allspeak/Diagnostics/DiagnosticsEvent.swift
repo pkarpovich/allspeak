@@ -72,6 +72,7 @@ enum DiagnosticsEvent: Sendable {
     case watch(reachable: Bool, pos: Double)
     case hall(key: String, name: String, cinema: String, pos: Double)
     case listen(Listen)
+    case download(WatchDownloadEvent, pos: Double)
 
     var name: String {
         switch self {
@@ -88,6 +89,7 @@ enum DiagnosticsEvent: Sendable {
         case .watch: return "watch"
         case .hall: return "hall"
         case .listen: return "listen"
+        case .download: return "download"
         }
     }
 
@@ -164,6 +166,15 @@ enum DiagnosticsEvent: Sendable {
             builder.addPosition("target", listen.target)
             builder.addPosition("elapsed", listen.elapsed)
             builder.add("error", listen.error)
+        case let .download(event, pos):
+            builder.add("kind", event.kind.rawValue)
+            builder.add("phase", event.phase.rawValue)
+            builder.add("sha", event.sha256)
+            builder.add("attempt", event.attempt)
+            builder.add("bytes", event.bytes)
+            builder.add("seconds", event.seconds)
+            builder.add("error", event.error)
+            builder.addPosition("pos", pos)
         }
         return builder.line()
     }

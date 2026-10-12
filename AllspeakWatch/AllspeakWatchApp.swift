@@ -9,6 +9,7 @@ struct AllspeakWatchApp: App {
     @WKApplicationDelegateAdaptor(AllspeakWatchAppDelegate.self) private var delegate
     #endif
     @State private var client: WatchSessionClient
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         #if DEBUG
@@ -22,7 +23,6 @@ struct AllspeakWatchApp: App {
         shared.onMetadataChange = ComplicationPublisher.publish
         shared.makeListener = { WatchCinemaListener(catalogURL: $0) }
         shared.activate()
-        shared.loadCachedCues()
         shared.startInterpolationTimer()
         self._client = State(initialValue: shared)
     }
@@ -31,6 +31,10 @@ struct AllspeakWatchApp: App {
         WindowGroup {
             ContentView()
                 .environment(client)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            client.retryDownloads()
         }
     }
 }

@@ -8,7 +8,7 @@ import WatchKit
 @MainActor
 @Observable
 final class WatchSessionClient: NSObject {
-    static let shared = WatchSessionClient()
+    static let shared = WatchSessionClient(downloader: .live())
 
     var metadata: SessionMetadata? {
         didSet { onMetadataChange?(metadata) }
@@ -24,21 +24,6 @@ final class WatchSessionClient: NSObject {
     var activeTrackID: UUID? { metadata?.activeTrackID }
     var hasFingerprint: Bool { fingerprintURL != nil }
 
-    // An in-flight chunked cue-bundle pull. The watch requests slices 0..<total
-    // over sendMessage (each a request/reply, so a dropped chunk is retried),
-    // accumulates them, and reassembles the gzipped bundle once complete.
-    private struct CueDownload {
-        let sessionID: UUID
-        let revision: Int
-        var totalChunks: Int?
-        var chunks: [Int: Data]
-    }
-
-    private struct FingerprintDownload {
-        let sha256: String
-        var chunks: [Int: Data]
-    }
-
     @ObservationIgnored var onMetadataChange: (@MainActor (SessionMetadata?) -> Void)?
     @ObservationIgnored var makeListener: (@MainActor (URL) -> any CinemaListening)?
     @ObservationIgnored var phoneListenTimeout: Duration = ListenEvent.timeout + .seconds(15)
@@ -48,33 +33,24 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
     @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private let sender: WatchMessageSender
-    @ObservationIgnored private let cache: CueCache?
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var interpolationTimer: Timer?
-    @ObservationIgnored private var cueDownload: CueDownload?
-    @ObservationIgnored private let fingerprintCache: FingerprintCache?
-    @ObservationIgnored private var fingerprintDownload: FingerprintDownload?
+    @ObservationIgnored private let downloader: WatchCatalogDownloader?
+    @ObservationIgnored private var loadedSubtitleSHA: String?
     #if os(watchOS)
     @ObservationIgnored private var pendingBackgroundTasks: [WKWatchConnectivityRefreshBackgroundTask] = []
     #endif
 
-    init(sender: WatchMessageSender? = nil, cache: CueCache? = nil, fingerprintCache: FingerprintCache? = nil) {
+    init(sender: WatchMessageSender? = nil, downloader: WatchCatalogDownloader? = nil) {
         self.sender = sender ?? DefaultWatchMessageSender.shared
-        if let cache {
-            self.cache = cache
-        } else if let baseURL = try? CueCache.defaultBaseURL() {
-            self.cache = try? CueCache(baseURL: baseURL)
-        } else {
-            self.cache = nil
-        }
-        if let fingerprintCache {
-            self.fingerprintCache = fingerprintCache
-        } else if let baseURL = try? FingerprintCache.defaultBaseURL() {
-            self.fingerprintCache = try? FingerprintCache(baseURL: baseURL)
-        } else {
-            self.fingerprintCache = nil
-        }
+        self.downloader = downloader
         super.init()
+        downloader?.onFile = { [weak self] kind, sha, url in
+            self?.receiveDownloadedFile(kind, sha256: sha, url: url)
+        }
+        downloader?.onEvent = { [weak self] event in
+            self?.send(.watchDownload(event))
+        }
     }
 
     func activate() {
@@ -171,14 +147,6 @@ final class WatchSessionClient: NSObject {
         interpolationTimer = nil
     }
 
-    func loadCachedCues() {
-        guard let cache,
-              let metadata,
-              let bundle = cache.load(sessionID: metadata.sessionID, revision: metadata.revision)
-        else { return }
-        self.cues = bundle.cues
-    }
-
     func send(_ command: WatchCommand) {
         sendCommand(command, errorHandler: { _ in })
     }
@@ -221,11 +189,9 @@ final class WatchSessionClient: NSObject {
         if SessionEndedSignal.isSessionEnded(context) {
             cancelListening()
             self.metadata = nil
-            self.cues = []
             self.lastSnapshot = nil
-            self.cueDownload = nil
-            self.fingerprintURL = nil
-            self.fingerprintDownload = nil
+            downloader?.cancel()
+            clearSessionFiles()
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
@@ -239,206 +205,54 @@ final class WatchSessionClient: NSObject {
         }
         if sessionChanged || revisionChanged {
             self.lastSnapshot = nil
-            self.cueDownload = nil
         }
-        if let cache, let bundle = cache.load(sessionID: meta.sessionID, revision: meta.revision) {
-            self.cues = bundle.cues
-        } else if sessionChanged || revisionChanged {
-            self.cues = []
-        }
-        if cues.isEmpty && meta.cueCount > 0 {
-            startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
-        }
-        refreshFingerprint()
+        refreshSessionFiles()
     }
 
-    // MARK: - Chunked cue-bundle pull
+    func retryDownloads() {
+        downloader?.retryNow()
+    }
 
-    private func startCueDownloadIfNeeded(sessionID: UUID, revision: Int) {
-        guard cues.isEmpty else { return }
-        if let download = cueDownload, download.sessionID == sessionID, download.revision == revision {
+    // MARK: - Session files from the catalog
+
+    private func refreshSessionFiles() {
+        guard let metadata, let catalogID = metadata.catalogID else {
+            downloader?.cancel()
+            clearSessionFiles()
             return
         }
-        cueDownload = CueDownload(sessionID: sessionID, revision: revision, totalChunks: nil, chunks: [:])
-        requestCueChunk(sessionID: sessionID, revision: revision, index: 0)
-    }
-
-    private func requestCueChunk(sessionID: UUID, revision: Int, index: Int) {
-        guard let payload = try? WatchCommand.requestCueChunk(
-            sessionID: sessionID, revision: revision, index: index
-        ).toPropertyList() else { return }
-        let replyHandler: @Sendable ([String: Any]) -> Void = { [weak self] reply in
-            let bridge = SendableDictionary(value: reply)
-            Task { @MainActor in
-                self?.handleCueChunkReply(bridge.value)
-            }
+        let subtitleSHA = metadata.subtitleSHA?.lowercased()
+        let fingerprintSHA = metadata.fingerprintSHA?.lowercased()
+        if loadedSubtitleSHA != subtitleSHA {
+            cues = []
+            loadedSubtitleSHA = nil
         }
-        let errorHandler: @Sendable (Error) -> Void = { [weak self] _ in
-            Task { @MainActor in
-                self?.failCueDownload(sessionID: sessionID, revision: revision)
-            }
-        }
-        sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
-    }
-
-    private func handleCueChunkReply(_ payload: [String: Any]) {
-        guard var download = cueDownload else { return }
-        guard let reply = try? CueChunkReply(propertyList: payload),
-              reply.sessionID == download.sessionID,
-              reply.revision == download.revision else {
-            failCueDownload(sessionID: download.sessionID, revision: download.revision)
-            return
-        }
-        // The session may have moved on while a chunk was in flight.
-        guard let meta = metadata,
-              meta.sessionID == download.sessionID,
-              meta.revision == download.revision else {
-            cueDownload = nil
-            return
-        }
-        download.totalChunks = reply.totalChunks
-        download.chunks[reply.index] = reply.data
-        cueDownload = download
-
-        if download.chunks.count >= reply.totalChunks {
-            assembleCueDownload(download)
-            return
-        }
-        guard let next = (0..<reply.totalChunks).first(where: { download.chunks[$0] == nil }) else {
-            assembleCueDownload(download)
-            return
-        }
-        requestCueChunk(sessionID: download.sessionID, revision: download.revision, index: next)
-    }
-
-    private func assembleCueDownload(_ download: CueDownload) {
-        guard let total = download.totalChunks else { return }
-        var data = Data()
-        for index in 0..<total {
-            guard let chunk = download.chunks[index] else {
-                // A gap means the reassembly is incomplete; re-request the gap.
-                requestCueChunk(sessionID: download.sessionID, revision: download.revision, index: index)
-                return
-            }
-            data.append(chunk)
-        }
-        cueDownload = nil
-        guard let bundle = try? CueBundle(compressed: data),
-              bundle.sessionID == download.sessionID else { return }
-        try? cache?.save(bundle)
-        if let meta = metadata, meta.sessionID == bundle.sessionID {
-            self.cues = bundle.cues
-        }
-    }
-
-    private func failCueDownload(sessionID: UUID, revision: Int) {
-        guard let download = cueDownload,
-              download.sessionID == sessionID,
-              download.revision == revision else { return }
-        // Drop the download so a reachability/activation/metadata trigger can
-        // restart it - the request's sendMessage error is the only failure
-        // signal, and without re-arming the watch would sit on "Loading".
-        cueDownload = nil
-    }
-
-    // Activation / reachability recovery: a download whose in-flight request was
-    // lost leaves cues empty with no other retry trigger until this fires.
-    private func retryCueDownloadIfNeeded() {
-        guard cues.isEmpty, let meta = metadata, meta.cueCount > 0 else { return }
-        cueDownload = nil
-        startCueDownloadIfNeeded(sessionID: meta.sessionID, revision: meta.revision)
-    }
-
-    // MARK: - Chunked fingerprint pull
-
-    private func refreshFingerprint() {
-        guard let sha256 = metadata?.fingerprintSHA else {
+        if fingerprintURL.map({ $0.deletingPathExtension().lastPathComponent }) != fingerprintSHA {
             fingerprintURL = nil
-            fingerprintDownload = nil
-            return
         }
-        if let url = fingerprintCache?.url(sha256: sha256) {
-            if fingerprintURL != url {
-                fingerprintURL = url
-            }
-            fingerprintDownload = nil
-            return
-        }
+        var files: [WatchDownloadEvent.Kind: String] = [:]
+        files[.subtitle] = subtitleSHA
+        files[.fingerprint] = fingerprintSHA
+        downloader?.request(catalogID: catalogID, files: files)
+    }
+
+    private func clearSessionFiles() {
+        cues = []
+        loadedSubtitleSHA = nil
         fingerprintURL = nil
-        startFingerprintDownloadIfNeeded(sha256: sha256)
     }
 
-    private func startFingerprintDownloadIfNeeded(sha256: String) {
-        guard fingerprintCache != nil else { return }
-        if fingerprintDownload?.sha256 == sha256 { return }
-        fingerprintDownload = FingerprintDownload(sha256: sha256, chunks: [:])
-        requestFingerprintChunk(sha256: sha256, index: 0)
-    }
-
-    private func requestFingerprintChunk(sha256: String, index: Int) {
-        guard let payload = try? WatchCommand.requestFingerprintChunk(sha256: sha256, index: index).toPropertyList() else {
-            return
+    private func receiveDownloadedFile(_ kind: WatchDownloadEvent.Kind, sha256: String, url: URL) {
+        switch kind {
+        case .subtitle:
+            guard metadata?.subtitleSHA?.lowercased() == sha256, loadedSubtitleSHA != sha256 else { return }
+            guard let text = try? SRTParser.read(at: url) else { return }
+            cues = SRTParser.parse(text)
+            loadedSubtitleSHA = sha256
+        case .fingerprint:
+            guard metadata?.fingerprintSHA?.lowercased() == sha256, fingerprintURL != url else { return }
+            fingerprintURL = url
         }
-        let replyHandler: @Sendable ([String: Any]) -> Void = { [weak self] reply in
-            let bridge = SendableDictionary(value: reply)
-            Task { @MainActor in
-                self?.handleFingerprintChunkReply(bridge.value, requestedSHA: sha256)
-            }
-        }
-        let errorHandler: @Sendable (Error) -> Void = { [weak self] _ in
-            Task { @MainActor in
-                self?.failFingerprintDownload(sha256: sha256)
-            }
-        }
-        sender.send(message: payload, replyHandler: replyHandler, errorHandler: errorHandler)
-    }
-
-    private func handleFingerprintChunkReply(_ payload: [String: Any], requestedSHA: String) {
-        guard var download = fingerprintDownload, download.sha256 == requestedSHA else { return }
-        guard let reply = try? FingerprintChunkReply(propertyList: payload), reply.sha256 == download.sha256 else {
-            failFingerprintDownload(sha256: requestedSHA)
-            return
-        }
-        guard metadata?.fingerprintSHA == download.sha256 else {
-            fingerprintDownload = nil
-            return
-        }
-        download.chunks[reply.index] = reply.data
-        fingerprintDownload = download
-        if let next = (0..<reply.totalChunks).first(where: { download.chunks[$0] == nil }) {
-            requestFingerprintChunk(sha256: download.sha256, index: next)
-            return
-        }
-        assembleFingerprintDownload(download, totalChunks: reply.totalChunks)
-    }
-
-    private func assembleFingerprintDownload(_ download: FingerprintDownload, totalChunks: Int) {
-        fingerprintDownload = nil
-        let data = (0..<totalChunks).reduce(into: Data()) { result, index in
-            result.append(download.chunks[index] ?? Data())
-        }
-        guard let url = try? fingerprintCache?.save(data, sha256: download.sha256) else { return }
-        guard metadata?.fingerprintSHA == download.sha256 else { return }
-        fingerprintURL = url
-    }
-
-    func handleReceivedFingerprintFile(_ data: Data, sha256: String) {
-        guard fingerprintURL == nil else { return }
-        guard metadata?.fingerprintSHA?.lowercased() == sha256.lowercased() else { return }
-        guard let url = try? fingerprintCache?.save(data, sha256: sha256) else { return }
-        fingerprintDownload = nil
-        fingerprintURL = url
-    }
-
-    private func failFingerprintDownload(sha256: String) {
-        guard fingerprintDownload?.sha256 == sha256 else { return }
-        fingerprintDownload = nil
-    }
-
-    private func retryFingerprintDownloadIfNeeded() {
-        guard fingerprintURL == nil, let sha256 = metadata?.fingerprintSHA else { return }
-        fingerprintDownload = nil
-        startFingerprintDownloadIfNeeded(sha256: sha256)
     }
 
     // MARK: - Cinema listen
@@ -629,7 +443,8 @@ final class WatchSessionClient: NSObject {
             activeTrackID: snapshot.activeTrackID ?? current.activeTrackID,
             serverDate: snapshot.serverDate,
             fingerprintSHA: current.fingerprintSHA,
-            fingerprintSize: current.fingerprintSize
+            catalogID: current.catalogID,
+            subtitleSHA: current.subtitleSHA
         )
     }
 }
@@ -644,8 +459,7 @@ extension WatchSessionClient: WCSessionDelegate {
         Task { @MainActor in
             self.isConnected = reachable
             if reachable {
-                self.retryCueDownloadIfNeeded()
-                self.retryFingerprintDownloadIfNeeded()
+                self.retryDownloads()
                 self.retryPhoneCancelIfNeeded()
             }
         }
@@ -656,8 +470,7 @@ extension WatchSessionClient: WCSessionDelegate {
         Task { @MainActor in
             self.isConnected = reachable
             if reachable {
-                self.retryCueDownloadIfNeeded()
-                self.retryFingerprintDownloadIfNeeded()
+                self.retryDownloads()
                 self.retryPhoneCancelIfNeeded()
             }
         }
@@ -667,14 +480,6 @@ extension WatchSessionClient: WCSessionDelegate {
         let bridge = SendableDictionary(value: message)
         Task { @MainActor in
             self.handleReceivedMessage(bridge.value)
-        }
-    }
-
-    nonisolated func session(_: WCSession, didReceive file: WCSessionFile) {
-        guard let sha256 = file.metadata?[FingerprintFileTransfer.sha256Key] as? String,
-              let data = try? Data(contentsOf: file.fileURL) else { return }
-        Task { @MainActor in
-            self.handleReceivedFingerprintFile(data, sha256: sha256)
         }
     }
 

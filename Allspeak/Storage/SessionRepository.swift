@@ -2,13 +2,6 @@ import AVFoundation
 import CoreData
 import Foundation
 
-struct SessionSnapshot: Equatable, Sendable {
-    let id: NSManagedObjectID
-    let name: String
-    let audioFilename: String
-    let srtFilename: String
-}
-
 struct TrackSnapshot: Equatable, Sendable {
     let id: NSManagedObjectID
     let trackID: UUID
@@ -37,50 +30,12 @@ struct PendingTrackImport: Sendable, Equatable {
 }
 
 final class SessionRepository: @unchecked Sendable {
-    private let persistence: PersistenceController
-    private let storage: DocumentsStorage
+    let persistence: PersistenceController
+    let storage: DocumentsStorage
 
     init(persistence: PersistenceController = .shared, storage: DocumentsStorage = .default) {
         self.persistence = persistence
         self.storage = storage
-    }
-
-    func importSession(name: String, audioSrc: URL, srtSrc: URL) async throws -> NSManagedObjectID {
-        let id = UUID()
-        let audioName = audioSrc.lastPathComponent
-        let srtName = srtSrc.lastPathComponent
-        let createdAt = Date()
-
-        let audioDest: URL
-        do {
-            audioDest = try storage.copyIntoSession(srcURL: audioSrc, sessionID: id, as: audioName)
-            try storage.copyIntoSession(srcURL: srtSrc, sessionID: id, as: srtName)
-        } catch {
-            try? storage.removeSessionDir(id)
-            throw error
-        }
-
-        let durationSeconds = await Self.readDuration(at: audioDest)
-
-        let context = persistence.newBackgroundContext()
-        do {
-            return try await context.perform {
-                let session = NSEntityDescription.insertNewObject(forEntityName: "Session", into: context)
-                session.setValue(id, forKey: "id")
-                session.setValue(name, forKey: "name")
-                session.setValue(audioName, forKey: "audioFilename")
-                session.setValue(srtName, forKey: "srtFilename")
-                session.setValue(createdAt, forKey: "createdAt")
-                if let durationSeconds {
-                    session.setValue(durationSeconds, forKey: "durationSeconds")
-                }
-                try context.save()
-                return session.objectID
-            }
-        } catch {
-            try? storage.removeSessionDir(id)
-            throw error
-        }
     }
 
     func importMultiTrackSession(
@@ -176,7 +131,7 @@ final class SessionRepository: @unchecked Sendable {
         }
     }
 
-    private static func readDuration(at url: URL) async -> Double? {
+    static func readDuration(at url: URL) async -> Double? {
         let asset = AVURLAsset(url: url)
         do {
             let cm = try await asset.load(.duration)
@@ -194,17 +149,6 @@ final class SessionRepository: @unchecked Sendable {
             let object = try context.existingObject(with: id)
             object.setValue(newName, forKey: "name")
             try context.save()
-        }
-    }
-
-    func fetchSnapshot(id: NSManagedObjectID) async throws -> SessionSnapshot {
-        let context = persistence.viewContext
-        return try await context.perform {
-            let object = try context.existingObject(with: id)
-            let name = object.value(forKey: "name") as? String ?? ""
-            let audio = object.value(forKey: "audioFilename") as? String ?? ""
-            let srt = object.value(forKey: "srtFilename") as? String ?? ""
-            return SessionSnapshot(id: id, name: name, audioFilename: audio, srtFilename: srt)
         }
     }
 
@@ -309,29 +253,6 @@ final class SessionRepository: @unchecked Sendable {
             let object = try context.existingObject(with: id)
             object.setValue(seconds, forKey: "lastPositionSeconds")
             try context.save()
-        }
-    }
-
-    func addTrack(sessionID: NSManagedObjectID, filename: String, label: String) async throws -> NSManagedObjectID {
-        let context = persistence.newBackgroundContext()
-        return try await context.perform {
-            let session: NSManagedObject
-            do {
-                session = try context.existingObject(with: sessionID)
-            } catch {
-                throw SessionRepositoryError.sessionNotFound
-            }
-            let existing = (session.value(forKey: "tracks") as? Set<NSManagedObject>) ?? []
-            let maxOrder = existing.compactMap { $0.value(forKey: "sortOrder") as? Int16 }.max() ?? -1
-            let track = NSEntityDescription.insertNewObject(forEntityName: "AudioTrack", into: context)
-            track.setValue(UUID(), forKey: "id")
-            track.setValue(filename, forKey: "filename")
-            track.setValue(label, forKey: "label")
-            track.setValue(Int16(maxOrder + 1), forKey: "sortOrder")
-            track.setValue(existing.isEmpty, forKey: "isDefault")
-            track.setValue(session, forKey: "session")
-            try context.save()
-            return track.objectID
         }
     }
 
@@ -560,6 +481,26 @@ final class SessionRepository: @unchecked Sendable {
         }
         if let removedUUID {
             try? storage.removeSessionDir(removedUUID)
+        }
+    }
+
+    func removeSessionsWithoutCatalog() async throws {
+        let context = persistence.newBackgroundContext()
+        let storage = self.storage
+        let removed: [UUID] = try await context.perform {
+            let sessions = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "Session"))
+            var removed: [UUID] = []
+            for session in sessions {
+                let uuid = session.value(forKey: "id") as? UUID
+                if let uuid, storage.hasCatalogSidecar(sessionID: uuid) { continue }
+                context.delete(session)
+                if let uuid { removed.append(uuid) }
+            }
+            if context.hasChanges { try context.save() }
+            return removed
+        }
+        for uuid in removed {
+            try? storage.removeSessionDir(uuid)
         }
     }
 }

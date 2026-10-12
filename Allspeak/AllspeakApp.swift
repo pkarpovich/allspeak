@@ -9,6 +9,8 @@ struct AllspeakApp: App {
         WatchSessionHost.shared.activate()
         let storage = DocumentsStorage.default
         Task.detached(priority: .utility) { storage.removeLegacySyncFiles() }
+        let repository = SessionRepository()
+        Task.detached(priority: .utility) { try? await repository.removeSessionsWithoutCatalog() }
     }
 
     var body: some Scene {

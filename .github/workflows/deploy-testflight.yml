@@ -85,6 +85,7 @@ jobs:
           EOF
 
           cat > AllspeakWatch/Signing.xcconfig << EOF
+          #include? "../Allspeak/CatalogConfig.xcconfig"
           CODE_SIGN_STYLE = Manual
           CODE_SIGN_IDENTITY = Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER = $UUID_WATCHOS

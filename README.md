@@ -7,9 +7,9 @@ cinema, listen to the original audio through one AirPod while the on-screen
 scrolling subtitle window acts as a visual sync anchor. Tapping any subtitle
 line seeks the audio to that line's timestamp.
 
-The in-cinema experience is fully offline; the only online path is the optional
-Catalog for pulling prepared sessions onto the phone (see below). No manual
-offset entry, no calibration, no accounts, no onboarding, no settings.
+The in-cinema experience is fully offline; sessions come only from the Catalog,
+which the phone and the watch download from before the screening (see below).
+No manual offset entry, no calibration, no accounts, no onboarding, no settings.
 
 <p align="center">
   <img src="docs/screenshots/phones.png" width="100%" alt="Catalog, player, and session detail" />
@@ -49,28 +49,14 @@ frameworks (SwiftUI, AVFoundation, CoreData, WatchConnectivity, ShazamKit).
 
 ## Preparing files
 
-The MVP does not bundle audio extraction. You supply the `.m4a` and `.srt`
-pair yourself (e.g. via a Mac-side script that strips them from an MKV
-source) and transfer them to the iPhone through the Files app, AirDrop, or
-iCloud Drive. Inside Allspeak:
-
-1. Tap `+` on the Sessions screen.
-2. Name the session (e.g. `After the Light · 21:30`).
-3. Tap `Choose audio files` and pick one or more `.m4a` files via the
-   system file picker. Each file becomes a separate audio track on the
-   session (e.g. `loudnorm-only`, `demucs+loudnorm`, `DFN v3`, or a
-   different dubbing studio). Label each picked file before saving — the
-   first track becomes the default.
-4. Tap `Choose subtitles file` and pick the `.srt`. The subtitle timeline
-   is shared across all tracks in the session.
-5. Save.
-
-Picked files are copied into the app's Documents container at
-`Documents/sessions/<uuid>/track-<trackID>-<filename>` (one per track)
-plus a single subtitles file, and are independent of the original source
-location after import. To add more tracks to an existing session (e.g.
-drop in a new dub when it becomes available), use the `Tracks` action in
-the session row's context menu.
+Sessions are prepared on the Mac (audio extraction, subtitles, fingerprint) and
+published to the catalog backend; the app has no way to create or edit a
+session by hand. Each imported session lives in
+`Documents/sessions/<uuid>/` with its tracks
+(`track-<trackID>-<filename>`), one subtitles file, an optional opening clip and
+fingerprint, and the `server.json` sidecar that ties it to its catalog entry. On
+launch the app deletes any session without that sidecar (sessions created by
+hand before the catalog existed, or an import that never finished).
 
 ### Audio prep pipeline (`scripts/bifrost.fish`)
 
@@ -171,13 +157,8 @@ no automatic or background listening.
   input, so AirPods keep playing over A2DP instead of switching to the HFP mic.
   The player keeps playing, and `.playback` / `.spokenAudio` is restored
   afterwards.
-- The watch gets the fingerprint with `WCSession.transferFile`: its first
-  `requestFingerprintChunk(sha256:index: 0)` makes the phone queue the whole
-  file once (deduplicated against `outstandingFileTransfers`, metadata
-  `fingerprintSHA256`), and `session(_:didReceive:)` stores it after checking
-  the sha256 against the session metadata. The ~30 KB `sendMessage` chunk pull
-  runs alongside as a fallback; whichever finishes first wins. The watch keeps
-  only the latest file in Application Support, keyed by sha256.
+- The watch downloads the fingerprint from the catalog together with the
+  subtitle (see "Watch downloads").
 - Both sources write `listen` events to the phone's diagnostics log (the watch
   reports its phases to the phone), so the logs show which mic matches better.
 
@@ -224,6 +205,9 @@ written as `1` / `0`. Event types:
   `apply`), `listenSec`, and `error` on failure. A match adds `trackTime`, the
   matched `chunk` start, `delta` against the current position and the output
   `latency`; `apply` adds `elapsed` since the match and the seek `target`.
+- `download` - a watch catalog download step: `kind` (subtitle or fingerprint),
+  `phase` (`start`, `done`, `failed`), `sha`, `attempt`, and `bytes` / `seconds`
+  on success or `error` on failure.
 
 The player's title capsule is a menu with the Cinema City Łódź Manufaktura hall
 list (IMAX, Sala 1-14). The hall is saved on the session, so it can be picked
@@ -253,10 +237,9 @@ title, total download size, and track labels.
    audio track with its size, plus the subtitle row) or tap `Import` directly on
    the row.
 3. Import downloads all files (audio tracks + `.srt`) from Cloudflare R2 via
-   short-lived presigned URLs, then creates a regular local session through the
-   same `importMultiTrackSession` pipeline used for manual imports - an imported
-   session is indistinguishable from a hand-made one and appears under `Mine`
-   with its tracks (the server's default track pre-selected) and subtitles.
+   short-lived presigned URLs, then creates a local session through
+   `importMultiTrackSession`; it appears under `Mine` with its tracks (the
+   server's default track pre-selected) and subtitles.
    When the server lists an optional `fingerprint` (the ShazamKit catalog used
    by cinema listen), it is downloaded too and stored in the session directory
    as `fingerprint-<sha>-<name>`; sessions without one import as before.
@@ -330,10 +313,30 @@ listener as a second source.
 3. Foreground both apps at least once after install. WatchConnectivity
    requires both peers to have been launched by the user before delivery
    starts working.
-4. Open a session on the iPhone. The watch will receive the session
-   metadata via `updateApplicationContext` and pull the full cue bundle in
-   ~30 KB gzipped `sendMessage` chunks (cached on-watch for restart
-   resilience).
+4. Open a session on the iPhone. The watch receives the session metadata via
+   `updateApplicationContext`, including the catalog session id and the sha256
+   of the subtitle and the fingerprint, and downloads both files itself from the
+   catalog (see "Watch downloads" below). Nothing is transferred file-by-file
+   over WatchConnectivity.
+
+### Watch downloads
+
+The watch fetches the session files straight from the catalog with
+`URLSession`, which watchOS routes through the paired iPhone, Wi-Fi or LTE.
+`WatchCatalogDownloader` calls `GET /api/v1/sessions/{catalogID}` with the read
+token for fresh presigned URLs, downloads the subtitle and the fingerprint whose
+sha256 match the metadata, verifies each sha256 and keeps the latest file of
+each kind in Application Support (`subtitles/<sha>.srt`,
+`fingerprint/<sha>.shazamcatalog`). Subtitles are parsed on the watch with
+`SRTParser`. A cached file is used at once without any network request.
+
+A failed attempt is retried after 5, 15 and 45 s, and again whenever the watch
+app becomes active or the phone becomes reachable. Every attempt is reported to
+the phone as a `download` diagnostics line (`kind`, `phase` start / done /
+failed, `sha`, `attempt`, `bytes`, `seconds`, `error`). The watch reads the
+catalog URL and read token from its own Info.plist
+(`AllspeakCatalogURL` / `AllspeakCatalogReadToken`), filled from
+`Allspeak/CatalogConfig.xcconfig` through `AllspeakWatch/Signing.xcconfig`.
 
 ### Usage
 
@@ -377,12 +380,13 @@ listener as a second source.
 
 The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
-`setVolume(_:)`, `requestCueChunk(sessionID:revision:index:)`, and for cinema
-listen `requestFingerprintChunk(sha256:index:)`, `startListening(listenID:)`,
-`cancelListening(listenID:)`, `listenEvent(_:)` and `applySync(sessionID:trackTime:matchDate:source:sha256:)`.
+`setVolume(_:)`, for cinema listen `startListening(listenID:)`,
+`cancelListening(listenID:)`, `listenEvent(_:)` and
+`applySync(sessionID:trackTime:matchDate:source:sha256:)`, and
+`watchDownload(_:)` for the download diagnostics.
 Session metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
 the current `activeTrackID`, an optional `serverDate` playback anchor, and
-optional `fingerprintSHA` / `fingerprintSize` (all decoded with
+optional `fingerprintSHA`, `catalogID` and `subtitleSHA` (all decoded with
 `decodeIfPresent`, so an older phone build still decodes). The
 wire contract lives in
 `Allspeak/Watch/WireProtocol.swift` — see the header comment there for

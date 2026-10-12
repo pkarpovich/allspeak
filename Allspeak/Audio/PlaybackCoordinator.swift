@@ -27,9 +27,13 @@ final class PlaybackCoordinator {
         case loadFailed
     }
 
+    struct CatalogSource: Equatable, Sendable {
+        let catalogID: UUID
+        let subtitleSHA: String
+    }
+
     struct SessionFingerprint: Equatable, Sendable {
         let sha256: String
-        let size: Int
         let url: URL
     }
 
@@ -42,6 +46,7 @@ final class PlaybackCoordinator {
     private(set) var tracks: [TrackInfo] = []
     private(set) var selectedHallKey: String?
     private(set) var fingerprint: SessionFingerprint?
+    private(set) var catalogSource: CatalogSource?
     private var isInBackground: Bool = false
     private var isSwitching: Bool = false
     // Bumped by every startSession/endSession so an invocation resuming from
@@ -203,6 +208,7 @@ final class PlaybackCoordinator {
         self.selectedHallKey = snap.hallKey
         let sidecar = try? CatalogSidecar.load(from: dir)
         self.fingerprint = Self.loadFingerprint(sidecar: sidecar, sessionUUID: snap.uuid, storage: storage)
+        self.catalogSource = Self.catalogSource(sidecar: sidecar)
         self.isInBackground = false
         self.repository = repository
         self.storage = storage
@@ -275,6 +281,11 @@ final class PlaybackCoordinator {
         }
     }
 
+    private static func catalogSource(sidecar: CatalogSidecar?) -> CatalogSource? {
+        guard let sidecar else { return nil }
+        return CatalogSource(catalogID: sidecar.serverID, subtitleSHA: sidecar.subtitle.sha256.lowercased())
+    }
+
     private static func loadFingerprint(
         sidecar: CatalogSidecar?,
         sessionUUID: UUID,
@@ -282,10 +293,9 @@ final class PlaybackCoordinator {
     ) -> SessionFingerprint? {
         guard let sidecar,
               let sha256 = sidecar.fingerprint?.sha256,
-              let url = sidecar.fingerprintURL(sessionID: sessionUUID, storage: storage),
-              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+              let url = sidecar.fingerprintURL(sessionID: sessionUUID, storage: storage)
         else { return nil }
-        return SessionFingerprint(sha256: sha256.lowercased(), size: size, url: url)
+        return SessionFingerprint(sha256: sha256.lowercased(), url: url)
     }
 
     private static func resolveTrackURL(
@@ -328,6 +338,7 @@ final class PlaybackCoordinator {
         self.activeTrackID = nil
         self.selectedHallKey = nil
         self.fingerprint = nil
+        self.catalogSource = nil
         self.isInBackground = false
         self.revision += 1
         diagnostics.begin(filmTitle: title)
@@ -451,11 +462,13 @@ final class PlaybackCoordinator {
 
         let dir = storage.sessionDir(for: sessionUUID)
         let previousFingerprint = fingerprint
+        let sidecar = try? CatalogSidecar.load(from: dir)
         fingerprint = Self.loadFingerprint(
-            sidecar: try? CatalogSidecar.load(from: dir),
+            sidecar: sidecar,
             sessionUUID: sessionUUID,
             storage: storage
         )
+        catalogSource = Self.catalogSource(sidecar: sidecar)
         if fingerprint != previousFingerprint {
             cancelListening()
         }
@@ -593,6 +606,7 @@ final class PlaybackCoordinator {
         self.activeTrackID = nil
         self.selectedHallKey = nil
         self.fingerprint = nil
+        self.catalogSource = nil
         self.isInBackground = false
         self.repository = nil
         self.isSwitching = false
@@ -638,13 +652,9 @@ final class PlaybackCoordinator {
             activeTrackID: activeTrackID,
             serverDate: Date(),
             fingerprintSHA: fingerprint?.sha256,
-            fingerprintSize: fingerprint?.size
+            catalogID: catalogSource?.catalogID,
+            subtitleSHA: catalogSource?.subtitleSHA
         )
-    }
-
-    func currentCueBundle() -> CueBundle? {
-        guard let controller, let sessionUUID else { return nil }
-        return CueBundle(sessionID: sessionUUID, revision: revision, cues: controller.subtitles)
     }
 
     // Lock Screen, Dynamic Island, Control Center and AirPods transport all
@@ -756,8 +766,6 @@ final class PlaybackCoordinator {
             }
         case .setVolume(let value):
             controller?.setVolume(value)
-        case .requestCueChunk, .requestFingerprintChunk:
-            break
         case .startListening(let listenID):
             startListening(listenID: listenID)
         case .cancelListening(let listenID):
@@ -766,6 +774,8 @@ final class PlaybackCoordinator {
             noteWatchListenEvent(update)
         case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
             applySync(sessionID: sessionID, trackTime: trackTime, matchDate: matchDate, source: source, sha256: sha256)
+        case .watchDownload(let event):
+            noteWatchDownload(event)
         }
     }
 
@@ -804,6 +814,11 @@ final class PlaybackCoordinator {
     func cancelListening(listenID: UUID) {
         guard self.listenID == listenID else { return }
         cancelListening()
+    }
+
+    func noteWatchDownload(_ event: WatchDownloadEvent) {
+        guard let controller else { return }
+        diagnostics.log(.download(event, pos: controller.livePosition))
     }
 
     func noteWatchListenEvent(_ update: ListenUpdate) {

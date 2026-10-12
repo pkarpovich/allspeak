@@ -55,7 +55,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedTime returns 0 when neither source has an anchor")
     func noAnchorReturnsZero() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         #expect(client.interpolatedTime == 0)
     }
 
@@ -123,7 +123,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedTime reads from lastSnapshot")
     func computedInterpolatedTimeReadsLastSnapshot() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         #expect(client.interpolatedTime == 0)
         client.lastSnapshot = Self.snapshot(currentTime: 17, isPlaying: false)
         #expect(client.interpolatedTime == 17)
@@ -131,7 +131,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedIndex reads from cues + lastSnapshot")
     func computedInterpolatedIndexReadsState() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         client.cues = Self.cues
         client.lastSnapshot = Self.snapshot(currentTime: 3, isPlaying: false)
         #expect(client.interpolatedIndex == 2)
@@ -139,7 +139,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedTime falls back to metadata when no snapshot")
     func computedInterpolatedTimeFallsBackToMetadata() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         client.metadata = SessionMetadata(
             sessionID: Self.sessionID,
             revision: 1,
@@ -156,7 +156,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("metadata fallback clamps to duration upper bound")
     func metadataFallbackClampsToDuration() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         client.metadata = SessionMetadata(
             sessionID: Self.sessionID,
             revision: 1,
@@ -171,7 +171,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("snapshot takes precedence over metadata fallback")
     func snapshotPrecedesMetadataFallback() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         client.metadata = SessionMetadata(
             sessionID: Self.sessionID,
             revision: 1,
@@ -261,7 +261,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedTime re-anchors on a fresher metadata anchor")
     func computedInterpolatedTimeUsesFresherMetadataAnchor() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         // A seek landed via the metadata context while the snapshot transport was
         // unreachable, so lastSnapshot still holds the pre-seek position.
         client.lastSnapshot = Self.snapshot(currentTime: 10, isPlaying: false, serverDate: Self.baseDate)
@@ -275,7 +275,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedIndex re-anchors on a fresher metadata anchor")
     func computedInterpolatedIndexUsesFresherMetadataAnchor() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         client.cues = Self.cues
         client.lastSnapshot = Self.snapshot(currentTime: 0, isPlaying: false, serverDate: Self.baseDate)
         client.metadata = Self.metadata(
@@ -288,7 +288,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedTime extrapolates from a metadata anchor with no snapshot")
     func computedInterpolatedTimeExtrapolatesMetadataAnchor() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         client.metadata = Self.metadata(currentTime: 30, isPlaying: true, serverDate: Date())
         // Playing with a live anchor: the readout must advance past currentTime
         // rather than freeze at it.
@@ -298,7 +298,7 @@ struct WatchSessionClientInterpolationTests {
 
     @Test("computed interpolatedTime keeps the snapshot when it is the fresher anchor")
     func computedInterpolatedTimeKeepsFresherSnapshot() {
-        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender(), cache: nil)
+        let client = WatchSessionClient(sender: WatchSessionClientInterpolationTests.NoopSender())
         client.lastSnapshot = Self.snapshot(
             currentTime: 77,
             isPlaying: false,
