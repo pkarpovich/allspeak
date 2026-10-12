@@ -1759,6 +1759,27 @@ struct PlaybackCoordinatorTests {
         ])
     }
 
+    @Test("startListening in the background fails at once without touching the audio session")
+    func startListeningInBackgroundFails() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.noteAppState(foreground: false)
+
+        fixture.coordinator.startListening(listenID: testListenID)
+
+        #expect(fixture.harness.listeners.isEmpty)
+        #expect(fixture.harness.updates == [
+            ListenUpdate(listenID: testListenID, source: .phone, phase: .failed, listenSeconds: 0, error: "in background"),
+        ])
+        let failed = try #require(try Self.listenLines(fixture.log).last)
+        #expect(failed["phase"] as? String == "failed")
+        #expect(failed["error"] as? String == "in background")
+
+        fixture.coordinator.noteAppState(foreground: true)
+        fixture.coordinator.startListening(listenID: UUID())
+        #expect(fixture.harness.listeners.count == 1)
+    }
+
     @Test("startListening without a session tells the watch it failed")
     func startWithoutSessionFails() {
         let harness = ListenHarness()
@@ -1789,7 +1810,7 @@ struct PlaybackCoordinatorTests {
         ])
     }
 
-    @Test("applySync seeks to trackTime + elapsed + latency and logs apply then a sync seek")
+    @Test("applySync seeks to trackTime + elapsed + latency, logs apply then a sync seek, and resumes a paused player")
     func applySyncSeeksToTarget() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)
         defer { Self.tearDown(fixture) }
@@ -1801,8 +1822,9 @@ struct PlaybackCoordinatorTests {
         let controller = try #require(fixture.coordinator.controller)
         #expect(abs(controller.livePosition - 1.7) < 0.01)
 
+        #expect(controller.isPlaying)
         let records = try Self.readTransportLines(try #require(fixture.log.currentFileURL))
-        #expect(records.count == 2)
+        #expect(records.map { $0["event"] as? String } == ["listen", "seek", "play"])
         let apply = try #require(records.first)
         #expect(apply["event"] as? String == "listen")
         #expect(apply["phase"] as? String == "apply")
@@ -1814,11 +1836,23 @@ struct PlaybackCoordinatorTests {
         #expect(apply["target"] as? Double == 1.7)
         #expect(apply["delta"] as? Double == 1.5)
 
-        let seek = try #require(records.last)
-        #expect(seek["event"] as? String == "seek")
+        let seek = records[1]
         #expect(seek["source"] as? String == "sync")
         #expect(seek["time"] as? Double == 1.7)
         #expect(seek["from"] as? Double == 0)
+    }
+
+    @Test("applySync on a playing player does not log another play")
+    func applySyncKeepsPlayingPlayer() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.play()
+
+        let sessionID = try #require(fixture.coordinator.sessionUUID)
+        fixture.coordinator.applySync(sessionID: sessionID, trackTime: 1.0, matchDate: Self.listenNow, source: .watch, sha256: "abc123")
+
+        let records = try Self.readTransportLines(try #require(fixture.log.currentFileURL))
+        #expect(records.map { $0["event"] as? String } == ["play", "listen", "seek"])
     }
 
     @Test("applySync cancels an active phone listener before seeking")
@@ -1833,7 +1867,7 @@ struct PlaybackCoordinatorTests {
 
         #expect(listener.cancelCount == 1)
         let records = try Self.readTransportLines(try #require(fixture.log.currentFileURL))
-        #expect(records.map { $0["phase"] as? String ?? $0["event"] as? String } == ["start", "cancel", "apply", "seek"])
+        #expect(records.map { $0["phase"] as? String ?? $0["event"] as? String } == ["start", "cancel", "apply", "seek", "play"])
     }
 
     @Test("applySync with zero latency targets trackTime + elapsed")
@@ -1852,7 +1886,7 @@ struct PlaybackCoordinatorTests {
         )
 
         let logURL = try #require(fixture.log.currentFileURL)
-        let seek = try #require(try Self.readTransportLines(logURL).last)
+        let seek = try #require(try Self.readTransportLines(logURL).first { $0["event"] as? String == "seek" })
         #expect(seek["time"] as? Double == 3.0)
         #expect(seek["source"] as? String == "sync")
     }

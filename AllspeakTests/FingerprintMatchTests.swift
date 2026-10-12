@@ -1,4 +1,5 @@
 import Foundation
+import ShazamKit
 import Testing
 @testable import Allspeak
 
@@ -52,5 +53,24 @@ struct FingerprintMatchTests {
     func targetNoElapsed() {
         let target = FingerprintMatch.target(trackTime: 100, matchDate: matchDate, now: matchDate, outputLatency: 0.2)
         #expect(target == 100.2)
+    }
+
+    @Test("a ShazamKit match-attempt failure or a missing error keeps listening")
+    func retryPolicyKeepsListening() {
+        #expect(ListenRetryPolicy.keepsListening(after: nil))
+        #expect(ListenRetryPolicy.keepsListening(after: SHError(.matchAttemptFailed)))
+        #expect(ListenRetryPolicy.keepsListening(after: NSError(domain: SHErrorDomain, code: 202)))
+    }
+
+    @Test(
+        "other errors stop listening",
+        arguments: [
+            NSError(domain: SHErrorDomain, code: SHError.Code.invalidAudioFormat.rawValue),
+            NSError(domain: SHErrorDomain, code: SHError.Code.customCatalogInvalid.rawValue),
+            NSError(domain: "com.apple.coreaudio.avfaudio", code: 202),
+        ]
+    )
+    func retryPolicyStops(error: NSError) {
+        #expect(!ListenRetryPolicy.keepsListening(after: error))
     }
 }

@@ -4,7 +4,6 @@ struct ListenView: View {
     static let appliedDisplayDuration: Duration = .seconds(1.5)
 
     @Environment(WatchSessionClient.self) private var client
-    private let haptics: any WatchSyncHapticsPlaying = WatchDeviceHaptics()
 
     private var panel: ListenPanelState { client.listenPanel }
 
@@ -13,10 +12,6 @@ struct ListenView: View {
             Tokens.bg.ignoresSafeArea()
             content
                 .padding(.horizontal, 8)
-        }
-        .onChange(of: panel.shownMatch) { previous, current in
-            guard previous == nil, current != nil else { return }
-            haptics.play(.click)
         }
         .task(id: isApplied) {
             guard isApplied else { return }
@@ -47,6 +42,7 @@ struct ListenView: View {
 
     private var idleView: some View {
         VStack(spacing: 10) {
+            filmTime
             Button(action: handleStart) {
                 Label("Listen", systemImage: Tokens.Icon.listen)
                     .font(Tokens.Font.bodyEmphasized)
@@ -67,6 +63,7 @@ struct ListenView: View {
 
     private var listeningView: some View {
         VStack(spacing: 10) {
+            filmTime
             statusLines(showsHint: panel.watch.isListening)
             Button(action: handleStop) {
                 Text("Stop")
@@ -76,6 +73,23 @@ struct ListenView: View {
             }
             .buttonStyle(.glass)
         }
+    }
+
+    private var filmTime: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let elapsed = position(at: context.date)
+            let duration = client.lastSnapshot?.duration ?? client.metadata?.duration ?? 0
+            HStack {
+                Text(WatchTransportFormat.elapsedLabel(elapsed))
+                Spacer(minLength: 4)
+                Text(WatchTransportFormat.remainingLabel(elapsed: elapsed, duration: duration))
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Tokens.text2)
+            .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Film position")
     }
 
     private func statusLines(showsHint: Bool) -> some View {

@@ -88,6 +88,7 @@ final class WatchCinemaListener: CinemaListening {
             case .noMatch:
                 continue
             case .error(let error, _):
+                if ListenRetryPolicy.keepsListening(after: error) { continue }
                 finish(.failed(error.localizedDescription))
             }
         }

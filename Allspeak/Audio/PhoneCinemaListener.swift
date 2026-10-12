@@ -316,7 +316,8 @@ final class ShazamStreamMatcher: NSObject, SHSessionDelegate, StreamMatching, @u
     }
 
     func session(_ session: SHSession, didNotFindMatchFor signature: SHSignature, error: (any Error)?) {
-        deliver(.notFound(error: error?.localizedDescription))
+        let fatal = ListenRetryPolicy.keepsListening(after: error) ? nil : error?.localizedDescription
+        deliver(.notFound(error: fatal))
     }
 
     private func deliver(_ outcome: ListenMatcherOutcome) {

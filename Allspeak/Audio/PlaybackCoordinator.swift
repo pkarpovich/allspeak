@@ -777,6 +777,12 @@ final class PlaybackCoordinator {
             sendListenUpdate(ListenUpdate(listenID: listenID, source: .phone, phase: .failed, listenSeconds: 0, error: "no session"))
             return
         }
+        guard !isInBackground else {
+            let update = ListenUpdate(listenID: listenID, source: .phone, phase: .failed, listenSeconds: 0, error: "in background")
+            logListen(update, source: .phone)
+            sendListenUpdate(update)
+            return
+        }
         guard let fingerprint else {
             let update = ListenUpdate(listenID: listenID, source: .phone, phase: .failed, listenSeconds: 0, error: "no fingerprint")
             logListen(update, source: .phone)
@@ -824,6 +830,9 @@ final class PlaybackCoordinator {
             elapsed: elapsed
         )))
         seek(to: target, source: .sync)
+        if !controller.isPlaying {
+            play()
+        }
         return true
     }
 
