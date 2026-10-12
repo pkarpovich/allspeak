@@ -17,6 +17,11 @@ struct ListenPanelState: Equatable, Sendable {
         let match: FingerprintMatch
     }
 
+    enum Outcome: Equatable, Sendable {
+        case matched
+        case noMatch
+    }
+
     enum Phase: Equatable, Sendable {
         case idle
         case listening
@@ -39,6 +44,15 @@ struct ListenPanelState: Equatable, Sendable {
 
     var isListening: Bool {
         phone.isListening || watch.isListening
+    }
+
+    var outcome: Outcome? {
+        if shownMatch != nil { return .matched }
+        if isListening { return nil }
+        let statuses = [phone, watch]
+        if statuses.contains(.cancelled) { return nil }
+        guard statuses.contains(where: \.isUnsuccessfulEnd) else { return nil }
+        return .noMatch
     }
 
     func status(for source: ListenSource) -> SourceStatus {
@@ -156,5 +170,12 @@ extension ListenPanelState.SourceStatus {
     var isListening: Bool {
         guard case .listening = self else { return false }
         return true
+    }
+
+    var isUnsuccessfulEnd: Bool {
+        switch self {
+        case .noMatch, .timedOut, .interrupted, .failed: true
+        case .idle, .listening, .matched, .cancelled: false
+        }
     }
 }

@@ -1456,6 +1456,40 @@ struct WatchSessionClientTests {
         return try snapshot.toPropertyList()
     }
 
+    @Test("the listen action starts listening when idle and is ignored while listening")
+    func listenActionStartsWhenIdle() throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.performListenAction()
+        #expect(client.listenPanel.phase == .listening)
+        #expect(Self.sentCommands(sender.sentMessages).contains(.startListening(listenID: testListenID)))
+
+        sender.sentMessages = []
+        client.performListenAction()
+        #expect(Self.sentCommands(sender.sentMessages).isEmpty)
+    }
+
+    @Test("the listen action applies a shown match")
+    func listenActionAppliesShownMatch() async throws {
+        let (client, sender, _, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.performListenAction()
+        let update = ListenUpdate(listenID: testListenID, source: .phone, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 3))
+        client.handleReceivedMessage(try update.toPropertyList())
+        sender.sentMessages = []
+        sender.nextReply = try Self.sessionReply(for: client)
+        client.performListenAction()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let applies = Self.sentCommands(sender.sentMessages).filter { command in
+            guard case .applySync = command else { return false }
+            return true
+        }
+        #expect(applies.count == 1)
+    }
+
     @Test("applyShownMatch sends applySync and stops the watch listener")
     func applyShownMatchSendsApplySync() async throws {
         let (client, sender, listener, dir) = try makeListeningClient()

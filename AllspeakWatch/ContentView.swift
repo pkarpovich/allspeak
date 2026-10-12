@@ -10,6 +10,7 @@ struct ContentView: View {
 
     @Environment(WatchSessionClient.self) private var client
     @State private var selection: Page = .currentLine
+    private let haptics: any WatchSyncHapticsPlaying = WatchDeviceHaptics()
 
     private var showsListen: Bool { client.hasFingerprint }
     private var showsTrackList: Bool { client.tracks.count > 1 }
@@ -33,6 +34,17 @@ struct ContentView: View {
         .onChange(of: showsListen) { _, shows in
             guard !shows, selection == .listen else { return }
             selection = .currentLine
+        }
+        .onChange(of: client.listenPanel.isListening) { _, listening in
+            guard listening, showsListen else { return }
+            selection = .listen
+        }
+        .onChange(of: client.listenPanel.outcome) { _, outcome in
+            switch outcome {
+            case .matched: haptics.play(.success)
+            case .noMatch: haptics.play(.failure)
+            case nil: break
+            }
         }
         .onChange(of: showsTrackList) { _, shows in
             guard !shows, selection == .trackList else { return }

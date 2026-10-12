@@ -125,21 +125,29 @@ track, in 600 s chunks with 30 s overlap; each chunk's media item has
 page right after the transport page. There is no listening UI on the phone and
 no automatic or background listening.
 
+- The Listen page shows the film position and the time left, like the
+  transport page.
 - One tap on `Listen` starts two independent listeners at once: the phone's
   built-in mic and the watch mic. The page shows a status line per source
   (`Phone: listening 0:23`, `Watch: no match`, `interrupted`, `error: ...`),
   a `Stop` button, and a hint to keep the wrist raised.
 - The first match from either source shows a card with the offset
-  (`+2.4 s`), the source, and `Apply` / `Cancel`, with a click haptic. The
+  (`+2.4 s`), the source, and `Apply` / `Cancel`, with a success haptic on any
+  watch page. When every source ends without a match (and none was stopped by
+  the user) the watch plays a failure haptic. The
   watch computes the offset as `(trackTime + (now - matchDate)) - position`,
   where `trackTime = abs_start + predictedCurrentMatchOffset`.
 - `Apply` stops both listeners and sends
   `applySync(sessionID:trackTime:matchDate:source:sha256:)`. The phone seeks to
   `trackTime + (now - matchDate) + outputLatency` with the `sync` source only
   while `sessionID` is still the active session and `sha256` its fingerprint,
-  and replies with an empty snapshot otherwise; the watch shows `Done` only
+  starting a paused player since the film kept running; otherwise it replies
+  with an empty snapshot. The watch shows `Done` only
   when the reply snapshot belongs to the same session.
-- Each listener stops on its first match, after 120 s, or on `Stop`. The watch
+- Each listener stops on its first match, after 120 s, or on `Stop`. A
+  ShazamKit `matchAttemptFailed` (code 202, which `SHManagedSession` returns
+  about every 12 s without a match) is treated as "no match yet" and listening
+  goes on. The watch
   listener (`SHManagedSession`) waits for the app to become active after the
   first microphone prompt and stops as `interrupted` when the watch app leaves
   the active phase (wrist down); the phone listener stops as
@@ -153,17 +161,36 @@ no automatic or background listening.
   phone is usually locked in a pocket at that point, so do the first tap at
   home with Allspeak open on the phone and grant both prompts. A refused
   permission shows as `error: mic permission` for that source.
+- iOS does not let an app start recording in the background, so while the
+  phone app is in the background (locked phone in a pocket) the phone source
+  fails at once with `in background` and never touches the audio session;
+  switching the category made the dub drop out for a moment.
 - The phone listener uses `SHSession` with its own `AVAudioEngine` input tap.
   While listening the audio session is `.playAndRecord` / `.default` with
   options exactly `[.allowBluetoothA2DP]` and the built-in mic as preferred
   input, so AirPods keep playing over A2DP instead of switching to the HFP mic.
   The player keeps playing, and `.playback` / `.spokenAudio` is restored
   afterwards.
-- The watch pulls the fingerprint from the phone in ~30 KB `sendMessage` chunks
-  (`requestFingerprintChunk(sha256:index:)`, like the cue bundle) and keeps
+- The watch gets the fingerprint with `WCSession.transferFile`: its first
+  `requestFingerprintChunk(sha256:index: 0)` makes the phone queue the whole
+  file once (deduplicated against `outstandingFileTransfers`, metadata
+  `fingerprintSHA256`), and `session(_:didReceive:)` stores it after checking
+  the sha256 against the session metadata. The ~30 KB `sendMessage` chunk pull
+  runs alongside as a fallback; whichever finishes first wins. The watch keeps
   only the latest file in Application Support, keyed by sha256.
 - Both sources write `listen` events to the phone's diagnostics log (the watch
   reports its phases to the phone), so the logs show which mic matches better.
+
+#### Action button
+
+The watch app exposes a `Listen` App Intent and an App Shortcut ("Listen with
+Allspeak") for the Action button on Apple Watch Ultra, usually through a
+shortcut that checks the current Focus. It runs with `supportedModes =
+.foreground(.immediate)` because the mic needs the app in front: a press starts
+listening when idle, applies a shown match, and is ignored while listening. The
+watch switches to the Listen page whenever a listen starts. App Shortcuts of the
+watch app run on the watch itself. There is no iPhone intent: iOS does not let an
+app start recording from the background, so a locked phone cannot listen.
 
 ### Session diagnostics
 

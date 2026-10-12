@@ -1,4 +1,5 @@
 import Foundation
+import ShazamKit
 
 struct FingerprintMatch: Equatable, Sendable {
     let trackTime: Double
@@ -20,6 +21,14 @@ struct FingerprintMatch: Equatable, Sendable {
 
     static func target(trackTime: Double, matchDate: Date, now: Date, outputLatency: Double) -> Double {
         trackTime + now.timeIntervalSince(matchDate) + outputLatency
+    }
+}
+
+enum ListenRetryPolicy {
+    static func keepsListening(after error: (any Error)?) -> Bool {
+        guard let error else { return true }
+        let nsError = error as NSError
+        return nsError.domain == SHErrorDomain && nsError.code == SHError.Code.matchAttemptFailed.rawValue
     }
 }
 

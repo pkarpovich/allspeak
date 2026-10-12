@@ -464,6 +464,17 @@ final class WatchSessionClient: NSObject {
         startWatchListener(listenID: listenID)
     }
 
+    func performListenAction() {
+        switch listenPanel.phase {
+        case .match:
+            applyShownMatch()
+        case .idle:
+            startListening()
+        case .listening, .applied:
+            break
+        }
+    }
+
     func cancelListening() {
         if listenPanel.phone.isListening, let listenID {
             unconfirmedPhoneCancels.insert(listenID)

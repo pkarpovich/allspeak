@@ -3,11 +3,14 @@ import Foundation
 import WatchKit
 #endif
 
-// Haptic feedback for watch transport controls (skip clicks). Protocol-based so
+// Haptic feedback for watch transport controls (skip clicks) and listen
+// outcomes. Protocol-based so
 // AllspeakTests can inject a fake from the iOS target, where WKInterfaceDevice
 // is unavailable.
 enum WatchSyncHaptic: Equatable {
     case click
+    case success
+    case failure
 }
 
 protocol WatchSyncHapticsPlaying {
@@ -20,6 +23,10 @@ struct WatchDeviceHaptics: WatchSyncHapticsPlaying {
         switch haptic {
         case .click:
             WKInterfaceDevice.current().play(.click)
+        case .success:
+            WKInterfaceDevice.current().play(.success)
+        case .failure:
+            WKInterfaceDevice.current().play(.failure)
         }
     }
 }

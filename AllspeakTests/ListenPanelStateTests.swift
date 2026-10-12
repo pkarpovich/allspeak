@@ -37,6 +37,48 @@ struct ListenPanelStateTests {
         #expect(state.watch == .listening(since: start))
     }
 
+    @Test("outcome is nil while idle or while any source still listens")
+    func outcomeNilWhileListening() {
+        #expect(ListenPanelState().outcome == nil)
+        var state = listening()
+        #expect(state.outcome == nil)
+        state.receive(source: .watch, event: event(.interrupted), now: start.addingTimeInterval(3))
+        #expect(state.outcome == nil)
+    }
+
+    @Test("outcome is matched as soon as either source matches")
+    func outcomeMatched() {
+        var state = listening()
+        state.receive(source: .phone, event: event(.matched(match(trackTime: 10, at: 2))), now: start.addingTimeInterval(2))
+        #expect(state.outcome == .matched)
+    }
+
+    @Test(
+        "outcome is noMatch once every source ended without a match",
+        arguments: [
+            (ListenEvent.Phase.noMatch, ListenEvent.Phase.timedOut),
+            (.interrupted, .noMatch),
+            (.failed("mic permission"), .timedOut),
+        ]
+    )
+    func outcomeNoMatch(watchEnd: ListenEvent.Phase, phoneEnd: ListenEvent.Phase) {
+        var state = listening()
+        state.receive(source: .watch, event: event(watchEnd), now: start.addingTimeInterval(3))
+        state.receive(source: .phone, event: event(phoneEnd), now: start.addingTimeInterval(120))
+        #expect(state.outcome == .noMatch)
+    }
+
+    @Test("a user stop gives no outcome")
+    func outcomeNilAfterCancel() {
+        var state = listening()
+        state.receive(source: .watch, event: event(.cancelled), now: start.addingTimeInterval(3))
+        state.receive(source: .phone, event: event(.cancelled), now: start.addingTimeInterval(3))
+        #expect(state.outcome == nil)
+        var dismissed = listening()
+        dismissed.dismiss()
+        #expect(dismissed.outcome == nil)
+    }
+
     @Test("the first match wins and a later match from the other source does not replace it")
     func firstMatchWins() {
         var state = listening()
