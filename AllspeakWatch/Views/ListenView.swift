@@ -52,7 +52,7 @@ struct ListenView: View {
             }
             .buttonStyle(.glass)
             if hasOutcome {
-                statusLines(showsHint: false)
+                statusLines
             }
         }
     }
@@ -64,7 +64,7 @@ struct ListenView: View {
     private var listeningView: some View {
         VStack(spacing: 10) {
             filmTime
-            statusLines(showsHint: panel.watch.isListening)
+            statusLines
             Button(action: handleStop) {
                 Text("Stop")
                     .font(Tokens.Font.bodyEmphasized)
@@ -92,16 +92,11 @@ struct ListenView: View {
         .accessibilityLabel("Film position")
     }
 
-    private func statusLines(showsHint: Bool) -> some View {
+    private var statusLines: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: 4) {
                 statusLine(.phone, at: context.date)
                 statusLine(.watch, at: context.date)
-                if showsHint {
-                    Text("Keep your wrist raised")
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(Tokens.text3)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
