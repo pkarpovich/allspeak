@@ -19,7 +19,6 @@ final class WatchCinemaListener: CinemaListening {
     private var session: SHManagedSession?
     private var listening: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
-    private var resignObserver: (any NSObjectProtocol)?
 
     init(catalogURL: URL) {
         self.catalogURL = catalogURL
@@ -62,7 +61,6 @@ final class WatchCinemaListener: CinemaListening {
             finish(.interrupted)
             return
         }
-        observeResignActive()
 
         let catalog = SHCustomCatalog()
         do {
@@ -94,18 +92,6 @@ final class WatchCinemaListener: CinemaListening {
         }
     }
 
-    private func observeResignActive() {
-        resignObserver = NotificationCenter.default.addObserver(
-            forName: WKApplication.willResignActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.finish(.interrupted)
-            }
-        }
-    }
-
     private func startTimeout() {
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: ListenEvent.timeout)
@@ -123,10 +109,6 @@ final class WatchCinemaListener: CinemaListening {
         listening = nil
         session?.cancel()
         session = nil
-        if let resignObserver {
-            NotificationCenter.default.removeObserver(resignObserver)
-            self.resignObserver = nil
-        }
         emit(phase)
         onEvent = nil
     }

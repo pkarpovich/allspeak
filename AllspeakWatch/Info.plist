@@ -34,6 +34,10 @@
 	<string>$(ALLSPEAK_CATALOG_URL)</string>
 	<key>AllspeakCatalogReadToken</key>
 	<string>$(ALLSPEAK_CATALOG_READ_TOKEN)</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allspeak listens briefly to the cinema audio so it can sync the dub track to what's playing on screen.</string>
 </dict>

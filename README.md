@@ -115,12 +115,19 @@ no automatic or background listening.
   transport page.
 - One tap on `Listen` starts two independent listeners at once: the phone's
   built-in mic and the watch mic. The page shows a status line per source
-  (`Phone: listening 0:23`, `Watch: no match`, `interrupted`, `error: ...`),
-  a `Stop` button, and a hint to keep the wrist raised.
+  (`Phone: listening 0:23`, `Watch: no match`, `interrupted`, `error: ...`)
+  and a `Stop` button.
+- The watch keeps listening after the screen drops to Always On or the wrist
+  goes down: the watch app declares the `audio` background mode
+  (`UIBackgroundModes`), and a recording started by the tap in the foreground
+  may continue in the background. Only the 120 s timeout, a match, `Stop` or a
+  ShazamKit error end it.
 - The first match from either source shows a card with the offset
-  (`+2.4 s`), the source, and `Apply` / `Cancel`, with a success haptic on any
-  watch page. When every source ends without a match (and none was stopped by
-  the user) the watch plays a failure haptic. The
+  (`+2.4 s`), the source, and `Apply` / `Cancel`, with a double click haptic on
+  any watch page. When every source ends without a match (and none was stopped
+  by the user) the watch plays a single click. Click is the quietest haptic;
+  watchOS ties a sound to every haptic, so only the watch's silent mode mutes
+  it, and no haptic plays while the app is in the background. The
   watch computes the offset as `(trackTime + (now - matchDate)) - position`,
   where `trackTime = abs_start + predictedCurrentMatchOffset`.
 - `Apply` stops both listeners and sends
@@ -432,7 +439,7 @@ Tests use [Swift Testing](https://developer.apple.com/documentation/testing)
 
 ```fish
 xcodebuild test -scheme Allspeak \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ```
 
 Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`, `.catalog`)
