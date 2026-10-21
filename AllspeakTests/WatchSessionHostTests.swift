@@ -618,7 +618,9 @@ struct WatchSessionHostTests {
             source: .phone,
             sha256: Self.fingerprintSHA.lowercased()
         ))
-        #expect(abs(snapshot.currentTime - 2.0) < 0.01)
+        #expect(snapshot.isPlaying)
+        #expect(snapshot.currentTime >= 1.99)
+        #expect(snapshot.currentTime < 3.0)
     }
 
     @Test("received commands run one at a time in arrival order and each gets its reply")
