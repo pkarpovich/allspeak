@@ -7,6 +7,10 @@ import Foundation
 final class ListenTelemetry {
     typealias Sampler = @MainActor (_ date: Date, _ listenSeconds: Double) -> WatchSample
 
+    static let batchSize = 12
+
+    var onBatch: (@MainActor (WatchListenTelemetry) -> Void)?
+
     private let markerURL: URL
     private let interval: Duration
     private let now: () -> Date
@@ -55,6 +59,10 @@ final class ListenTelemetry {
     func record() {
         guard current != nil else { return }
         appendSample()
+        if let batch = current, batch.samples.count >= Self.batchSize {
+            current?.samples = []
+            onBatch?(batch)
+        }
         guard let current, let data = try? JSONEncoder().encode(current) else { return }
         try? FileManager.default.createDirectory(at: markerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: markerURL, options: .atomic)

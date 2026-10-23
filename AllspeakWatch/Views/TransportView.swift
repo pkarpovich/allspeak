@@ -54,6 +54,7 @@ struct TransportView: View {
     // The only way to get BOTH crown-up = louder AND full-bar = loud is to hide
     // the native indicator (digitalCrownAccessory visibility) and draw a custom
     // bar - ask Pavel before going there.
+    @State private var marks = 0
     @State private var volume: Double = 0.5
     @State private var isAdjustingVolume = false
     @State private var volumeActivityTask: Task<Void, Never>?
@@ -151,7 +152,7 @@ struct TransportView: View {
             .padding(.horizontal, 12)
     }
 
-    // Top row: the ±3s coarse skip pair, centered.
+    // Top row: the ±3s coarse skip pair around the listen-all-film toggle.
     private var coarseRow: some View {
         ViewThatFits(in: .horizontal) {
             coarseRowContent(buttonSize: 52, spacing: 9)
@@ -165,12 +166,13 @@ struct TransportView: View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "3", size: buttonSize, action: handleSkipBackCoarse)
                 .accessibilityLabel("Skip back 3 seconds")
+            autoListenButton(size: buttonSize)
             skipButton(icon: Tokens.Icon.skipForward, seconds: "3", size: buttonSize, action: handleSkipForwardCoarse)
                 .accessibilityLabel("Skip forward 3 seconds")
         }
     }
 
-    // Bottom row: the ±1s fine skip pair, centered.
+    // Bottom row: the ±1s fine skip pair around the out-of-sync mark.
     private var fineRow: some View {
         ViewThatFits(in: .horizontal) {
             fineRowContent(buttonSize: 60, spacing: 14)
@@ -184,6 +186,7 @@ struct TransportView: View {
         HStack(spacing: spacing) {
             skipButton(icon: Tokens.Icon.skipBack, seconds: "1", size: buttonSize, action: handleSkipBackFine)
                 .accessibilityLabel("Skip back 1 second")
+            markButton(size: buttonSize)
             skipButton(icon: Tokens.Icon.skipForward, seconds: "1", size: buttonSize, action: handleSkipForwardFine)
                 .accessibilityLabel("Skip forward 1 second")
         }
@@ -303,6 +306,46 @@ struct TransportView: View {
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
         .frame(width: size, height: size)
+    }
+
+    private func autoListenButton(size: CGFloat) -> some View {
+        let isOn = client.autoListen.isOn
+        return Button(action: handleAutoListen) {
+            Image(systemName: Tokens.Icon.listen)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(isOn ? Tokens.accent : Tokens.text)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .frame(width: size, height: size)
+        .disabled(!client.hasFingerprint)
+        .accessibilityLabel(isOn ? "Stop listening to the film" : "Listen all film")
+    }
+
+    private func markButton(size: CGFloat) -> some View {
+        Button(action: handleMark) {
+            Image(systemName: Tokens.Icon.flag)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Tokens.text)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .frame(width: size, height: size)
+        .sensoryFeedback(.success, trigger: marks)
+        .accessibilityLabel("Mark out of sync")
+    }
+
+    private func handleAutoListen() {
+        if client.autoListen.isOn {
+            client.stopAutoListen()
+        } else {
+            client.startAutoListen()
+        }
+    }
+
+    private func handleMark() {
+        client.markDesync()
+        marks += 1
     }
 
     private var isPlaying: Bool {

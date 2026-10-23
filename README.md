@@ -173,6 +173,18 @@ no automatic or background listening.
   stretch where the phone is unreachable (Always On, phone in pocket) and
   arrive later in order.
 
+#### Listen all film
+
+The waveform circle between the ±3 s buttons on the watch transport screen
+(gold while on, tap again to stop) runs one `SHManagedSession` until
+`Stop`, a ShazamKit error or the session ending, without the 120 s timeout and
+without the phone. Every match is reported as a watch `listen` event of one
+`listenID`. A match whose offset is over 1 s switches to the Listen page with
+`Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it. Nothing is applied on its
+own; `Apply` and the Action button send the usual `applySync`. Telemetry
+samples go to the phone in batches of 12 (one minute) instead of once at the
+end.
+
 #### Action button
 
 The watch app exposes a `Listen` App Intent and an App Shortcut ("Listen with
@@ -230,8 +242,8 @@ Event types:
   (crash, jetsam, force quit), reported on the next launch with `listenSec` of
   its last sample, followed by its `watchSample` lines.
 - `mark` - the user marked the dub out of sync: `source`, and on the watch also
-  the watch's own `watchPos`. On the watch the button is on the Listen page
-  under Listen; on the phone it is the last item of the title menu.
+  the watch's own `watchPos`. On the watch it is the flag circle between the
+  ±1 s buttons; on the phone it is the last item of the title menu.
 - `download` - a watch catalog download step: `kind` (subtitle or fingerprint),
   `phase` (`start`, `done`, `failed`), `sha`, `attempt`, and `bytes` / `seconds`
   on success or `error` on failure.

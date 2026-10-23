@@ -46,6 +46,17 @@ struct ContentView: View {
             case nil: break
             }
         }
+        .onChange(of: client.autoListen.suggestion) { previous, suggestion in
+            guard suggestion != nil else {
+                if previous != nil, selection == .listen {
+                    selection = .currentLine
+                }
+                return
+            }
+            haptics.play(.success)
+            guard showsListen else { return }
+            selection = .listen
+        }
         .onChange(of: showsTrackList) { _, shows in
             guard !shows, selection == .trackList else { return }
             selection = .currentLine

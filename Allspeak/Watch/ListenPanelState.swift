@@ -166,6 +166,25 @@ struct ListenPanelState: Equatable, Sendable {
     }
 }
 
+struct AutoListenState: Equatable, Sendable {
+    static let suggestionThreshold = 1.0
+
+    var isOn = false
+    var startedAt: Date?
+    var lastMatch: FingerprintMatch?
+    var suggestion: FingerprintMatch?
+    var error: String?
+
+    static func errorText(_ phase: ListenEvent.Phase) -> String? {
+        switch phase {
+        case .failed(let message): message
+        case .interrupted: "interrupted"
+        case .timedOut: "timed out"
+        case .started, .matched, .noMatch, .cancelled: nil
+        }
+    }
+}
+
 extension ListenPanelState.SourceStatus {
     var isListening: Bool {
         guard case .listening = self else { return false }

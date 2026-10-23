@@ -24,7 +24,10 @@ enum ListenSmoke {
         )
         client.fingerprintURL = URL(fileURLWithPath: "/dev/null")
         client.makeListener = { [weak client] _ in
-            ListenSmokeListener { client?.interpolatedTime ?? 0 }
+            ListenSmokeListener(continuous: false) { client?.interpolatedTime ?? 0 }
+        }
+        client.makeContinuousListener = { [weak client] _ in
+            ListenSmokeListener(continuous: true) { client?.interpolatedTime ?? 0 }
         }
         return client
     }
@@ -32,11 +35,13 @@ enum ListenSmoke {
 
 @MainActor
 private final class ListenSmokeListener: CinemaListening {
+    private let continuous: Bool
     private let position: @MainActor () -> Double
     private var task: Task<Void, Never>?
     private var onEvent: (@MainActor (ListenEvent) -> Void)?
 
-    init(position: @escaping @MainActor () -> Double) {
+    init(continuous: Bool, position: @escaping @MainActor () -> Double) {
+        self.continuous = continuous
         self.position = position
     }
 
@@ -51,7 +56,11 @@ private final class ListenSmokeListener: CinemaListening {
                 matchDate: Date(),
                 chunkStart: 1800
             )
-            finish(.matched(match), listenSeconds: 8)
+            if continuous {
+                self.onEvent?(ListenEvent(phase: .matched(match), listenSeconds: 8))
+            } else {
+                finish(.matched(match), listenSeconds: 8)
+            }
         }
     }
 

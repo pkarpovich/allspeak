@@ -22,6 +22,7 @@ struct AllspeakWatchApp: App {
         let shared = WatchSessionClient.shared
         shared.onMetadataChange = ComplicationPublisher.publish
         shared.makeListener = { WatchCinemaListener(catalogURL: $0) }
+        shared.makeContinuousListener = { WatchCinemaListener(catalogURL: $0, continuous: true) }
         shared.telemetry = ListenTelemetry(markerURL: WatchSample.markerURL(), sample: WatchSample.current)
         shared.activate()
         shared.startInterpolationTimer()
