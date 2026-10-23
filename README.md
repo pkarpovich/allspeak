@@ -123,11 +123,12 @@ no automatic or background listening.
   may continue in the background. Only the 120 s timeout, a match, `Stop` or a
   ShazamKit error end it.
 - The first match from either source shows a card with the offset
-  (`+2.4 s`), the source, and `Apply` / `Cancel`, with a double click haptic on
+  (`+2.4 s`), the source, and `Apply` / `Cancel`, with the success haptic on
   any watch page. When every source ends without a match (and none was stopped
-  by the user) the watch plays a single click. Click is the quietest haptic;
-  watchOS ties a sound to every haptic, so only the watch's silent mode mutes
-  it, and no haptic plays while the app is in the background. The
+  by the user) the watch plays the failure haptic. watchOS ties a sound to every
+  haptic and only the watch's silent mode mutes it (a Shortcuts automation on
+  the cinema Focus can turn it on); no haptic plays while the app is in the
+  background. The
   watch computes the offset as `(trackTime + (now - matchDate)) - position`,
   where `trackTime = abs_start + predictedCurrentMatchOffset`.
 - `Apply` stops both listeners and sends
