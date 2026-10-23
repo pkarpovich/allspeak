@@ -79,7 +79,7 @@ final class WatchCinemaListener: CinemaListening {
             switch result {
             case .match(let match):
                 let found = match.mediaItems.lazy
-                    .compactMap { FingerprintMatch.make(subtitle: $0.subtitle, predictedOffset: $0.predictedCurrentMatchOffset, matchDate: matchDate) }
+                    .compactMap { FingerprintMatch.make(subtitle: $0.subtitle, predictedOffset: $0.predictedCurrentMatchOffset, matchDate: matchDate, frequencySkew: Double($0.frequencySkew)) }
                     .first
                 guard let found else { continue }
                 finish(.matched(found))

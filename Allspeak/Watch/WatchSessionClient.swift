@@ -29,6 +29,9 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored var phoneListenTimeout: Duration = ListenEvent.timeout + .seconds(15)
     @ObservationIgnored private var watchListener: (any CinemaListening)?
     @ObservationIgnored var makeListenID: () -> UUID = UUID.init
+    @ObservationIgnored var now: () -> Date = Date.init
+    @ObservationIgnored var telemetry: ListenTelemetry?
+    @ObservationIgnored private var abortedListen: WatchListenTelemetry?
     @ObservationIgnored private var listenID: UUID?
     @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
     @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
@@ -49,11 +52,15 @@ final class WatchSessionClient: NSObject {
             self?.receiveDownloadedFile(kind, sha256: sha, url: url)
         }
         downloader?.onEvent = { [weak self] event in
-            self?.send(.watchDownload(event))
+            guard let self else { return }
+            var event = event
+            event.eventDate = self.now()
+            self.report(.watchDownload(event))
         }
     }
 
     func activate() {
+        takeAbortedListen()
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
@@ -149,6 +156,27 @@ final class WatchSessionClient: NSObject {
 
     func send(_ command: WatchCommand) {
         sendCommand(command, errorHandler: { _ in })
+    }
+
+    func report(_ command: WatchCommand) {
+        guard let payload = try? command.toPropertyList() else { return }
+        sender.transferUserInfo(payload)
+    }
+
+    func markDesync() {
+        report(.syncMark(SyncMark(eventDate: now(), position: interpolatedTime)))
+    }
+
+    // Read before any listen can start (the Action button starts one right
+    // after launch) so a new listen's marker is never mistaken for a dead one.
+    func takeAbortedListen() {
+        abortedListen = telemetry?.takeAborted()
+    }
+
+    func reportAbortedListen() {
+        guard let aborted = abortedListen else { return }
+        abortedListen = nil
+        report(.watchAborted(aborted))
     }
 
     private func sendCommand(
@@ -382,6 +410,7 @@ final class WatchSessionClient: NSObject {
         }
         let listener = makeListener(url)
         watchListener = listener
+        telemetry?.begin(listenID: listenID)
         listener.start { [weak self] event in
             self?.handleWatchListenEvent(event, listenID: listenID)
         }
@@ -389,9 +418,13 @@ final class WatchSessionClient: NSObject {
 
     private func handleWatchListenEvent(_ event: ListenEvent, listenID: UUID) {
         receiveListenEvent(source: .watch, event: event)
-        send(.listenEvent(ListenUpdate(listenID: listenID, source: .watch, event: event)))
+        var update = ListenUpdate(listenID: listenID, source: .watch, event: event)
+        update.eventDate = now()
+        report(.listenEvent(update))
         guard event.phase != .started else { return }
         watchListener = nil
+        guard let samples = telemetry?.end() else { return }
+        report(.watchSamples(samples))
     }
 
     private func receiveListenEvent(source: ListenSource, event: ListenEvent) {
@@ -452,11 +485,14 @@ final class WatchSessionClient: NSObject {
 extension WatchSessionClient: WCSessionDelegate {
     nonisolated func session(
         _ session: WCSession,
-        activationDidCompleteWith _: WCSessionActivationState,
+        activationDidCompleteWith state: WCSessionActivationState,
         error _: Error?
     ) {
         let reachable = session.isReachable
         Task { @MainActor in
+            if state == .activated {
+                self.reportAbortedListen()
+            }
             self.isConnected = reachable
             if reachable {
                 self.retryDownloads()

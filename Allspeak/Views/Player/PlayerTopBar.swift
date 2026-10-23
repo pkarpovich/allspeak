@@ -12,6 +12,7 @@ struct PlayerTopBar: View {
     let onClip: () -> Void
     let onSwitchTrack: (UUID) -> Void
     let onSelectHall: (Hall) -> Void
+    let onMarkDesync: () -> Void
 
     var showsTrackMenu: Bool { tracks.count > 1 }
 
@@ -78,6 +79,7 @@ struct PlayerTopBar: View {
                 }
             }
             .pickerStyle(.inline)
+            Button("Mark out of sync", systemImage: Icons.flag, action: onMarkDesync)
         } label: {
             VStack(spacing: 1) {
                 HStack(spacing: 5) {

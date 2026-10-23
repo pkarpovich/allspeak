@@ -776,6 +776,12 @@ final class PlaybackCoordinator {
             applySync(sessionID: sessionID, trackTime: trackTime, matchDate: matchDate, source: source, sha256: sha256)
         case .watchDownload(let event):
             noteWatchDownload(event)
+        case .watchSamples(let telemetry):
+            noteWatchSamples(telemetry)
+        case .watchAborted(let telemetry):
+            noteWatchAborted(telemetry)
+        case .syncMark(let mark):
+            markDesync(source: .watch, watchPosition: mark.position, eventDate: mark.eventDate)
         }
     }
 
@@ -818,7 +824,34 @@ final class PlaybackCoordinator {
 
     func noteWatchDownload(_ event: WatchDownloadEvent) {
         guard let controller else { return }
-        diagnostics.log(.download(event, pos: controller.livePosition))
+        diagnostics.log(.download(event, pos: controller.livePosition, rxDelay: rxDelay(since: event.eventDate)))
+    }
+
+    func noteWatchSamples(_ telemetry: WatchListenTelemetry) {
+        guard controller != nil else { return }
+        for sample in telemetry.samples {
+            diagnostics.log(.watchSample(listenID: telemetry.listenID, sample: sample, rxDelay: rxDelay(since: sample.date) ?? 0))
+        }
+    }
+
+    func noteWatchAborted(_ telemetry: WatchListenTelemetry) {
+        guard controller != nil else { return }
+        let last = telemetry.samples.last
+        diagnostics.log(.watchAborted(
+            listenID: telemetry.listenID,
+            listenSec: last?.listenSeconds,
+            rxDelay: rxDelay(since: last?.date ?? telemetry.startedAt) ?? 0
+        ))
+        noteWatchSamples(telemetry)
+    }
+
+    func markDesync(source: ListenSource, watchPosition: Double? = nil, eventDate: Date? = nil) {
+        guard let controller else { return }
+        diagnostics.log(.mark(source: source, pos: controller.livePosition, watchPos: watchPosition, rxDelay: rxDelay(since: eventDate)))
+    }
+
+    private func rxDelay(since date: Date?) -> Double? {
+        date.map { now().timeIntervalSince($0) }
     }
 
     func noteWatchListenEvent(_ update: ListenUpdate) {
@@ -835,6 +868,7 @@ final class PlaybackCoordinator {
         let pos = controller.livePosition
         let target = FingerprintMatch.target(trackTime: trackTime, matchDate: matchDate, now: now, outputLatency: latency)
         diagnostics.log(.listen(DiagnosticsEvent.Listen(
+            listenID: listenID,
             source: source,
             phase: .apply,
             trackTime: trackTime,
@@ -867,12 +901,15 @@ final class PlaybackCoordinator {
         guard let controller else { return }
         let pos = controller.livePosition
         var listen = DiagnosticsEvent.Listen(
+            listenID: update.listenID,
             source: source,
             phase: Self.diagnosticsPhase(update.phase),
             pos: pos,
             listenSec: update.listenSeconds,
             chunk: update.chunkStart,
-            error: update.error
+            error: update.error,
+            skew: update.frequencySkew,
+            rxDelay: rxDelay(since: update.eventDate)
         )
         if let trackTime = update.trackTime, let matchDate = update.matchDate {
             listen.trackTime = trackTime

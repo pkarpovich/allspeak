@@ -256,6 +256,11 @@ extension WatchSessionHost: WCSessionDelegate {
         let sendableReply = SendablePayloadCallback(invoke: replyHandler)
         receive(command) { sendableReply.invoke($0) }
     }
+
+    nonisolated func session(_: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        guard let command = try? WatchCommand(propertyList: userInfo) else { return }
+        receive(command) { _ in }
+    }
 }
 
 private struct SendablePayloadCallback: @unchecked Sendable {

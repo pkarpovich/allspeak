@@ -168,6 +168,9 @@ no automatic or background listening.
   subtitle (see "Watch downloads").
 - Both sources write `listen` events to the phone's diagnostics log (the watch
   reports its phases to the phone), so the logs show which mic matches better.
+  The watch queues its reports with `transferUserInfo`, so they survive a
+  stretch where the phone is unreachable (Always On, phone in pocket) and
+  arrive later in order.
 
 #### Action button
 
@@ -187,7 +190,10 @@ Playing any session writes a per-screening JSONL log to
 on the Mac. It is always on and has no setting. Every line carries `ts` and
 `event`. Every event except `session` records the track position in track
 seconds: `pos`, or `from` / `to` for skips and `from` for seeks. Booleans are
-written as `1` / `0`. Event types:
+written as `1` / `0`. A line reported by the watch adds `rxDelay`, the seconds
+between the event on the watch and its logging on the phone: the event happened
+at `ts - rxDelay`, while `pos` is the position when the phone logged it.
+Event types:
 
 - `session` - first line: session, title, track (id, label, file, SHA), catalog
   id and revision, the session's saved hall (`hall`, `hallName`), app version,
@@ -207,11 +213,24 @@ written as `1` / `0`. Event types:
 - `watch` - watch reachability change, `reachable` (only while a session is
   open).
 - `hall` - cinema hall picked in the player.
-- `listen` - a cinema-listen phase: `source` (phone or watch), `phase`
-  (`start`, `match`, `nomatch`, `timeout`, `cancel`, `interrupted`, `failed`,
-  `apply`), `listenSec`, and `error` on failure. A match adds `trackTime`, the
-  matched `chunk` start, `delta` against the current position and the output
-  `latency`; `apply` adds `elapsed` since the match and the seek `target`.
+- `listen` - a cinema-listen phase: `listenID` (shared by the phone and the
+  watch listen of one attempt and by its `apply`), `source` (phone or watch),
+  `phase` (`start`, `match`, `nomatch`, `timeout`, `cancel`, `interrupted`,
+  `failed`, `apply`), `listenSec`, and `error` on failure. A match adds
+  `trackTime`, the matched `chunk` start, ShazamKit's `skew` (frequency skew of
+  the hall audio against the reference), `delta` against the current position
+  and the output `latency`; `apply` adds `elapsed` since the match and the seek
+  `target`.
+- `watchSample` - the watch process every 5 s during a watch listen, sent in one
+  batch when the listen ends: `listenID`, `listenSec`, address space in use
+  `vmMB`, `footprintMB`, `availMB` left before the memory limit, watch app state
+  `app` (active / inactive / background), `thermal`, `lowPower`, `battery`.
+- `watchAborted` - a watch listen whose process died before it finished
+  (crash, jetsam, force quit), reported on the next launch with `listenSec` of
+  its last sample, followed by its `watchSample` lines.
+- `mark` - the user marked the dub out of sync: `source`, and on the watch also
+  the watch's own `watchPos`. On the watch the button is on the Listen page
+  under Listen; on the phone it is the last item of the title menu.
 - `download` - a watch catalog download step: `kind` (subtitle or fingerprint),
   `phase` (`start`, `done`, `failed`), `sha`, `attempt`, and `bytes` / `seconds`
   on success or `error` on failure.
@@ -389,8 +408,10 @@ The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
 `setVolume(_:)`, for cinema listen `startListening(listenID:)`,
 `cancelListening(listenID:)`, `listenEvent(_:)` and
-`applySync(sessionID:trackTime:matchDate:source:sha256:)`, and
-`watchDownload(_:)` for the download diagnostics.
+`applySync(sessionID:trackTime:matchDate:source:sha256:)`, and for diagnostics
+`watchDownload(_:)`, `watchSamples(_:)`, `watchAborted(_:)` and `syncMark(_:)`.
+The diagnostics commands and `listenEvent(_:)` travel over `transferUserInfo`
+instead of `sendMessage`.
 Session metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
 the current `activeTrackID`, an optional `serverDate` playback anchor, and
 optional `fingerprintSHA`, `catalogID` and `subtitleSHA` (all decoded with

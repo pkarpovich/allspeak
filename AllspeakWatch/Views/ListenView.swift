@@ -4,6 +4,7 @@ struct ListenView: View {
     static let appliedDisplayDuration: Duration = .seconds(1.5)
 
     @Environment(WatchSessionClient.self) private var client
+    @State private var marks = 0
 
     private var panel: ListenPanelState { client.listenPanel }
 
@@ -54,6 +55,14 @@ struct ListenView: View {
             if hasOutcome {
                 statusLines
             }
+            Button(action: handleMark) {
+                Label("Out of sync", systemImage: Tokens.Icon.flag)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Tokens.text2)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .sensoryFeedback(.success, trigger: marks)
         }
     }
 
@@ -186,6 +195,11 @@ struct ListenView: View {
 
     private func handleStart() {
         client.startListening()
+    }
+
+    private func handleMark() {
+        client.markDesync()
+        marks += 1
     }
 
     private func handleStop() {

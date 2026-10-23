@@ -25,6 +25,7 @@ protocol StreamMatching: AnyObject, Sendable {
 struct ListenCandidate: Equatable, Sendable {
     let subtitle: String?
     let predictedOffset: TimeInterval
+    var frequencySkew: Double? = nil
 }
 
 enum ListenMatcherOutcome: Equatable, Sendable {
@@ -162,7 +163,7 @@ final class PhoneCinemaListener: CinemaListening {
         switch outcome {
         case .found(let candidates, let matchDate):
             let match = candidates.lazy
-                .compactMap { FingerprintMatch.make(subtitle: $0.subtitle, predictedOffset: $0.predictedOffset, matchDate: matchDate) }
+                .compactMap { FingerprintMatch.make(subtitle: $0.subtitle, predictedOffset: $0.predictedOffset, matchDate: matchDate, frequencySkew: $0.frequencySkew) }
                 .first
             guard let match else { return }
             finish(.matched(match))
@@ -310,7 +311,7 @@ final class ShazamStreamMatcher: NSObject, SHSessionDelegate, StreamMatching, @u
     func session(_ session: SHSession, didFind match: SHMatch) {
         let matchDate = Date()
         let candidates = match.mediaItems.map {
-            ListenCandidate(subtitle: $0.subtitle, predictedOffset: $0.predictedCurrentMatchOffset)
+            ListenCandidate(subtitle: $0.subtitle, predictedOffset: $0.predictedCurrentMatchOffset, frequencySkew: Double($0.frequencySkew))
         }
         deliver(.found(candidates, matchDate: matchDate))
     }

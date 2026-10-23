@@ -75,7 +75,8 @@ struct PlayerView: View {
                         onCinema: { applyCinema(.pill) },
                         onClip: presentClip,
                         onSwitchTrack: switchTrack,
-                        onSelectHall: selectHall
+                        onSelectHall: selectHall,
+                        onMarkDesync: { PlaybackCoordinator.shared.markDesync(source: .phone) }
                     )
                     .padding(.top, 18)
 

@@ -46,6 +46,7 @@ enum DiagnosticsEvent: Sendable {
     }
 
     struct Listen: Sendable {
+        var listenID: UUID?
         var source: ListenSource
         var phase: ListenPhase
         var trackTime: Double?
@@ -57,6 +58,8 @@ enum DiagnosticsEvent: Sendable {
         var target: Double?
         var elapsed: Double?
         var error: String?
+        var skew: Double?
+        var rxDelay: Double?
     }
 
     case session(SessionHeader)
@@ -72,7 +75,10 @@ enum DiagnosticsEvent: Sendable {
     case watch(reachable: Bool, pos: Double)
     case hall(key: String, name: String, cinema: String, pos: Double)
     case listen(Listen)
-    case download(WatchDownloadEvent, pos: Double)
+    case download(WatchDownloadEvent, pos: Double, rxDelay: Double?)
+    case watchSample(listenID: UUID, sample: WatchSample, rxDelay: Double)
+    case watchAborted(listenID: UUID, listenSec: Double?, rxDelay: Double)
+    case mark(source: ListenSource, pos: Double, watchPos: Double?, rxDelay: Double?)
 
     var name: String {
         switch self {
@@ -90,6 +96,9 @@ enum DiagnosticsEvent: Sendable {
         case .hall: return "hall"
         case .listen: return "listen"
         case .download: return "download"
+        case .watchSample: return "watchSample"
+        case .watchAborted: return "watchAborted"
+        case .mark: return "mark"
         }
     }
 
@@ -155,6 +164,7 @@ enum DiagnosticsEvent: Sendable {
             builder.add("cinema", cinema)
             builder.addPosition("pos", pos)
         case let .listen(listen):
+            builder.add("listenID", listen.listenID?.uuidString)
             builder.add("source", listen.source.rawValue)
             builder.add("phase", listen.phase.rawValue)
             builder.addPosition("trackTime", listen.trackTime)
@@ -166,7 +176,9 @@ enum DiagnosticsEvent: Sendable {
             builder.addPosition("target", listen.target)
             builder.addPosition("elapsed", listen.elapsed)
             builder.add("error", listen.error)
-        case let .download(event, pos):
+            builder.add("skew", listen.skew)
+            builder.addPosition("rxDelay", listen.rxDelay)
+        case let .download(event, pos, rxDelay):
             builder.add("kind", event.kind.rawValue)
             builder.add("phase", event.phase.rawValue)
             builder.add("sha", event.sha256)
@@ -175,6 +187,27 @@ enum DiagnosticsEvent: Sendable {
             builder.add("seconds", event.seconds)
             builder.add("error", event.error)
             builder.addPosition("pos", pos)
+            builder.addPosition("rxDelay", rxDelay)
+        case let .watchSample(listenID, sample, rxDelay):
+            builder.add("listenID", listenID.uuidString)
+            builder.addPosition("listenSec", sample.listenSeconds)
+            builder.addPosition("vmMB", sample.virtualMB)
+            builder.addPosition("footprintMB", sample.footprintMB)
+            builder.addPosition("availMB", sample.availableMB)
+            builder.add("app", sample.appState)
+            builder.add("thermal", sample.thermalState)
+            builder.add("lowPower", sample.lowPower)
+            builder.add("battery", sample.battery)
+            builder.addPosition("rxDelay", rxDelay)
+        case let .watchAborted(listenID, listenSec, rxDelay):
+            builder.add("listenID", listenID.uuidString)
+            builder.addPosition("listenSec", listenSec)
+            builder.addPosition("rxDelay", rxDelay)
+        case let .mark(source, pos, watchPos, rxDelay):
+            builder.add("source", source.rawValue)
+            builder.addPosition("pos", pos)
+            builder.addPosition("watchPos", watchPos)
+            builder.addPosition("rxDelay", rxDelay)
         }
         return builder.line()
     }

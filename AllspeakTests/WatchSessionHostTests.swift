@@ -2,6 +2,7 @@ import AVFoundation
 import CoreData
 import Foundation
 import Testing
+import WatchConnectivity
 @testable import Allspeak
 
 private let testListenID = UUID(uuidString: "5E5E5E5E-0000-4000-8000-000000000001")!
@@ -710,6 +711,30 @@ struct WatchSessionHostTests {
 
         #expect(listener.startCount == 0)
         #expect(updates.isEmpty)
+    }
+
+    @Test("a command delivered through transferUserInfo reaches the coordinator")
+    func userInfoCommandIsProcessed() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let log = DiagnosticsLog(rootURL: fixture.root)
+        log.begin(filmTitle: "Movie")
+        fixture.coordinator.diagnostics = log
+        let mark = WatchCommand.syncMark(SyncMark(eventDate: Date(), position: 2))
+
+        fixture.host.session(WCSession.default, didReceiveUserInfo: try mark.toPropertyList())
+
+        let logURL = try #require(log.currentFileURL)
+        var text = ""
+        for _ in 0..<200 {
+            text = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+            if text.contains(#""event":"mark""#) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(text.contains(#""event":"mark","source":"watch""#))
     }
 
     @Test("dispatch(.switchTrack) updates activeTrackID and snapshot reflects it")

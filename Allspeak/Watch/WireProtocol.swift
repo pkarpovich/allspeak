@@ -37,6 +37,12 @@ import Foundation
 //   .watchDownload(WatchDownloadEvent) a phase of the watch's catalog download
 //                                     (subtitle or fingerprint); the phone only
 //                                     logs it
+//   .watchSamples(WatchListenTelemetry) memory and device samples taken during
+//                                     one watch listen; the phone only logs them
+//   .watchAborted(WatchListenTelemetry) a watch listen whose process died before
+//                                     it finished, found on the next launch
+//   .syncMark(SyncMark)               the user marked the dub out of sync on the
+//                                     watch; the phone only logs it
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -78,6 +84,11 @@ import Foundation
 //       Optional fields (trackTime, matchDate, chunkStart, error) are omitted
 //       when nil, so older and newer builds decode each other.
 //
+//   Watch  --transferUserInfo-----------> iPhone  WatchCommand (log only)
+//       .listenEvent, .watchDownload, .watchSamples, .watchAborted, .syncMark; queued
+//       while the phone is unreachable and delivered in order later, so each
+//       carries its own eventDate / sample dates
+//
 //   Watch  --sendMessage (with reply)---> iPhone  WatchCommand
 //       reply payload is a PlaybackSnapshot so the watch stays fresh after
 //       every user action;
@@ -118,6 +129,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case listenEvent(ListenUpdate)
     case applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String)
     case watchDownload(WatchDownloadEvent)
+    case watchSamples(WatchListenTelemetry)
+    case watchAborted(WatchListenTelemetry)
+    case syncMark(SyncMark)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -133,6 +147,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case source
         case listenID
         case download
+        case telemetry
+        case mark
     }
 
     private enum Kind: String, Codable {
@@ -148,6 +164,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case listenEvent
         case applySync
         case watchDownload
+        case watchSamples
+        case watchAborted
+        case syncMark
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -190,6 +209,15 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .watchDownload(let event):
             try container.encode(Kind.watchDownload, forKey: .kind)
             try container.encode(event, forKey: .download)
+        case .watchSamples(let telemetry):
+            try container.encode(Kind.watchSamples, forKey: .kind)
+            try container.encode(telemetry, forKey: .telemetry)
+        case .watchAborted(let telemetry):
+            try container.encode(Kind.watchAborted, forKey: .kind)
+            try container.encode(telemetry, forKey: .telemetry)
+        case .syncMark(let mark):
+            try container.encode(Kind.syncMark, forKey: .kind)
+            try container.encode(mark, forKey: .mark)
         }
     }
 
@@ -227,6 +255,12 @@ enum WatchCommand: Codable, Equatable, Sendable {
             )
         case .watchDownload:
             self = .watchDownload(try container.decode(WatchDownloadEvent.self, forKey: .download))
+        case .watchSamples:
+            self = .watchSamples(try container.decode(WatchListenTelemetry.self, forKey: .telemetry))
+        case .watchAborted:
+            self = .watchAborted(try container.decode(WatchListenTelemetry.self, forKey: .telemetry))
+        case .syncMark:
+            self = .syncMark(try container.decode(SyncMark.self, forKey: .mark))
         }
     }
 }
@@ -323,8 +357,9 @@ struct WatchDownloadEvent: Codable, Equatable, Sendable {
     let bytes: Int?
     let seconds: Double?
     let error: String?
+    var eventDate: Date?
 
-    init(kind: Kind, phase: Phase, sha256: String, attempt: Int, bytes: Int? = nil, seconds: Double? = nil, error: String? = nil) {
+    init(kind: Kind, phase: Phase, sha256: String, attempt: Int, bytes: Int? = nil, seconds: Double? = nil, error: String? = nil, eventDate: Date? = nil) {
         self.kind = kind
         self.phase = phase
         self.sha256 = sha256
@@ -332,7 +367,31 @@ struct WatchDownloadEvent: Codable, Equatable, Sendable {
         self.bytes = bytes
         self.seconds = seconds
         self.error = error
+        self.eventDate = eventDate
     }
+}
+
+struct WatchSample: Codable, Equatable, Sendable {
+    let date: Date
+    let listenSeconds: Double
+    let virtualMB: Double
+    let footprintMB: Double
+    let availableMB: Double
+    let appState: String
+    let thermalState: String
+    let lowPower: Bool
+    let battery: Double?
+}
+
+struct SyncMark: Codable, Equatable, Sendable {
+    let eventDate: Date
+    let position: Double
+}
+
+struct WatchListenTelemetry: Codable, Equatable, Sendable {
+    let listenID: UUID
+    let startedAt: Date
+    var samples: [WatchSample]
 }
 
 struct ListenUpdate: Codable, Equatable, Sendable {
@@ -354,6 +413,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
     let chunkStart: Double?
     let listenSeconds: Double
     let error: String?
+    let frequencySkew: Double?
+    var eventDate: Date?
 
     init(
         listenID: UUID,
@@ -363,7 +424,9 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         matchDate: Date? = nil,
         chunkStart: Double? = nil,
         listenSeconds: Double,
-        error: String? = nil
+        error: String? = nil,
+        frequencySkew: Double? = nil,
+        eventDate: Date? = nil
     ) {
         self.listenID = listenID
         self.source = source
@@ -373,6 +436,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         self.chunkStart = chunkStart
         self.listenSeconds = listenSeconds
         self.error = error
+        self.frequencySkew = frequencySkew
+        self.eventDate = eventDate
     }
 
     init(listenID: UUID, source: ListenSource, event: ListenEvent) {
@@ -387,7 +452,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
                 trackTime: match.trackTime,
                 matchDate: match.matchDate,
                 chunkStart: match.chunkStart,
-                listenSeconds: event.listenSeconds
+                listenSeconds: event.listenSeconds,
+                frequencySkew: match.frequencySkew
             )
         case .noMatch:
             self.init(listenID: listenID, source: source, phase: .nomatch, listenSeconds: event.listenSeconds)
@@ -409,7 +475,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
             phase = .started
         case .match:
             guard let trackTime, let matchDate else { return nil }
-            phase = .matched(FingerprintMatch(trackTime: trackTime, matchDate: matchDate, chunkStart: chunkStart ?? 0))
+            phase = .matched(FingerprintMatch(trackTime: trackTime, matchDate: matchDate, chunkStart: chunkStart ?? 0, frequencySkew: frequencySkew))
         case .nomatch:
             phase = .noMatch
         case .timeout:
