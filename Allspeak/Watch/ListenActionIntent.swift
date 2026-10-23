@@ -5,9 +5,13 @@ struct ListenActionIntent: AppIntent {
     static let description = IntentDescription("Listens to the cinema audio to resync the dub. Press again after a match to apply it.")
     static let supportedModes: IntentModes = .foreground(.immediate)
 
+    // Also compiled into the iPhone app only so the Shortcuts editor there can
+    // offer it for an Action button shortcut; the action itself runs on the watch.
     @MainActor
     func perform() async throws -> some IntentResult {
+        #if os(watchOS)
         WatchSessionClient.shared.performListenAction()
+        #endif
         return .result()
     }
 }
