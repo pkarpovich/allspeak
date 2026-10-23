@@ -36,7 +36,11 @@ struct WatchSessionClientTests {
             }
         }
 
-        func transferUserInfo(_: [String: Any]) {}
+        var transferredUserInfo: [[String: Any]] = []
+
+        func transferUserInfo(_ userInfo: [String: Any]) {
+            transferredUserInfo.append(userInfo)
+        }
     }
 
     private func makeClient() throws -> (WatchSessionClient, MockSender, URL) {
@@ -718,7 +722,7 @@ struct WatchSessionClientTests {
     }
 
     private static func downloadEvents(_ messages: [[String: Any]]) -> [WatchDownloadEvent] {
-        sentCommands(messages).compactMap { command in
+        reportedCommands(messages).compactMap { command in
             guard case .watchDownload(let event) = command else { return nil }
             return event
         }
@@ -743,7 +747,7 @@ struct WatchSessionClientTests {
 
         #expect(fixture.client.cues.map(\.text) == ["first", "second"])
         #expect(fixture.client.hasFingerprint)
-        let done = Self.downloadEvents(fixture.sender.sentMessages).filter { $0.phase == .done }
+        let done = Self.downloadEvents(fixture.sender.transferredUserInfo).filter { $0.phase == .done }
         #expect(Set(done.map(\.kind)) == [.subtitle, .fingerprint])
     }
 
@@ -875,10 +879,29 @@ struct WatchSessionClientTests {
             if phase != .started { onEvent = nil }
             handler?(ListenEvent(phase: phase, listenSeconds: seconds))
         }
+
+        func emit(_ phase: ListenEvent.Phase, seconds: Double = 1) {
+            onEvent?(ListenEvent(phase: phase, listenSeconds: seconds))
+        }
     }
 
     private static func sentCommands(_ messages: [[String: Any]]) -> [WatchCommand] {
         messages.compactMap { try? WatchCommand(propertyList: $0) }
+    }
+
+    private static func reportedCommands(_ transfers: [[String: Any]]) -> [WatchCommand] {
+        sentCommands(transfers).map { command in
+            switch command {
+            case .listenEvent(var update):
+                update.eventDate = nil
+                return .listenEvent(update)
+            case .watchDownload(var event):
+                event.eventDate = nil
+                return .watchDownload(event)
+            default:
+                return command
+            }
+        }
     }
 
     private func makeListeningClient() throws -> (WatchSessionClient, MockSender, FakeListener, URL) {
@@ -911,10 +934,10 @@ struct WatchSessionClientTests {
         #expect(client.listenPanel.phase == .listening)
         let commands = Self.sentCommands(sender.sentMessages)
         #expect(commands.first == .startListening(listenID: testListenID))
-        #expect(commands.contains(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0))))
+        #expect(Self.reportedCommands(sender.transferredUserInfo).contains(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0))))
     }
 
-    @Test("a watch match is shown and sent to the phone as a listenEvent")
+    @Test("a watch match is shown and reported to the phone as a listenEvent")
     func watchMatchForwarded() throws {
         let (client, sender, listener, dir) = try makeListeningClient()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -925,7 +948,234 @@ struct WatchSessionClientTests {
         #expect(client.listenPanel.shownMatch == ListenPanelState.ShownMatch(source: .watch, match: Self.listenMatch))
         #expect(client.listenPanel.phone.isListening)
         let expected = WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, event: ListenEvent(phase: .matched(Self.listenMatch), listenSeconds: 7)))
-        #expect(Self.sentCommands(sender.sentMessages).contains(expected))
+        #expect(Self.reportedCommands(sender.transferredUserInfo).contains(expected))
+    }
+
+    @Test("watch listen events go through the transfer queue with the watch's event date")
+    func watchListenEventsQueuedWithDate() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let eventDate = Date(timeIntervalSince1970: 2_000_000)
+        client.now = { eventDate }
+
+        client.startListening()
+        listener.send(.timedOut, seconds: 120)
+
+        let reported = Self.sentCommands(sender.transferredUserInfo).compactMap { command -> ListenUpdate? in
+            guard case .listenEvent(let update) = command else { return nil }
+            return update
+        }
+        #expect(reported.map(\.phase) == [.start, .timeout])
+        #expect(reported.allSatisfy { $0.eventDate == eventDate })
+        #expect(!Self.sentCommands(sender.sentMessages).contains { command in
+            if case .listenEvent = command { return true }
+            return false
+        })
+    }
+
+    @Test("a watch listen samples telemetry and reports it after the final event")
+    func watchListenReportsSamples() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let markerURL = dir.appendingPathComponent("marker.json")
+        var clock = Date(timeIntervalSince1970: 3_000_000)
+        client.telemetry = ListenTelemetry(markerURL: markerURL, interval: .seconds(3600), now: { clock }, sample: Self.sample)
+
+        client.startListening()
+        #expect(FileManager.default.fileExists(atPath: markerURL.path))
+        clock += 5
+        client.telemetry?.record()
+        clock += 3
+        listener.send(.matched(Self.listenMatch), seconds: 8)
+
+        let commands = Self.sentCommands(sender.transferredUserInfo)
+        guard case .watchSamples(let telemetry) = commands.last else {
+            Issue.record("expected watchSamples last, got \(commands)")
+            return
+        }
+        #expect(telemetry.listenID == testListenID)
+        #expect(telemetry.samples.map(\.listenSeconds) == [0, 5, 8])
+        #expect(!FileManager.default.fileExists(atPath: markerURL.path))
+    }
+
+    @Test("a listen the process never finished is reported once as aborted")
+    func unfinishedListenReportedAsAborted() throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let markerURL = dir.appendingPathComponent("marker.json")
+        let crashed = ListenTelemetry(markerURL: markerURL, interval: .seconds(3600), sample: Self.sample)
+        crashed.begin(listenID: testListenID)
+        client.telemetry = ListenTelemetry(markerURL: markerURL, sample: Self.sample)
+
+        client.takeAbortedListen()
+        client.reportAbortedListen()
+        client.reportAbortedListen()
+
+        let commands = Self.sentCommands(sender.transferredUserInfo)
+        #expect(commands.count == 1)
+        guard case .watchAborted(let telemetry) = commands.first else {
+            Issue.record("expected watchAborted, got \(commands)")
+            return
+        }
+        #expect(telemetry.listenID == testListenID)
+        #expect(telemetry.samples.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: markerURL.path))
+    }
+
+    @Test("a listen started right after launch is not reported as the aborted one")
+    func listenAfterLaunchNotAborted() throws {
+        let (client, sender, listener, dir) = try makeListeningClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let markerURL = dir.appendingPathComponent("marker.json")
+        client.telemetry = ListenTelemetry(markerURL: markerURL, interval: .seconds(3600), sample: Self.sample)
+
+        client.takeAbortedListen()
+        client.startListening()
+        client.reportAbortedListen()
+
+        #expect(!Self.sentCommands(sender.transferredUserInfo).contains { command in
+            if case .watchAborted = command { return true }
+            return false
+        })
+        #expect(FileManager.default.fileExists(atPath: markerURL.path))
+        listener.send(.timedOut, seconds: 120)
+        #expect(!FileManager.default.fileExists(atPath: markerURL.path))
+    }
+
+    @Test("markDesync reports the watch's film position through the transfer queue")
+    func markDesyncReported() throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let markDate = Date(timeIntervalSince1970: 4_000_000)
+        client.now = { markDate }
+        let meta = SessionMetadata(
+            sessionID: UUID(), revision: 1, title: "Digger",
+            duration: 7200, cueCount: 0, isPlaying: false, currentTime: 321
+        )
+        client.handleReceivedApplicationContext(try meta.toPropertyList())
+
+        client.markDesync()
+
+        #expect(Self.sentCommands(sender.transferredUserInfo) == [.syncMark(SyncMark(eventDate: markDate, position: 321))])
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    private func makeAutoClient() throws -> (WatchSessionClient, MockSender, FakeListener, URL) {
+        let (client, sender, _, dir) = try makeListeningClient()
+        let listener = FakeListener()
+        client.makeContinuousListener = { _ in listener }
+        client.now = { Self.autoNow }
+        return (client, sender, listener, dir)
+    }
+
+    private static let autoNow = Date(timeIntervalSince1970: 5_000_000)
+
+    private static func autoMatch(delta: Double) -> FingerprintMatch {
+        FingerprintMatch(trackTime: delta, matchDate: autoNow, chunkStart: 0)
+    }
+
+    @Test("listen all film keeps listening across matches and only suggests a shift over 1 s")
+    func autoListenSuggestsLargeShifts() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startAutoListen()
+        #expect(client.autoListen.isOn)
+        #expect(!Self.sentCommands(sender.sentMessages).contains(.startListening(listenID: testListenID)))
+
+        listener.emit(.matched(Self.autoMatch(delta: 0.6)))
+        #expect(client.autoListen.lastMatch == Self.autoMatch(delta: 0.6))
+        #expect(client.autoListen.suggestion == nil)
+
+        listener.emit(.matched(Self.autoMatch(delta: -2.5)))
+        #expect(client.autoListen.suggestion == Self.autoMatch(delta: -2.5))
+
+        listener.emit(.matched(Self.autoMatch(delta: 0.2)))
+        #expect(client.autoListen.suggestion == nil)
+        #expect(client.autoListen.isOn)
+
+        let phases = Self.reportedCommands(sender.transferredUserInfo).compactMap { command -> ListenUpdate.Phase? in
+            guard case .listenEvent(let update) = command else { return nil }
+            return update.phase
+        }
+        #expect(phases == [.start, .match, .match, .match])
+    }
+
+    @Test("applying a suggestion sends applySync and keeps listening")
+    func autoListenApply() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = try #require(client.metadata)
+
+        client.startAutoListen()
+        listener.emit(.matched(Self.autoMatch(delta: 3)))
+        sender.sentMessages = []
+        client.performListenAction()
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.applySync(
+            sessionID: meta.sessionID,
+            trackTime: 3,
+            matchDate: Self.autoNow,
+            source: .watch,
+            sha256: try #require(meta.fingerprintSHA)
+        )])
+        #expect(client.autoListen.suggestion == nil)
+        #expect(client.autoListen.isOn)
+        #expect(listener.cancelCount == 0)
+    }
+
+    @Test("stopping listen all film cancels the listener and resets the state")
+    func autoListenStop() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startAutoListen()
+        client.stopAutoListen()
+
+        #expect(listener.cancelCount == 1)
+        #expect(client.autoListen == AutoListenState())
+        #expect(Self.reportedCommands(sender.transferredUserInfo).last == .listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .cancel, listenSeconds: 1)))
+    }
+
+    @Test("a listener failure ends listen all film with the error shown")
+    func autoListenFailure() throws {
+        let (client, _, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startAutoListen()
+        listener.send(.failed("catalog: broken"))
+
+        #expect(!client.autoListen.isOn)
+        #expect(client.autoListen.error == "catalog: broken")
+    }
+
+    @Test("telemetry of a long listen goes out in batches")
+    func telemetryBatches() throws {
+        let (client, sender, dir) = try makeClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var clock = Date(timeIntervalSince1970: 6_000_000)
+        client.telemetry = ListenTelemetry(markerURL: dir.appendingPathComponent("marker.json"), interval: .seconds(3600), now: { clock }, sample: Self.sample)
+
+        client.telemetry?.begin(listenID: testListenID)
+        for _ in 1..<ListenTelemetry.batchSize {
+            clock += 5
+            client.telemetry?.record()
+        }
+
+        let batches = Self.sentCommands(sender.transferredUserInfo).compactMap { command -> WatchListenTelemetry? in
+            guard case .watchSamples(let telemetry) = command else { return nil }
+            return telemetry
+        }
+        #expect(batches.map(\.samples.count) == [ListenTelemetry.batchSize])
+        #expect(client.telemetry?.end()?.samples.count == 1)
+    }
+
+    private static func sample(date: Date, listenSeconds: Double) -> WatchSample {
+        WatchSample(
+            date: date, listenSeconds: listenSeconds,
+            virtualMB: 400, footprintMB: 60, availableMB: 30,
+            appState: "background", thermalState: "nominal", lowPower: false, battery: 0.8
+        )
     }
 
     @Test("a listenUpdate payload updates the phone source")
@@ -986,7 +1236,7 @@ struct WatchSessionClientTests {
         #expect(client.listenPanel == ListenPanelState())
         let commands = Self.sentCommands(sender.sentMessages)
         #expect(commands.contains(.cancelListening(listenID: testListenID)))
-        #expect(commands.contains(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .cancel, listenSeconds: 1))))
+        #expect(Self.reportedCommands(sender.transferredUserInfo).contains(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .cancel, listenSeconds: 1))))
     }
 
     private static func sessionReply(for client: WatchSessionClient) throws -> [String: Any] {
@@ -1153,7 +1403,7 @@ struct WatchSessionClientTests {
         #expect(client.listenPanel.watch == .failed("no fingerprint"))
         #expect(client.listenPanel.phone.isListening)
         let failed = WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 0, error: "no fingerprint"))
-        #expect(Self.sentCommands(sender.sentMessages).contains(failed))
+        #expect(Self.reportedCommands(sender.transferredUserInfo).contains(failed))
     }
 
     @Test("an unreachable phone marks the phone source failed")

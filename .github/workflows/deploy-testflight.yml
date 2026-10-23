@@ -119,6 +119,7 @@ jobs:
         run: |
           BUILD_NUMBER=$(git rev-list --count HEAD).${{ github.run_number }}
           agvtool new-version -all $BUILD_NUMBER
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
 
       - name: Archive
         run: |
@@ -127,6 +128,13 @@ jobs:
             -scheme $SCHEME \
             -archivePath $RUNNER_TEMP/Allspeak.xcarchive \
             -destination 'generic/platform=iOS'
+
+      - name: Upload dSYMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dSYMs-${{ env.BUILD_NUMBER }}
+          path: ${{ runner.temp }}/Allspeak.xcarchive/dSYMs
+          if-no-files-found: warn
 
       - name: Export and upload to TestFlight
         env:

@@ -5,17 +5,19 @@ struct FingerprintMatch: Equatable, Sendable {
     let trackTime: Double
     let matchDate: Date
     let chunkStart: Double
+    var frequencySkew: Double? = nil
 
     private static let absStartPrefix = "abs_start="
 
-    static func make(subtitle: String?, predictedOffset: TimeInterval, matchDate: Date) -> FingerprintMatch? {
+    static func make(subtitle: String?, predictedOffset: TimeInterval, matchDate: Date, frequencySkew: Double? = nil) -> FingerprintMatch? {
         guard let subtitle, subtitle.hasPrefix(absStartPrefix) else { return nil }
         guard let chunkStart = Double(subtitle.dropFirst(absStartPrefix.count)), chunkStart.isFinite else { return nil }
         guard predictedOffset.isFinite else { return nil }
         return FingerprintMatch(
             trackTime: chunkStart + predictedOffset,
             matchDate: matchDate,
-            chunkStart: chunkStart
+            chunkStart: chunkStart,
+            frequencySkew: frequencySkew
         )
     }
 

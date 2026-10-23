@@ -27,6 +27,7 @@ enum Tokens {
         static let popcorn           = "popcorn.fill"
         static let listen            = "waveform"
         static let done              = "checkmark.circle.fill"
+        static let flag              = "flag"
     }
 }
 

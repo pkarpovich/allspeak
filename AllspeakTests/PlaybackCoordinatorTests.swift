@@ -2004,6 +2004,82 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.harness.listeners.isEmpty)
         #expect(fixture.harness.updates.isEmpty)
     }
+
+    @Test("a queued watch event logs its listen id, skew and delivery delay")
+    func queuedWatchEventLogsDelay() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+
+        fixture.coordinator.apply(.listenEvent(ListenUpdate(
+            listenID: testListenID,
+            source: .watch,
+            phase: .match,
+            trackTime: 1.5,
+            matchDate: Self.listenNow.addingTimeInterval(-4),
+            chunkStart: 600,
+            listenSeconds: 8,
+            frequencySkew: 0.012,
+            eventDate: Self.listenNow.addingTimeInterval(-4)
+        )))
+
+        let line = try #require(try Self.listenLines(fixture.log).last)
+        #expect(line["listenID"] as? String == testListenID.uuidString)
+        #expect(line["skew"] as? Double == 0.012)
+        #expect(line["rxDelay"] as? Double == 4)
+    }
+
+    @Test("an out-of-sync mark logs the player position, and the watch's own position when it came from the watch")
+    func desyncMarksLogged() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.controller?.seek(to: 1.0)
+
+        fixture.coordinator.markDesync(source: .phone)
+        fixture.coordinator.apply(.syncMark(SyncMark(eventDate: Self.listenNow.addingTimeInterval(-3), position: 0.5)))
+
+        let logURL = try #require(fixture.log.currentFileURL)
+        let lines = try Self.readJSONLines(logURL).filter { $0["event"] as? String == "mark" }
+        #expect(lines.map { $0["source"] as? String } == ["phone", "watch"])
+        #expect(lines.map { $0["pos"] as? Double } == [1.0, 1.0])
+        #expect(lines[0]["watchPos"] == nil)
+        #expect(lines[0]["rxDelay"] == nil)
+        #expect(lines[1]["watchPos"] as? Double == 0.5)
+        #expect(lines[1]["rxDelay"] as? Double == 3)
+    }
+
+    @Test("watch samples log one line each, an aborted listen logs a marker line first")
+    func watchSamplesAndAbortLogged() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        let startedAt = Self.listenNow.addingTimeInterval(-60)
+        let samples = [0.0, 5.0].map { seconds in
+            WatchSample(
+                date: startedAt.addingTimeInterval(seconds), listenSeconds: seconds,
+                virtualMB: 410.5, footprintMB: 62.25, availableMB: 18,
+                appState: "background", thermalState: "fair", lowPower: true, battery: 0.5
+            )
+        }
+        let telemetry = WatchListenTelemetry(listenID: testListenID, startedAt: startedAt, samples: samples)
+
+        fixture.coordinator.apply(.watchSamples(telemetry))
+        fixture.coordinator.apply(.watchAborted(telemetry))
+
+        let logURL = try #require(fixture.log.currentFileURL)
+        let lines = try Self.readJSONLines(logURL).filter { ["watchSample", "watchAborted"].contains($0["event"] as? String) }
+        #expect(lines.map { $0["event"] as? String } == ["watchSample", "watchSample", "watchAborted", "watchSample", "watchSample"])
+        #expect(lines[1]["listenID"] as? String == testListenID.uuidString)
+        #expect(lines[1]["listenSec"] as? Double == 5)
+        #expect(lines[1]["vmMB"] as? Double == 410.5)
+        #expect(lines[1]["footprintMB"] as? Double == 62.25)
+        #expect(lines[1]["availMB"] as? Double == 18)
+        #expect(lines[1]["app"] as? String == "background")
+        #expect(lines[1]["thermal"] as? String == "fair")
+        #expect(lines[1]["lowPower"] as? Double == 1)
+        #expect(lines[1]["battery"] as? Double == 0.5)
+        #expect(lines[1]["rxDelay"] as? Double == 55)
+        #expect(lines[2]["listenSec"] as? Double == 5)
+        #expect(lines[2]["rxDelay"] as? Double == 55)
+    }
 }
 
 @MainActor

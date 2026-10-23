@@ -19,6 +19,7 @@ final class WatchSessionClient: NSObject {
     var interpolationTick: UInt64 = 0
     var fingerprintURL: URL?
     var listenPanel = ListenPanelState()
+    var autoListen = AutoListenState()
 
     var tracks: [TrackInfo] { metadata?.tracks ?? [] }
     var activeTrackID: UUID? { metadata?.activeTrackID }
@@ -29,6 +30,18 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored var phoneListenTimeout: Duration = ListenEvent.timeout + .seconds(15)
     @ObservationIgnored private var watchListener: (any CinemaListening)?
     @ObservationIgnored var makeListenID: () -> UUID = UUID.init
+    @ObservationIgnored var now: () -> Date = Date.init
+    @ObservationIgnored var telemetry: ListenTelemetry? {
+        didSet {
+            telemetry?.onBatch = { [weak self] batch in
+                self?.report(.watchSamples(batch))
+            }
+        }
+    }
+    @ObservationIgnored var makeContinuousListener: (@MainActor (URL) -> any CinemaListening)?
+    @ObservationIgnored private var autoListener: (any CinemaListening)?
+    @ObservationIgnored private var autoListenID: UUID?
+    @ObservationIgnored private var abortedListen: WatchListenTelemetry?
     @ObservationIgnored private var listenID: UUID?
     @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
     @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
@@ -49,11 +62,15 @@ final class WatchSessionClient: NSObject {
             self?.receiveDownloadedFile(kind, sha256: sha, url: url)
         }
         downloader?.onEvent = { [weak self] event in
-            self?.send(.watchDownload(event))
+            guard let self else { return }
+            var event = event
+            event.eventDate = self.now()
+            self.report(.watchDownload(event))
         }
     }
 
     func activate() {
+        takeAbortedListen()
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
@@ -151,6 +168,27 @@ final class WatchSessionClient: NSObject {
         sendCommand(command, errorHandler: { _ in })
     }
 
+    func report(_ command: WatchCommand) {
+        guard let payload = try? command.toPropertyList() else { return }
+        sender.transferUserInfo(payload)
+    }
+
+    func markDesync() {
+        report(.syncMark(SyncMark(eventDate: now(), position: interpolatedTime)))
+    }
+
+    // Read before any listen can start (the Action button starts one right
+    // after launch) so a new listen's marker is never mistaken for a dead one.
+    func takeAbortedListen() {
+        abortedListen = telemetry?.takeAborted()
+    }
+
+    func reportAbortedListen() {
+        guard let aborted = abortedListen else { return }
+        abortedListen = nil
+        report(.watchAborted(aborted))
+    }
+
     private func sendCommand(
         _ command: WatchCommand,
         snapshotReplyHandler: (@MainActor @Sendable (PlaybackSnapshot?) -> Void)? = nil,
@@ -188,6 +226,7 @@ final class WatchSessionClient: NSObject {
     func handleReceivedApplicationContext(_ context: [String: Any]) {
         if SessionEndedSignal.isSessionEnded(context) {
             cancelListening()
+            stopAutoListen()
             self.metadata = nil
             self.lastSnapshot = nil
             downloader?.cancel()
@@ -202,6 +241,7 @@ final class WatchSessionClient: NSObject {
         let fingerprintChanged = previous?.fingerprintSHA != meta.fingerprintSHA
         if previous != nil, sessionChanged || fingerprintChanged {
             cancelListening()
+            stopAutoListen()
         }
         if sessionChanged || revisionChanged {
             self.lastSnapshot = nil
@@ -279,6 +319,10 @@ final class WatchSessionClient: NSObject {
     }
 
     func performListenAction() {
+        if autoListen.isOn {
+            applyAutoSuggestion()
+            return
+        }
         switch listenPanel.phase {
         case .match:
             applyShownMatch()
@@ -382,6 +426,7 @@ final class WatchSessionClient: NSObject {
         }
         let listener = makeListener(url)
         watchListener = listener
+        telemetry?.begin(listenID: listenID)
         listener.start { [weak self] event in
             self?.handleWatchListenEvent(event, listenID: listenID)
         }
@@ -389,13 +434,76 @@ final class WatchSessionClient: NSObject {
 
     private func handleWatchListenEvent(_ event: ListenEvent, listenID: UUID) {
         receiveListenEvent(source: .watch, event: event)
-        send(.listenEvent(ListenUpdate(listenID: listenID, source: .watch, event: event)))
+        var update = ListenUpdate(listenID: listenID, source: .watch, event: event)
+        update.eventDate = now()
+        report(.listenEvent(update))
         guard event.phase != .started else { return }
         watchListener = nil
+        guard let samples = telemetry?.end() else { return }
+        report(.watchSamples(samples))
     }
 
     private func receiveListenEvent(source: ListenSource, event: ListenEvent) {
         listenPanel.receive(source: source, event: event, now: Date())
+    }
+
+    // MARK: - Listen all film
+
+    func startAutoListen() {
+        guard !autoListen.isOn, !listenPanel.isListening,
+              let url = fingerprintURL, let makeContinuousListener else { return }
+        let listenID = makeListenID()
+        autoListenID = listenID
+        autoListen = AutoListenState(isOn: true, startedAt: now())
+        let listener = makeContinuousListener(url)
+        autoListener = listener
+        telemetry?.begin(listenID: listenID)
+        listener.start { [weak self] event in
+            self?.handleAutoListenEvent(event, listenID: listenID)
+        }
+    }
+
+    func stopAutoListen() {
+        autoListener?.cancel()
+    }
+
+    func applyAutoSuggestion() {
+        guard let match = autoListen.suggestion,
+              let sessionID = metadata?.sessionID,
+              let sha256 = metadata?.fingerprintSHA else { return }
+        autoListen.suggestion = nil
+        sendCommand(.applySync(
+            sessionID: sessionID,
+            trackTime: match.trackTime,
+            matchDate: match.matchDate,
+            source: .watch,
+            sha256: sha256
+        ), errorHandler: { _ in })
+    }
+
+    func dismissAutoSuggestion() {
+        autoListen.suggestion = nil
+    }
+
+    private func handleAutoListenEvent(_ event: ListenEvent, listenID: UUID) {
+        guard autoListenID == listenID else { return }
+        var update = ListenUpdate(listenID: listenID, source: .watch, event: event)
+        update.eventDate = now()
+        report(.listenEvent(update))
+        switch event.phase {
+        case .started, .noMatch:
+            break
+        case .matched(let match):
+            let delta = ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now())
+            autoListen.lastMatch = match
+            autoListen.suggestion = abs(delta) > AutoListenState.suggestionThreshold ? match : nil
+        case .timedOut, .cancelled, .interrupted, .failed:
+            autoListener = nil
+            autoListenID = nil
+            autoListen = AutoListenState(error: AutoListenState.errorText(event.phase))
+            guard let samples = telemetry?.end() else { return }
+            report(.watchSamples(samples))
+        }
     }
 
     #if os(watchOS)
@@ -452,11 +560,14 @@ final class WatchSessionClient: NSObject {
 extension WatchSessionClient: WCSessionDelegate {
     nonisolated func session(
         _ session: WCSession,
-        activationDidCompleteWith _: WCSessionActivationState,
+        activationDidCompleteWith state: WCSessionActivationState,
         error _: Error?
     ) {
         let reachable = session.isReachable
         Task { @MainActor in
+            if state == .activated {
+                self.reportAbortedListen()
+            }
             self.isConnected = reachable
             if reachable {
                 self.retryDownloads()

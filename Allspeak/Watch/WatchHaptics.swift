@@ -24,13 +24,9 @@ struct WatchDeviceHaptics: WatchSyncHapticsPlaying {
         case .click:
             WKInterfaceDevice.current().play(.click)
         case .success:
-            WKInterfaceDevice.current().play(.click)
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(250))
-                WKInterfaceDevice.current().play(.click)
-            }
+            WKInterfaceDevice.current().play(.success)
         case .failure:
-            WKInterfaceDevice.current().play(.click)
+            WKInterfaceDevice.current().play(.failure)
         }
     }
 }

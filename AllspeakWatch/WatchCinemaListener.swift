@@ -12,6 +12,7 @@ final class WatchCinemaListener: CinemaListening {
     }
 
     private let catalogURL: URL
+    private let continuous: Bool
 
     private var state = State.idle
     private var onEvent: (@MainActor (ListenEvent) -> Void)?
@@ -20,8 +21,9 @@ final class WatchCinemaListener: CinemaListening {
     private var listening: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
 
-    init(catalogURL: URL) {
+    init(catalogURL: URL, continuous: Bool = false) {
         self.catalogURL = catalogURL
+        self.continuous = continuous
     }
 
     func start(onEvent: @escaping @MainActor (ListenEvent) -> Void) {
@@ -30,7 +32,9 @@ final class WatchCinemaListener: CinemaListening {
         self.onEvent = onEvent
         startedAt = Date()
         emit(.started)
-        startTimeout()
+        if !continuous {
+            startTimeout()
+        }
         listening = Task { [weak self] in
             await self?.listen()
         }
@@ -79,9 +83,13 @@ final class WatchCinemaListener: CinemaListening {
             switch result {
             case .match(let match):
                 let found = match.mediaItems.lazy
-                    .compactMap { FingerprintMatch.make(subtitle: $0.subtitle, predictedOffset: $0.predictedCurrentMatchOffset, matchDate: matchDate) }
+                    .compactMap { FingerprintMatch.make(subtitle: $0.subtitle, predictedOffset: $0.predictedCurrentMatchOffset, matchDate: matchDate, frequencySkew: Double($0.frequencySkew)) }
                     .first
                 guard let found else { continue }
+                if continuous {
+                    emit(.matched(found))
+                    continue
+                }
                 finish(.matched(found))
             case .noMatch:
                 continue

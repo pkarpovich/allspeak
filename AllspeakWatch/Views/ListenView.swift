@@ -6,6 +6,7 @@ struct ListenView: View {
     @Environment(WatchSessionClient.self) private var client
 
     private var panel: ListenPanelState { client.listenPanel }
+    private var auto: AutoListenState { client.autoListen }
 
     var body: some View {
         ZStack {
@@ -23,6 +24,15 @@ struct ListenView: View {
 
     @ViewBuilder
     private var content: some View {
+        if auto.isOn {
+            autoView
+        } else {
+            panelContent
+        }
+    }
+
+    @ViewBuilder
+    private var panelContent: some View {
         switch panel.phase {
         case .idle:
             idleView
@@ -53,6 +63,13 @@ struct ListenView: View {
             .buttonStyle(.glass)
             if hasOutcome {
                 statusLines
+            }
+            if let error = auto.error {
+                Text("All film: \(error)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Tokens.text2)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
             }
         }
     }
@@ -113,9 +130,64 @@ struct ListenView: View {
             .minimumScaleFactor(0.8)
     }
 
+    @ViewBuilder
+    private var autoView: some View {
+        if let suggestion = auto.suggestion {
+            VStack(spacing: 6) {
+                offsetText(for: suggestion)
+                Button(action: client.applyAutoSuggestion) {
+                    Text("Apply")
+                        .font(Tokens.Font.bodyEmphasized)
+                        .foregroundStyle(Tokens.onAccent)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(Tokens.accent)
+                Button(action: client.dismissAutoSuggestion) {
+                    Text("Dismiss")
+                        .font(Tokens.Font.bodyEmphasized)
+                        .foregroundStyle(Tokens.text)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+            }
+        } else {
+            VStack(spacing: 10) {
+                filmTime
+                autoStatus
+                Button(action: client.stopAutoListen) {
+                    Text("Stop")
+                        .font(Tokens.Font.bodyEmphasized)
+                        .foregroundStyle(Tokens.text)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+            }
+        }
+    }
+
+    private var autoStatus: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 4) {
+                Text("All film: \(ListenPanelState.elapsedText(context.date.timeIntervalSince(auto.startedAt ?? context.date)))")
+                if let last = auto.lastMatch {
+                    let delta = ListenPanelState.delta(match: last, interpolatedPosition: position(at: context.date), now: context.date)
+                    Text("last \(ListenPanelState.offsetText(delta)), \(ListenPanelState.elapsedText(context.date.timeIntervalSince(last.matchDate))) ago")
+                } else {
+                    Text("no match yet")
+                }
+            }
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(Tokens.text2)
+            .monospacedDigit()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private func matchView(_ shown: ListenPanelState.ShownMatch) -> some View {
         VStack(spacing: 6) {
-            offsetText(for: shown)
+            offsetText(for: shown.match)
             Text(sourceLabel(shown.source))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Tokens.text2)
@@ -154,10 +226,10 @@ struct ListenView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func offsetText(for shown: ListenPanelState.ShownMatch) -> some View {
+    private func offsetText(for match: FingerprintMatch) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let delta = ListenPanelState.delta(
-                match: shown.match,
+                match: match,
                 interpolatedPosition: position(at: context.date),
                 now: context.date
             )

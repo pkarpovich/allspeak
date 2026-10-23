@@ -21,6 +21,13 @@ struct WireProtocolTests {
         WatchCommand.watchDownload(WatchDownloadEvent(kind: .subtitle, phase: .start, sha256: "c6534d42", attempt: 1)),
         WatchCommand.watchDownload(WatchDownloadEvent(kind: .fingerprint, phase: .done, sha256: "885815be", attempt: 2, bytes: 3_220_498, seconds: 4.5)),
         WatchCommand.watchDownload(WatchDownloadEvent(kind: .fingerprint, phase: .failed, sha256: "885815be", attempt: 3, error: "offline")),
+        WatchCommand.watchDownload(WatchDownloadEvent(kind: .subtitle, phase: .done, sha256: "c6534d42", attempt: 1, eventDate: Date(timeIntervalSince1970: 1_000_000))),
+        WatchCommand.watchSamples(WatchListenTelemetry(listenID: testListenID, startedAt: Date(timeIntervalSince1970: 1_000_000), samples: [
+            WatchSample(date: Date(timeIntervalSince1970: 1_000_005), listenSeconds: 5, virtualMB: 400.5, footprintMB: 61, availableMB: 20,
+                        appState: "inactive", thermalState: "nominal", lowPower: false, battery: nil),
+        ])),
+        WatchCommand.watchAborted(WatchListenTelemetry(listenID: testListenID, startedAt: Date(timeIntervalSince1970: 1_000_000), samples: [])),
+        WatchCommand.syncMark(SyncMark(eventDate: Date(timeIntervalSince1970: 1_000_000.5), position: 4321.25)),
         WatchCommand.startListening(listenID: testListenID),
         WatchCommand.cancelListening(listenID: testListenID),
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)),
@@ -32,6 +39,17 @@ struct WireProtocolTests {
             matchDate: Date(timeIntervalSince1970: 1_700_000_000.25),
             chunkStart: 600,
             listenSeconds: 14.5
+        )),
+        WatchCommand.listenEvent(ListenUpdate(
+            listenID: testListenID,
+            source: .watch,
+            phase: .match,
+            trackTime: 612.5,
+            matchDate: Date(timeIntervalSince1970: 1_700_000_000.25),
+            chunkStart: 600,
+            listenSeconds: 14.5,
+            frequencySkew: -0.0125,
+            eventDate: Date(timeIntervalSince1970: 1_700_000_001.5)
         )),
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 2, error: "mic permission")),
         WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000001")!, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000.25), source: .phone, sha256: "abc123"),

@@ -22,7 +22,8 @@ struct PlayerTopBarTests {
             onCinema: {},
             onClip: {},
             onSwitchTrack: { _ in },
-            onSelectHall: { _ in }
+            onSelectHall: { _ in },
+            onMarkDesync: {}
         )
     }
 
