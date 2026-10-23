@@ -193,8 +193,10 @@ shortcut that checks the current Focus. It runs with `supportedModes =
 .foreground(.immediate)` because the mic needs the app in front: a press starts
 listening when idle, applies a shown match, and is ignored while listening. The
 watch switches to the Listen page whenever a listen starts. App Shortcuts of the
-watch app run on the watch itself. There is no iPhone intent: iOS does not let an
-app start recording from the background, so a locked phone cannot listen.
+watch app run on the watch itself. The same intent is compiled into the iPhone
+app only so the iPhone Shortcuts editor offers it for an Action button shortcut
+(for example, one that branches on the current Focus); on the iPhone it does
+nothing, since iOS does not let an app start recording from the background.
 
 ### Session diagnostics
 

@@ -87,6 +87,7 @@ targets:
       - path: Allspeak/Models/SRTParser.swift
       - path: Allspeak/Watch/ListenPanelState.swift
       - path: Allspeak/Watch/ListenTelemetry.swift
+      - path: Allspeak/Watch/ListenActionIntent.swift
     dependencies:
       - target: AllspeakWatchWidget
       - sdk: ShazamKit.framework
