@@ -2056,7 +2056,8 @@ struct PlaybackCoordinatorTests {
             WatchSample(
                 date: startedAt.addingTimeInterval(seconds), listenSeconds: seconds,
                 virtualMB: 410.5, footprintMB: 62.25, availableMB: 18,
-                appState: "background", thermalState: "fair", lowPower: true, battery: 0.5
+                appState: "background", thermalState: "fair", lowPower: true, battery: 0.5,
+                runtime: "running"
             )
         }
         let telemetry = WatchListenTelemetry(listenID: testListenID, startedAt: startedAt, samples: samples)
@@ -2076,6 +2077,7 @@ struct PlaybackCoordinatorTests {
         #expect(lines[1]["thermal"] as? String == "fair")
         #expect(lines[1]["lowPower"] as? Double == 1)
         #expect(lines[1]["battery"] as? Double == 0.5)
+        #expect(lines[1]["runtime"] as? String == "running")
         #expect(lines[1]["rxDelay"] as? Double == 55)
         #expect(lines[2]["listenSec"] as? Double == 5)
         #expect(lines[2]["rxDelay"] as? Double == 55)

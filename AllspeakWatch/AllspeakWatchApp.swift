@@ -37,6 +37,16 @@ struct AllspeakWatchApp: App {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             client.retryDownloads()
+            if client.autoListen.isOn {
+                ListenRuntimeSession.shared.ensureRunning()
+            }
+        }
+        .onChange(of: client.autoListen.isOn) { _, on in
+            if on {
+                ListenRuntimeSession.shared.ensureRunning()
+            } else {
+                ListenRuntimeSession.shared.stop()
+            }
         }
     }
 }
