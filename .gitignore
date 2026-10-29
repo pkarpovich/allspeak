@@ -18,7 +18,3 @@ Allspeak/CatalogConfig.xcconfig
 # Release export artifacts
 export/
 ExportOptions.plist
-
-
-# Claude project skills are distributed via marketplaces / tuclaw-plugin, not this repo
-.claude/
