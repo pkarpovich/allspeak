@@ -185,6 +185,8 @@ own; `Apply` and the Action button send the usual `applySync`. Telemetry
 samples go to the phone in batches of 12 (one minute) instead of once at the
 end.
 
+While the mode is on the watch runs a `WKExtendedRuntimeSession` of the `physical-therapy` type (`WKBackgroundModes`), started on the tap and re-armed whenever the app becomes active. `SHManagedSession` records in `shazamd`, so the `audio` background mode alone does not keep the app running: in Always On the process froze for up to 44 s, and every match after a freeze was stale by the freeze minus 12 s. The session lasts up to an hour; raising the wrist after it expires starts a new one.
+
 #### Action button
 
 The watch app exposes a `Listen` App Intent and an App Shortcut ("Listen with
@@ -239,7 +241,7 @@ Event types:
 - `watchSample` - the watch process every 5 s during a watch listen, sent in one
   batch when the listen ends: `listenID`, `listenSec`, address space in use
   `vmMB`, `footprintMB`, `availMB` left before the memory limit, watch app state
-  `app` (active / inactive / background), `thermal`, `lowPower`, `battery`.
+  `app` (active / inactive / background), `thermal`, `lowPower`, `battery`, and in listen all film the extended runtime session state `runtime` (`starting`, `running`, `expiring`, `invalid:<reason>`, `none`).
 - `watchAborted` - a watch listen whose process died before it finished
   (crash, jetsam, force quit), reported on the next launch with `listenSec` of
   its last sample, followed by its `watchSample` lines.

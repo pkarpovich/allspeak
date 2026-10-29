@@ -381,6 +381,7 @@ struct WatchSample: Codable, Equatable, Sendable {
     let thermalState: String
     let lowPower: Bool
     let battery: Double?
+    var runtime: String? = nil
 }
 
 struct SyncMark: Codable, Equatable, Sendable {

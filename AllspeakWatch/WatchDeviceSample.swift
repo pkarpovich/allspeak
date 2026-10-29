@@ -25,7 +25,8 @@ extension WatchSample {
             appState: appState(WKApplication.shared().applicationState),
             thermalState: thermalState(ProcessInfo.processInfo.thermalState),
             lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
-            battery: battery < 0 ? nil : Double(battery)
+            battery: battery < 0 ? nil : Double(battery),
+            runtime: ListenRuntimeSession.shared.status
         )
     }
 
