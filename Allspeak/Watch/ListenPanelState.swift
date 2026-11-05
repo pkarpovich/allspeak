@@ -174,6 +174,7 @@ struct AutoListenState: Equatable, Sendable {
     var lastMatch: FingerprintMatch?
     var suggestion: FingerprintMatch?
     var error: String?
+    var resumesOnActivation = false
 
     static func errorText(_ phase: ListenEvent.Phase) -> String? {
         switch phase {

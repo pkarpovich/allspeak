@@ -1149,6 +1149,53 @@ struct WatchSessionClientTests {
         #expect(client.autoListen.error == "catalog: broken")
     }
 
+    @Test("listen all film that was interrupted starts again on the next wake")
+    func autoListenResumesAfterInterruption() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var started = 0
+        client.makeContinuousListener = { _ in
+            started += 1
+            return listener
+        }
+
+        client.startAutoListen()
+        listener.send(.interrupted)
+        #expect(!client.autoListen.isOn)
+        #expect(client.autoListen.resumesOnActivation)
+
+        client.resumeAutoListen()
+
+        #expect(started == 2)
+        #expect(client.autoListen.isOn)
+        #expect(client.autoListen.error == nil)
+        let phases = Self.reportedCommands(sender.transferredUserInfo).compactMap { command -> ListenUpdate.Phase? in
+            guard case .listenEvent(let update) = command else { return nil }
+            return update.phase
+        }
+        #expect(phases == [.start, .interrupted, .start])
+    }
+
+    @Test("listen all film stopped by the user does not start again on wake")
+    func autoListenStoppedStaysOff() throws {
+        let (client, _, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startAutoListen()
+        client.stopAutoListen()
+        client.resumeAutoListen()
+
+        #expect(!client.autoListen.isOn)
+        #expect(listener.cancelCount == 1)
+
+        client.startAutoListen()
+        listener.send(.failed("audio session: busy"))
+        client.stopAutoListen()
+        client.resumeAutoListen()
+
+        #expect(client.autoListen == AutoListenState())
+    }
+
     @Test("telemetry of a long listen goes out in batches")
     func telemetryBatches() throws {
         let (client, sender, dir) = try makeClient()

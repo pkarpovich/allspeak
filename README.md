@@ -139,12 +139,13 @@ no automatic or background listening.
   with an empty snapshot. The watch shows `Done` only
   when the reply snapshot belongs to the same session.
 - Each listener stops on its first match, after 120 s, or on `Stop`. A
-  ShazamKit `matchAttemptFailed` (code 202, which `SHManagedSession` returns
-  about every 12 s without a match) is treated as "no match yet" and listening
-  goes on. The watch
-  listener (`SHManagedSession`) waits for the app to become active after the
-  first microphone prompt and stops as `interrupted` when the watch app leaves
-  the active phase (wrist down); the phone listener stops as
+  ShazamKit `matchAttemptFailed` (code 202, returned about every 12 s without
+  a match) is treated as "no match yet" and listening goes on. Both listeners
+  record with their own `AVAudioEngine` input tap and match the stream with
+  `SHSession`; the watch's audio session is `.record`. A recording on watchOS
+  can only start while the app is active, so a watch listen started right
+  after the first microphone prompt waits for the app to become active, and any
+  other start in Always On ends as `interrupted`. Both listeners stop as
   `interrupted` when an audio interruption (a call, Siri) begins.
 - A phone result that arrives while the watch is unreachable (wrist down) is
   held on the phone and re-sent when the watch becomes reachable again. If the
@@ -176,16 +177,19 @@ no automatic or background listening.
 #### Listen all film
 
 The waveform circle between the ±3 s buttons on the watch transport screen
-(gold while on, tap again to stop) runs one `SHManagedSession` until
-`Stop`, a ShazamKit error or the session ending, without the 120 s timeout and
-without the phone. Every match is reported as a watch `listen` event of one
-`listenID`. A match whose offset is over 1 s switches to the Listen page with
+(gold while on, tap again to stop) keeps the watch listener recording until
+`Stop`, a ShazamKit error, an audio interruption or the session ending, without
+the 120 s timeout and without the phone. A listen that ended on its own
+(interruption, error) starts again the next time the app becomes active; only
+`Stop` and a session change end it for good. Every match is reported as a watch `listen` event of one
+`listenID`, and every 12 s block without a match as a `nomatch` event, so the
+log shows whether the matcher kept running with the wrist down. A match whose offset is over 1 s switches to the Listen page with
 `Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it. Nothing is applied on its
 own; `Apply` and the Action button send the usual `applySync`. Telemetry
 samples go to the phone in batches of 12 (one minute) instead of once at the
 end.
 
-While the mode is on the watch runs a `WKExtendedRuntimeSession` of the `physical-therapy` type (`WKBackgroundModes`), started on the tap and re-armed whenever the app becomes active. `SHManagedSession` records in `shazamd`, so the `audio` background mode alone does not keep the app running: in Always On the process froze for up to 44 s, and every match after a freeze was stale by the freeze minus 12 s. The session lasts up to an hour; raising the wrist after it expires starts a new one.
+The watch records the hall itself instead of using `SHManagedSession`, which records in `shazamd`. With the daemon recording, the `audio` background mode did not keep the app running: in Always On the process froze for up to 44 s while the daemon kept recording, and the first 12 s block recorded after a freeze began was matched only at wake-up, so every match after a freeze was stale by the freeze minus 12 s (Runner, Clayface first run). With the app recording, the background mode keeps the process on its own capture, and a frozen process records nothing, so there is nothing stale to match. While the mode is on the watch also runs a `WKExtendedRuntimeSession` of the `physical-therapy` type (`WKBackgroundModes`), started on the tap and re-armed whenever the app becomes active; it lasts up to an hour and raising the wrist after it expires starts a new one.
 
 #### Action button
 

@@ -43,6 +43,7 @@ struct AllspeakWatchApp: App {
             }
             guard phase == .active else { return }
             client.retryDownloads()
+            client.resumeAutoListen()
             if client.autoListen.isOn {
                 ListenRuntimeSession.shared.ensureRunning()
             }

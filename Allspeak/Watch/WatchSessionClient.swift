@@ -464,7 +464,19 @@ final class WatchSessionClient: NSObject {
     }
 
     func stopAutoListen() {
-        autoListener?.cancel()
+        guard let autoListener else {
+            autoListen = AutoListenState()
+            return
+        }
+        autoListener.cancel()
+    }
+
+    // A listen all film that ended on its own (interruption, matcher error)
+    // starts again on the next wake, since recording can only start while the
+    // app is active; only Stop and a session change end it for good.
+    func resumeAutoListen() {
+        guard !autoListen.isOn, autoListen.resumesOnActivation else { return }
+        startAutoListen()
     }
 
     func applyAutoSuggestion() {
@@ -500,7 +512,10 @@ final class WatchSessionClient: NSObject {
         case .timedOut, .cancelled, .interrupted, .failed:
             autoListener = nil
             autoListenID = nil
-            autoListen = AutoListenState(error: AutoListenState.errorText(event.phase))
+            autoListen = AutoListenState(
+                error: AutoListenState.errorText(event.phase),
+                resumesOnActivation: event.phase != .cancelled
+            )
             guard let samples = telemetry?.end() else { return }
             report(.watchSamples(samples))
         }
