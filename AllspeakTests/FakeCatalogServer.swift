@@ -9,9 +9,25 @@ final class FakeCatalogServer: CatalogTransport, @unchecked Sendable {
     private var filesByURL: [URL: Data] = [:]
     private var failuresLeft: [String: Int] = [:]
     private var log: [URL] = []
+    private var uploadLog: [(path: String, name: String?, body: Data, contentType: String?)] = []
 
     var requests: [URL] {
         lock.withLock { log }
+    }
+
+    var uploads: [(path: String, name: String?, body: Data, contentType: String?)] {
+        lock.withLock { uploadLog }
+    }
+
+    func knows(catalogID: UUID) {
+        lock.withLock {
+            detailsByID[catalogID] = CatalogSessionDetail(
+                id: catalogID, title: "Film", revision: 1,
+                createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0),
+                tracks: [], subtitle: CatalogSubtitle(filename: "film.srt", size: 1, sha256: "0", url: Self.baseURL),
+                fingerprint: nil, urlsExpireAt: Date(timeIntervalSince1970: 3600)
+            )
+        }
     }
 
     var client: CatalogClient {
@@ -69,6 +85,25 @@ final class FakeCatalogServer: CatalogTransport, @unchecked Sendable {
             if let key = failuresLeft.keys.first(where: { url.path.hasSuffix($0) }), let left = failuresLeft[key], left > 0 {
                 failuresLeft[key] = left - 1
                 return (503, Data())
+            }
+            if request.httpMethod == "POST" {
+                let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                let name = components?.queryItems?.first { $0.name == "name" }?.value
+                let contentType = request.value(forHTTPHeaderField: "Content-Type")
+                let body = request.httpBody ?? Data()
+                let parts = url.pathComponents
+                if url.path == "/api/v1/diagnostics/crashes" {
+                    uploadLog.append((url.path, name, body, contentType))
+                    return (201, Data("{\"key\":\"diagnostics/crashes/\(name ?? "")\",\"size\":\(body.count)}".utf8))
+                }
+                if parts.count == 6, parts[3] == "sessions", parts[5] == "diagnostics",
+                   let id = UUID(uuidString: parts[4]) {
+                    guard detailsByID[id] != nil else { return (404, Data()) }
+                    if body.count > 8 * 1024 * 1024 { return (413, Data()) }
+                    uploadLog.append((url.path, name, body, contentType))
+                    return (201, Data("{\"key\":\"diagnostics/\(parts[4])/\(name ?? "")\",\"size\":\(body.count)}".utf8))
+                }
+                return (404, Data())
             }
             if url.path.hasPrefix("/api/v1/sessions/"),
                let id = UUID(uuidString: url.lastPathComponent),
