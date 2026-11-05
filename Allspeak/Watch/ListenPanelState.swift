@@ -166,15 +166,49 @@ struct ListenPanelState: Equatable, Sendable {
     }
 }
 
+// A shift over `confirmThreshold` is shown only once a second match agrees:
+// repeated music inside a scene matches the wrong place of the film with a
+// trackTime that stays put while the clock runs (Clayface: +111, +102, +93 s
+// over 17 s), and a true match advances with the clock. Smaller shifts show at
+// once, because the false ones in the logs were all over 3 s and a third of the
+// true small ones had no second match within 30 s.
 struct AutoListenState: Equatable, Sendable {
     static let suggestionThreshold = 1.0
+    static let confirmThreshold = 3.0
+    static let confirmTolerance = 2.0
+    static let confirmWindow: TimeInterval = 30
 
     var isOn = false
     var startedAt: Date?
     var lastMatch: FingerprintMatch?
     var suggestion: FingerprintMatch?
+    var pending: FingerprintMatch?
     var error: String?
     var resumesOnActivation = false
+
+    mutating func receive(_ match: FingerprintMatch, delta: Double) {
+        lastMatch = match
+        let shift = abs(delta)
+        if shift <= Self.suggestionThreshold {
+            suggestion = nil
+            pending = nil
+        } else if shift <= Self.confirmThreshold {
+            suggestion = match
+            pending = nil
+        } else if let pending, Self.agrees(pending, match) {
+            suggestion = match
+            self.pending = nil
+        } else {
+            suggestion = nil
+            pending = match
+        }
+    }
+
+    static func agrees(_ earlier: FingerprintMatch, _ later: FingerprintMatch) -> Bool {
+        let elapsed = later.matchDate.timeIntervalSince(earlier.matchDate)
+        guard elapsed >= 0, elapsed <= confirmWindow else { return false }
+        return abs((later.trackTime - earlier.trackTime) - elapsed) <= confirmTolerance
+    }
 
     static func errorText(_ phase: ListenEvent.Phase) -> String? {
         switch phase {

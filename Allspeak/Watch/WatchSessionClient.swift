@@ -508,9 +508,7 @@ final class WatchSessionClient: NSObject {
         case .started, .noMatch:
             break
         case .matched(let match):
-            let delta = ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now())
-            autoListen.lastMatch = match
-            autoListen.suggestion = abs(delta) > AutoListenState.suggestionThreshold ? match : nil
+            autoListen.receive(match, delta: ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now()))
         case .timedOut, .cancelled, .interrupted, .failed:
             autoListener = nil
             autoListenID = nil

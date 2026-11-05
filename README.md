@@ -184,7 +184,11 @@ the 120 s timeout and without the phone. A listen that ended on its own
 `Stop` and a session change end it for good. Every match is reported as a watch `listen` event of one
 `listenID`, and every 12 s block without a match as a `nomatch` event, so the
 log shows whether the matcher kept running with the wrist down. A match whose offset is over 1 s switches to the Listen page with
-`Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it. Nothing is applied on its
+`Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it.
+An offset over 3 s waits for a second match within 30 s whose track time
+advanced with the clock (within 2 s) before it is shown: repeated music inside
+a scene matches the wrong place of the film with a track time that stays put,
+and a match that disagrees drops the waiting one. Nothing is applied on its
 own; `Apply` and the Action button send the usual `applySync`. Telemetry
 samples go to the phone in batches of 12 (one minute) instead of once at the
 end.

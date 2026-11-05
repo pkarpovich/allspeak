@@ -1101,6 +1101,26 @@ struct WatchSessionClientTests {
         #expect(phases == [.start, .match, .match, .match])
     }
 
+    @Test("a shift over 3 s is suggested only after a second match that advanced with the clock")
+    func autoListenConfirmsLargeShifts() throws {
+        let (client, _, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var clock = Self.autoNow
+        client.now = { clock }
+
+        client.startAutoListen()
+        let first = FingerprintMatch(trackTime: 20, matchDate: clock, chunkStart: 0)
+        listener.emit(.matched(first))
+        #expect(client.autoListen.suggestion == nil)
+        #expect(client.autoListen.pending == first)
+
+        clock += 6
+        let second = FingerprintMatch(trackTime: 26, matchDate: clock, chunkStart: 0)
+        listener.emit(.matched(second))
+        #expect(client.autoListen.suggestion == second)
+        #expect(client.autoListen.pending == nil)
+    }
+
     @Test("applying a suggestion sends applySync and keeps listening")
     func autoListenApply() throws {
         let (client, sender, listener, dir) = try makeAutoClient()
