@@ -183,10 +183,7 @@ final class WatchCinemaListener: CinemaListening {
         guard state == .running else { return }
         switch outcome {
         case .found(let candidates, let matchDate):
-            let match = candidates.lazy
-                .compactMap { FingerprintMatch.make(subtitle: $0.subtitle, predictedOffset: $0.predictedOffset, matchDate: matchDate, frequencySkew: $0.frequencySkew) }
-                .first
-            guard let match else { return }
+            guard let match = FingerprintMatch.make(candidates: candidates, matchDate: matchDate) else { return }
             if continuous {
                 emit(.matched(match))
             } else {

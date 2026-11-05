@@ -501,6 +501,10 @@ final class WatchSessionClient: NSObject {
 
     private func handleAutoListenEvent(_ event: ListenEvent, listenID: UUID) {
         guard autoListenID == listenID else { return }
+        var event = event
+        if case .matched(let match) = event.phase {
+            event = ListenEvent(phase: .matched(match.nearest(to: interpolatedTime, now: now())), listenSeconds: event.listenSeconds)
+        }
         var update = ListenUpdate(listenID: listenID, source: .watch, event: event)
         update.eventDate = now()
         report(.listenEvent(update))

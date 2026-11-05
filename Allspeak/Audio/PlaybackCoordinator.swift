@@ -916,6 +916,7 @@ final class PlaybackCoordinator {
             chunk: update.chunkStart,
             error: update.error,
             skew: update.frequencySkew,
+            spread: update.spread,
             rxDelay: rxDelay(since: update.eventDate)
         )
         if let trackTime = update.trackTime, let matchDate = update.matchDate {

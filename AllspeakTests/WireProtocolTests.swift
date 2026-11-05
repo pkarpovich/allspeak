@@ -51,6 +51,7 @@ struct WireProtocolTests {
             chunkStart: 600,
             listenSeconds: 14.5,
             frequencySkew: -0.0125,
+            spread: 89.5,
             eventDate: Date(timeIntervalSince1970: 1_700_000_001.5)
         )),
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 2, error: "mic permission")),

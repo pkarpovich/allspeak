@@ -185,6 +185,9 @@ the 120 s timeout and without the phone. A listen that ended on its own
 `listenID`, and every 12 s block without a match as a `nomatch` event, so the
 log shows whether the matcher kept running with the wrist down. A match whose offset is over 1 s switches to the Listen page with
 `Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it.
+When one match names several places of the film (overlapping chunks, or
+repeated music inside a scene), the watch takes the one nearest to the playing
+position and the `listen` line logs the `spread` between them.
 An offset over 3 s waits for a second match within 30 s whose track time
 advanced with the clock (within 2 s) before it is shown: repeated music inside
 a scene matches the wrong place of the film with a track time that stays put,

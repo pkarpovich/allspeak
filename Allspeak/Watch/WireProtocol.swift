@@ -444,6 +444,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
     let listenSeconds: Double
     let error: String?
     let frequencySkew: Double?
+    var spread: Double? = nil
     var eventDate: Date?
 
     init(
@@ -456,6 +457,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         listenSeconds: Double,
         error: String? = nil,
         frequencySkew: Double? = nil,
+        spread: Double? = nil,
         eventDate: Date? = nil
     ) {
         self.listenID = listenID
@@ -467,6 +469,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         self.listenSeconds = listenSeconds
         self.error = error
         self.frequencySkew = frequencySkew
+        self.spread = spread
         self.eventDate = eventDate
     }
 
@@ -483,7 +486,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
                 matchDate: match.matchDate,
                 chunkStart: match.chunkStart,
                 listenSeconds: event.listenSeconds,
-                frequencySkew: match.frequencySkew
+                frequencySkew: match.frequencySkew,
+                spread: match.alternatives.isEmpty ? nil : match.spread
             )
         case .noMatch:
             self.init(listenID: listenID, source: source, phase: .nomatch, listenSeconds: event.listenSeconds)

@@ -71,6 +71,21 @@ struct WatchCinemaListenerTests {
         #expect(audioSession.calls == [.activateRecording, .deactivate])
     }
 
+    @Test("every valid candidate of a match reaches the client as an alternative")
+    func alternativesReachClient() async {
+        let listener = makeListener(continuous: true)
+        await startListening(listener)
+
+        matcherHub.deliver(.found([candidate(absStart: 4671, offset: 5), candidate(absStart: 4761, offset: 5)], matchDate: matchDate))
+
+        guard case .matched(let match)? = recorder.phases.last else {
+            Issue.record("no match delivered")
+            return
+        }
+        #expect(match.trackTime == 4676)
+        #expect(match.alternatives == [FingerprintMatch.Alternative(trackTime: 4766, chunkStart: 4761)])
+    }
+
     @Test("a one-shot listen stays silent on no match and keeps the mic open")
     func oneShotIgnoresNoMatch() async {
         let listener = makeListener()

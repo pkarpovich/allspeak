@@ -74,3 +74,56 @@ struct FingerprintMatchTests {
         #expect(!ListenRetryPolicy.keepsListening(after: error))
     }
 }
+
+@Suite("FingerprintMatch alternatives")
+struct FingerprintMatchAlternativesTests {
+    private let matchDate = Date(timeIntervalSince1970: 1_000_000)
+
+    private func candidate(_ absStart: Double, offset: Double) -> ListenCandidate {
+        ListenCandidate(subtitle: "abs_start=\(absStart)", predictedOffset: offset)
+    }
+
+    @Test("make keeps the first candidate as the match and the rest as alternatives")
+    func makeKeepsAlternatives() throws {
+        let match = try #require(FingerprintMatch.make(
+            candidates: [candidate(4671, offset: 5), candidate(4680, offset: -4), ListenCandidate(subtitle: "junk", predictedOffset: 1), candidate(4761.5, offset: 4.5)],
+            matchDate: matchDate
+        ))
+        #expect(match.trackTime == 4676)
+        #expect(match.chunkStart == 4671)
+        #expect(match.alternatives == [
+            FingerprintMatch.Alternative(trackTime: 4676, chunkStart: 4680),
+            FingerprintMatch.Alternative(trackTime: 4766, chunkStart: 4761.5),
+        ])
+        #expect(match.spread == 90)
+    }
+
+    @Test("make returns nil when no candidate carries abs_start")
+    func makeNeedsOneValidCandidate() {
+        #expect(FingerprintMatch.make(candidates: [ListenCandidate(subtitle: nil, predictedOffset: 1)], matchDate: matchDate) == nil)
+    }
+
+    @Test("nearest picks the candidate closest to the playing position")
+    func nearestPicksByPosition() {
+        let match = FingerprintMatch(
+            trackTime: 4766, matchDate: matchDate, chunkStart: 4761,
+            alternatives: [FingerprintMatch.Alternative(trackTime: 4676, chunkStart: 4671)]
+        )
+        let now = matchDate.addingTimeInterval(2)
+
+        let nearHall = match.nearest(to: 4667, now: now)
+        #expect(nearHall.trackTime == 4676)
+        #expect(nearHall.chunkStart == 4671)
+        #expect(nearHall.alternatives == [FingerprintMatch.Alternative(trackTime: 4766, chunkStart: 4761)])
+        #expect(nearHall.spread == match.spread)
+
+        #expect(match.nearest(to: 4760, now: now) == match)
+    }
+
+    @Test("a match without alternatives has no spread and is its own nearest")
+    func singleCandidate() {
+        let match = FingerprintMatch(trackTime: 100, matchDate: matchDate, chunkStart: 0)
+        #expect(match.spread == 0)
+        #expect(match.nearest(to: 500, now: matchDate) == match)
+    }
+}

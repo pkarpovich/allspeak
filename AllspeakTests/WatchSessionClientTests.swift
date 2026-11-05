@@ -1101,6 +1101,30 @@ struct WatchSessionClientTests {
         #expect(phases == [.start, .match, .match, .match])
     }
 
+    @Test("listen all film takes the candidate nearest to the playing position and reports its spread")
+    func autoListenPicksNearestCandidate() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let position = client.interpolatedTime
+        let far = FingerprintMatch(
+            trackTime: position + 90, matchDate: Self.autoNow, chunkStart: 4761,
+            alternatives: [FingerprintMatch.Alternative(trackTime: position + 0.5, chunkStart: 4671)]
+        )
+
+        client.startAutoListen()
+        listener.emit(.matched(far))
+
+        #expect(client.autoListen.lastMatch?.trackTime == position + 0.5)
+        #expect(client.autoListen.suggestion == nil)
+        #expect(client.autoListen.pending == nil)
+        let reported = Self.reportedCommands(sender.transferredUserInfo).compactMap { command -> ListenUpdate? in
+            guard case .listenEvent(let update) = command, update.phase == .match else { return nil }
+            return update
+        }
+        #expect(reported.map(\.trackTime) == [position + 0.5])
+        #expect(reported.map(\.spread) == [89.5])
+    }
+
     @Test("a shift over 3 s is suggested only after a second match that advanced with the clock")
     func autoListenConfirmsLargeShifts() throws {
         let (client, _, listener, dir) = try makeAutoClient()

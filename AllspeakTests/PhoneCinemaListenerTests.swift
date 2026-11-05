@@ -265,7 +265,8 @@ struct PhoneCinemaListenerTests {
             validCandidate(absStart: 600, offset: 3),
         ], matchDate: matchDate))
 
-        let expected = try #require(FingerprintMatch.make(subtitle: "abs_start=570", predictedOffset: 2, matchDate: matchDate))
+        var expected = try #require(FingerprintMatch.make(subtitle: "abs_start=570", predictedOffset: 2, matchDate: matchDate))
+        expected.alternatives = [FingerprintMatch.Alternative(trackTime: 603, chunkStart: 600)]
         #expect(recorder.phases == [.started, .matched(expected)])
     }
 
