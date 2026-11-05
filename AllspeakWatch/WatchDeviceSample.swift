@@ -27,7 +27,8 @@ extension WatchSample {
             lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
             battery: battery < 0 ? nil : Double(battery),
             runtime: ListenRuntimeSession.shared.state,
-            runtimeLeft: ListenRuntimeSession.shared.secondsLeft
+            runtimeLeft: ListenRuntimeSession.shared.secondsLeft,
+            uptime: ProcessInfo.processInfo.systemUptime
         )
     }
 

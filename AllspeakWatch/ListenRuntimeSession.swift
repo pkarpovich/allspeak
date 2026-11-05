@@ -1,11 +1,10 @@
 import Foundation
 import WatchKit
 
-// SHManagedSession records in shazamd, so the audio background mode does not
-// keep this process running with the wrist down: Always On froze it for up to
-// 44 s and every match after a freeze was stale by (freeze - 12 s). A
-// physical-therapy session runs in the background for up to an hour; it can
-// only start while the app is active, so it is re-armed on every wake.
+// Kept until a home test shows the in-process recording alone holds the
+// process with the wrist down. A physical-therapy session runs in the
+// background for up to an hour; it can only start while the app is active, so
+// it is re-armed on every wake.
 @MainActor
 final class ListenRuntimeSession: NSObject, WKExtendedRuntimeSessionDelegate {
     static let shared = ListenRuntimeSession()

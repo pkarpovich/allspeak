@@ -772,8 +772,8 @@ final class PlaybackCoordinator {
             cancelListening(listenID: listenID)
         case .listenEvent(let update):
             noteWatchListenEvent(update)
-        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
-            applySync(sessionID: sessionID, trackTime: trackTime, matchDate: matchDate, source: source, sha256: sha256)
+        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256, let listenID):
+            applySync(sessionID: sessionID, trackTime: trackTime, matchDate: matchDate, source: source, sha256: sha256, listenID: listenID)
         case .watchDownload(let event):
             noteWatchDownload(event)
         case .watchSamples(let telemetry):
@@ -866,7 +866,7 @@ final class PlaybackCoordinator {
     }
 
     @discardableResult
-    func applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String) -> Bool {
+    func applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String, listenID appliedListenID: UUID? = nil) -> Bool {
         cancelListening()
         guard let controller, sessionUUID == sessionID, fingerprint?.sha256 == sha256 else { return false }
         let now = self.now()
@@ -875,7 +875,7 @@ final class PlaybackCoordinator {
         let pos = controller.livePosition
         let target = FingerprintMatch.target(trackTime: trackTime, matchDate: matchDate, now: now, outputLatency: latency)
         diagnostics.log(.listen(DiagnosticsEvent.Listen(
-            listenID: listenID,
+            listenID: appliedListenID ?? listenID,
             source: source,
             phase: .apply,
             trackTime: trackTime,

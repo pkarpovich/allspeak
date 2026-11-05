@@ -363,7 +363,8 @@ final class WatchSessionClient: NSObject {
             trackTime: shown.match.trackTime,
             matchDate: shown.match.matchDate,
             source: shown.source,
-            sha256: sha256
+            sha256: sha256,
+            listenID: listenID
         )
         listenPanel.beginApply()
         let supersededCancels = unconfirmedPhoneCancels
@@ -489,7 +490,8 @@ final class WatchSessionClient: NSObject {
             trackTime: match.trackTime,
             matchDate: match.matchDate,
             source: .watch,
-            sha256: sha256
+            sha256: sha256,
+            listenID: autoListenID
         ), errorHandler: { _ in })
     }
 

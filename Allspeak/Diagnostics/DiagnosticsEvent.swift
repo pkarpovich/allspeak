@@ -202,6 +202,7 @@ enum DiagnosticsEvent: Sendable {
             builder.add("battery", sample.battery)
             builder.add("runtime", sample.runtime)
             builder.addPosition("runtimeLeft", sample.runtimeLeft)
+            builder.addPosition("uptime", sample.uptime)
             builder.addPosition("rxDelay", rxDelay)
         case let .watchAborted(listenID, listenSec, rxDelay):
             builder.add("listenID", listenID.uuidString)

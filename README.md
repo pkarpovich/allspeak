@@ -235,7 +235,7 @@ Event types:
   open).
 - `hall` - cinema hall picked in the player.
 - `listen` - a cinema-listen phase: `listenID` (shared by the phone and the
-  watch listen of one attempt and by its `apply`), `source` (phone or watch),
+  watch listen of one attempt and by its `apply`; the watch sends it with `applySync`, so an apply from listen all film carries that run's id), `source` (phone or watch),
   `phase` (`start`, `match`, `nomatch`, `timeout`, `cancel`, `interrupted`,
   `failed`, `apply`), `listenSec`, and `error` on failure. A match adds
   `trackTime`, the matched `chunk` start, ShazamKit's `skew` (frequency skew of
@@ -245,7 +245,7 @@ Event types:
 - `watchSample` - the watch process every 5 s during a watch listen, sent in one
   batch when the listen ends: `listenID`, `listenSec`, address space in use
   `vmMB`, `footprintMB`, `availMB` left before the memory limit, watch app state
-  `app` (active / inactive / background), `thermal`, `lowPower`, `battery`, and in listen all film the live state of the extended runtime session `runtime` (`none`, `notStarted`, `scheduled`, `running`, `invalid`) with `runtimeLeft`, the seconds until it expires.
+  `app` (active / inactive / background), `thermal`, `lowPower`, `battery`, and in listen all film the live state of the extended runtime session `runtime` (`none`, `notStarted`, `scheduled`, `running`, `invalid`) with `runtimeLeft`, the seconds until it expires. `uptime` is the watch's `systemUptime`: across a gap between samples it advances less than `ts` when the whole watch slept, and as much when only the app was suspended.
 - `watchState` - during listen all film, a watch app phase change (`kind` app, `state` active / inactive / background) or an extended runtime session step (`kind` runtime, `state` start, didStart, willExpire, `didInvalidate:<reason>[:<error code>]`, stop), timestamped on the watch.
 - `watchAborted` - a watch listen whose process died before it finished
   (crash, jetsam, force quit), reported on the next launch with `listenSec` of

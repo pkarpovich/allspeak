@@ -1117,7 +1117,8 @@ struct WatchSessionClientTests {
             trackTime: 3,
             matchDate: Self.autoNow,
             source: .watch,
-            sha256: try #require(meta.fingerprintSHA)
+            sha256: try #require(meta.fingerprintSHA),
+            listenID: testListenID
         )])
         #expect(client.autoListen.suggestion == nil)
         #expect(client.autoListen.isOn)
@@ -1352,7 +1353,8 @@ struct WatchSessionClientTests {
             trackTime: 612.5,
             matchDate: Self.listenMatch.matchDate,
             source: .phone,
-            sha256: Self.listeningSHA
+            sha256: Self.listeningSHA,
+            listenID: testListenID
         )
         #expect(commands.contains(apply))
         #expect(!commands.contains(.cancelListening(listenID: testListenID)))
@@ -1376,7 +1378,8 @@ struct WatchSessionClientTests {
             trackTime: 612.5,
             matchDate: Self.listenMatch.matchDate,
             source: .watch,
-            sha256: Self.listeningSHA
+            sha256: Self.listeningSHA,
+            listenID: testListenID
         )
         let cancelIndex = try #require(commands.firstIndex(of: .cancelListening(listenID: testListenID)))
         let applyIndex = try #require(commands.firstIndex(of: apply))
@@ -1415,7 +1418,8 @@ struct WatchSessionClientTests {
             trackTime: 612.5,
             matchDate: Self.listenMatch.matchDate,
             source: .watch,
-            sha256: Self.listeningSHA
+            sha256: Self.listeningSHA,
+            listenID: testListenID
         )
         #expect(Self.sentCommands(sender.sentMessages).filter { $0 == apply }.count == 1)
     }
