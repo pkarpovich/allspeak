@@ -260,6 +260,21 @@ logs a `hall` event.
 
 Logs older than 365 days are deleted when the next session starts.
 
+### Log upload
+
+Every closed log goes to the catalog backend on its own: when a session ends
+and whenever the app becomes active, the phone posts each log it has not sent
+yet to `POST /api/v1/sessions/{catalogID}/diagnostics?name=<file>` with the
+read token, and remembers it in `Documents/diagnostics/uploaded.json`. A log
+whose session header has no catalog id, or whose session the server does not
+know, is skipped for good; a network failure leaves the log for the next run.
+Settings shows how many logs wait and the last result, with an `Upload logs
+now` button as the fallback. On iOS 27 the phone also keeps every MetricKit
+diagnostic report (a crash on the next launch, a hang or an exception at once)
+as `Documents/diagnostics/reports/<kind>-<time>.json` and posts it to
+`POST /api/v1/diagnostics/crashes?name=<file>`. watchOS has no MetricKit, so
+watch crashes still only reach Xcode Organizer through TestFlight.
+
 ## Catalog (online session distribution)
 
 Sessions prepared on the Mac no longer have to reach the phone over AirDrop.
