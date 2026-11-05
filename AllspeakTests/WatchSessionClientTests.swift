@@ -1101,6 +1101,50 @@ struct WatchSessionClientTests {
         #expect(phases == [.start, .match, .match, .match])
     }
 
+    @Test("listen all film takes the candidate nearest to the playing position and reports its spread")
+    func autoListenPicksNearestCandidate() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let position = client.interpolatedTime
+        let far = FingerprintMatch(
+            trackTime: position + 90, matchDate: Self.autoNow, chunkStart: 4761,
+            alternatives: [FingerprintMatch.Alternative(trackTime: position + 0.5, chunkStart: 4671)]
+        )
+
+        client.startAutoListen()
+        listener.emit(.matched(far))
+
+        #expect(client.autoListen.lastMatch?.trackTime == position + 0.5)
+        #expect(client.autoListen.suggestion == nil)
+        #expect(client.autoListen.pending == nil)
+        let reported = Self.reportedCommands(sender.transferredUserInfo).compactMap { command -> ListenUpdate? in
+            guard case .listenEvent(let update) = command, update.phase == .match else { return nil }
+            return update
+        }
+        #expect(reported.map(\.trackTime) == [position + 0.5])
+        #expect(reported.map(\.spread) == [89.5])
+    }
+
+    @Test("a shift over 3 s is suggested only after a second match that advanced with the clock")
+    func autoListenConfirmsLargeShifts() throws {
+        let (client, _, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var clock = Self.autoNow
+        client.now = { clock }
+
+        client.startAutoListen()
+        let first = FingerprintMatch(trackTime: 20, matchDate: clock, chunkStart: 0)
+        listener.emit(.matched(first))
+        #expect(client.autoListen.suggestion == nil)
+        #expect(client.autoListen.pending == first)
+
+        clock += 6
+        let second = FingerprintMatch(trackTime: 26, matchDate: clock, chunkStart: 0)
+        listener.emit(.matched(second))
+        #expect(client.autoListen.suggestion == second)
+        #expect(client.autoListen.pending == nil)
+    }
+
     @Test("applying a suggestion sends applySync and keeps listening")
     func autoListenApply() throws {
         let (client, sender, listener, dir) = try makeAutoClient()
@@ -1117,7 +1161,8 @@ struct WatchSessionClientTests {
             trackTime: 3,
             matchDate: Self.autoNow,
             source: .watch,
-            sha256: try #require(meta.fingerprintSHA)
+            sha256: try #require(meta.fingerprintSHA),
+            listenID: testListenID
         )])
         #expect(client.autoListen.suggestion == nil)
         #expect(client.autoListen.isOn)
@@ -1147,6 +1192,53 @@ struct WatchSessionClientTests {
 
         #expect(!client.autoListen.isOn)
         #expect(client.autoListen.error == "catalog: broken")
+    }
+
+    @Test("listen all film that was interrupted starts again on the next wake")
+    func autoListenResumesAfterInterruption() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var started = 0
+        client.makeContinuousListener = { _ in
+            started += 1
+            return listener
+        }
+
+        client.startAutoListen()
+        listener.send(.interrupted)
+        #expect(!client.autoListen.isOn)
+        #expect(client.autoListen.resumesOnActivation)
+
+        client.resumeAutoListen()
+
+        #expect(started == 2)
+        #expect(client.autoListen.isOn)
+        #expect(client.autoListen.error == nil)
+        let phases = Self.reportedCommands(sender.transferredUserInfo).compactMap { command -> ListenUpdate.Phase? in
+            guard case .listenEvent(let update) = command else { return nil }
+            return update.phase
+        }
+        #expect(phases == [.start, .interrupted, .start])
+    }
+
+    @Test("listen all film stopped by the user does not start again on wake")
+    func autoListenStoppedStaysOff() throws {
+        let (client, _, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startAutoListen()
+        client.stopAutoListen()
+        client.resumeAutoListen()
+
+        #expect(!client.autoListen.isOn)
+        #expect(listener.cancelCount == 1)
+
+        client.startAutoListen()
+        listener.send(.failed("audio session: busy"))
+        client.stopAutoListen()
+        client.resumeAutoListen()
+
+        #expect(client.autoListen == AutoListenState())
     }
 
     @Test("telemetry of a long listen goes out in batches")
@@ -1305,7 +1397,8 @@ struct WatchSessionClientTests {
             trackTime: 612.5,
             matchDate: Self.listenMatch.matchDate,
             source: .phone,
-            sha256: Self.listeningSHA
+            sha256: Self.listeningSHA,
+            listenID: testListenID
         )
         #expect(commands.contains(apply))
         #expect(!commands.contains(.cancelListening(listenID: testListenID)))
@@ -1329,7 +1422,8 @@ struct WatchSessionClientTests {
             trackTime: 612.5,
             matchDate: Self.listenMatch.matchDate,
             source: .watch,
-            sha256: Self.listeningSHA
+            sha256: Self.listeningSHA,
+            listenID: testListenID
         )
         let cancelIndex = try #require(commands.firstIndex(of: .cancelListening(listenID: testListenID)))
         let applyIndex = try #require(commands.firstIndex(of: apply))
@@ -1368,7 +1462,8 @@ struct WatchSessionClientTests {
             trackTime: 612.5,
             matchDate: Self.listenMatch.matchDate,
             source: .watch,
-            sha256: Self.listeningSHA
+            sha256: Self.listeningSHA,
+            listenID: testListenID
         )
         #expect(Self.sentCommands(sender.sentMessages).filter { $0 == apply }.count == 1)
     }

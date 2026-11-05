@@ -28,6 +28,8 @@ struct WireProtocolTests {
         ])),
         WatchCommand.watchAborted(WatchListenTelemetry(listenID: testListenID, startedAt: Date(timeIntervalSince1970: 1_000_000), samples: [])),
         WatchCommand.syncMark(SyncMark(eventDate: Date(timeIntervalSince1970: 1_000_000.5), position: 4321.25)),
+        WatchCommand.watchState(WatchStateEvent(kind: .app, state: "inactive", eventDate: Date(timeIntervalSince1970: 1_000_001.25))),
+        WatchCommand.watchState(WatchStateEvent(kind: .runtime, state: "didInvalidate:suppressedBySystem", eventDate: Date(timeIntervalSince1970: 1_000_002))),
         WatchCommand.startListening(listenID: testListenID),
         WatchCommand.cancelListening(listenID: testListenID),
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)),
@@ -49,11 +51,13 @@ struct WireProtocolTests {
             chunkStart: 600,
             listenSeconds: 14.5,
             frequencySkew: -0.0125,
+            spread: 89.5,
             eventDate: Date(timeIntervalSince1970: 1_700_000_001.5)
         )),
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 2, error: "mic permission")),
         WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000001")!, trackTime: 612.5, matchDate: Date(timeIntervalSince1970: 1_700_000_000.25), source: .phone, sha256: "abc123"),
         WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000002")!, trackTime: 30, matchDate: Date(timeIntervalSince1970: 1_700_000_000), source: .watch, sha256: "def456"),
+        WatchCommand.applySync(sessionID: UUID(uuidString: "5E7A1C2B-0000-4000-8000-000000000003")!, trackTime: 45, matchDate: Date(timeIntervalSince1970: 1_700_000_000), source: .watch, sha256: "def456", listenID: testListenID),
     ])
     func watchCommandRoundTrip(command: WatchCommand) throws {
         let plist = try command.toPropertyList()

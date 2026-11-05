@@ -59,6 +59,7 @@ enum DiagnosticsEvent: Sendable {
         var elapsed: Double?
         var error: String?
         var skew: Double?
+        var spread: Double?
         var rxDelay: Double?
     }
 
@@ -78,6 +79,7 @@ enum DiagnosticsEvent: Sendable {
     case download(WatchDownloadEvent, pos: Double, rxDelay: Double?)
     case watchSample(listenID: UUID, sample: WatchSample, rxDelay: Double)
     case watchAborted(listenID: UUID, listenSec: Double?, rxDelay: Double)
+    case watchState(kind: String, state: String, pos: Double, rxDelay: Double)
     case mark(source: ListenSource, pos: Double, watchPos: Double?, rxDelay: Double?)
 
     var name: String {
@@ -98,6 +100,7 @@ enum DiagnosticsEvent: Sendable {
         case .download: return "download"
         case .watchSample: return "watchSample"
         case .watchAborted: return "watchAborted"
+        case .watchState: return "watchState"
         case .mark: return "mark"
         }
     }
@@ -177,6 +180,7 @@ enum DiagnosticsEvent: Sendable {
             builder.addPosition("elapsed", listen.elapsed)
             builder.add("error", listen.error)
             builder.add("skew", listen.skew)
+            builder.addPosition("spread", listen.spread)
             builder.addPosition("rxDelay", listen.rxDelay)
         case let .download(event, pos, rxDelay):
             builder.add("kind", event.kind.rawValue)
@@ -199,10 +203,17 @@ enum DiagnosticsEvent: Sendable {
             builder.add("lowPower", sample.lowPower)
             builder.add("battery", sample.battery)
             builder.add("runtime", sample.runtime)
+            builder.addPosition("runtimeLeft", sample.runtimeLeft)
+            builder.addPosition("uptime", sample.uptime)
             builder.addPosition("rxDelay", rxDelay)
         case let .watchAborted(listenID, listenSec, rxDelay):
             builder.add("listenID", listenID.uuidString)
             builder.addPosition("listenSec", listenSec)
+            builder.addPosition("rxDelay", rxDelay)
+        case let .watchState(kind, state, pos, rxDelay):
+            builder.add("kind", kind)
+            builder.add("state", state)
+            builder.addPosition("pos", pos)
             builder.addPosition("rxDelay", rxDelay)
         case let .mark(source, pos, watchPos, rxDelay):
             builder.add("source", source.rawValue)

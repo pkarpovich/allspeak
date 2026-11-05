@@ -363,7 +363,8 @@ final class WatchSessionClient: NSObject {
             trackTime: shown.match.trackTime,
             matchDate: shown.match.matchDate,
             source: shown.source,
-            sha256: sha256
+            sha256: sha256,
+            listenID: listenID
         )
         listenPanel.beginApply()
         let supersededCancels = unconfirmedPhoneCancels
@@ -464,7 +465,19 @@ final class WatchSessionClient: NSObject {
     }
 
     func stopAutoListen() {
-        autoListener?.cancel()
+        guard let autoListener else {
+            autoListen = AutoListenState()
+            return
+        }
+        autoListener.cancel()
+    }
+
+    // A listen all film that ended on its own (interruption, matcher error)
+    // starts again on the next wake, since recording can only start while the
+    // app is active; only Stop and a session change end it for good.
+    func resumeAutoListen() {
+        guard !autoListen.isOn, autoListen.resumesOnActivation else { return }
+        startAutoListen()
     }
 
     func applyAutoSuggestion() {
@@ -477,7 +490,8 @@ final class WatchSessionClient: NSObject {
             trackTime: match.trackTime,
             matchDate: match.matchDate,
             source: .watch,
-            sha256: sha256
+            sha256: sha256,
+            listenID: autoListenID
         ), errorHandler: { _ in })
     }
 
@@ -487,6 +501,10 @@ final class WatchSessionClient: NSObject {
 
     private func handleAutoListenEvent(_ event: ListenEvent, listenID: UUID) {
         guard autoListenID == listenID else { return }
+        var event = event
+        if case .matched(let match) = event.phase {
+            event = ListenEvent(phase: .matched(match.nearest(to: interpolatedTime, now: now())), listenSeconds: event.listenSeconds)
+        }
         var update = ListenUpdate(listenID: listenID, source: .watch, event: event)
         update.eventDate = now()
         report(.listenEvent(update))
@@ -494,13 +512,14 @@ final class WatchSessionClient: NSObject {
         case .started, .noMatch:
             break
         case .matched(let match):
-            let delta = ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now())
-            autoListen.lastMatch = match
-            autoListen.suggestion = abs(delta) > AutoListenState.suggestionThreshold ? match : nil
+            autoListen.receive(match, delta: ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now()))
         case .timedOut, .cancelled, .interrupted, .failed:
             autoListener = nil
             autoListenID = nil
-            autoListen = AutoListenState(error: AutoListenState.errorText(event.phase))
+            autoListen = AutoListenState(
+                error: AutoListenState.errorText(event.phase),
+                resumesOnActivation: event.phase != .cancelled
+            )
             guard let samples = telemetry?.end() else { return }
             report(.watchSamples(samples))
         }
