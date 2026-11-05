@@ -10,29 +10,46 @@ import WatchKit
 final class ListenRuntimeSession: NSObject, WKExtendedRuntimeSessionDelegate {
     static let shared = ListenRuntimeSession()
 
-    private(set) var status = "none"
+    var onEvent: (@MainActor (String) -> Void)?
+
     private var session: WKExtendedRuntimeSession?
+
+    var state: String {
+        guard let session else { return "none" }
+        switch session.state {
+        case .notStarted: return "notStarted"
+        case .scheduled: return "scheduled"
+        case .running: return "running"
+        case .invalid: return "invalid"
+        @unknown default: return "unknown"
+        }
+    }
+
+    var secondsLeft: Double? {
+        session?.expirationDate.map { $0.timeIntervalSinceNow }
+    }
 
     func ensureRunning() {
         if let session, session.state == .running || session.state == .scheduled { return }
         let session = WKExtendedRuntimeSession()
         session.delegate = self
         self.session = session
-        status = "starting"
+        onEvent?("start")
         session.start()
     }
 
     func stop() {
-        session?.invalidate()
-        session = nil
-        status = "none"
+        guard let session else { return }
+        session.invalidate()
+        self.session = nil
+        onEvent?("stop")
     }
 
     nonisolated func extendedRuntimeSessionDidStart(_ extendedRuntimeSession: WKExtendedRuntimeSession) {
         let id = ObjectIdentifier(extendedRuntimeSession)
         Task { @MainActor in
             guard self.isCurrent(id) else { return }
-            self.status = "running"
+            self.onEvent?("didStart")
         }
     }
 
@@ -40,7 +57,7 @@ final class ListenRuntimeSession: NSObject, WKExtendedRuntimeSessionDelegate {
         let id = ObjectIdentifier(extendedRuntimeSession)
         Task { @MainActor in
             guard self.isCurrent(id) else { return }
-            self.status = "expiring"
+            self.onEvent?("willExpire")
         }
     }
 
@@ -50,11 +67,12 @@ final class ListenRuntimeSession: NSObject, WKExtendedRuntimeSessionDelegate {
         error: (any Error)?
     ) {
         let text = Self.text(for: reason)
+        let detail = error.map { ":\(($0 as NSError).code)" } ?? ""
         let id = ObjectIdentifier(extendedRuntimeSession)
         Task { @MainActor in
             guard self.isCurrent(id) else { return }
             self.session = nil
-            self.status = "invalid:\(text)"
+            self.onEvent?("didInvalidate:\(text)\(detail)")
         }
     }
 

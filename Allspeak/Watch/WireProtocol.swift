@@ -43,6 +43,9 @@ import Foundation
 //                                     it finished, found on the next launch
 //   .syncMark(SyncMark)               the user marked the dub out of sync on the
 //                                     watch; the phone only logs it
+//   .watchState(WatchStateEvent)      a watch app state change or an extended
+//                                     runtime session callback during listen all
+//                                     film; the phone only logs it
 //
 // Metadata (iPhone -> Watch) carries the full track list so the watch
 // can render its TrackListView without a separate request:
@@ -85,7 +88,8 @@ import Foundation
 //       when nil, so older and newer builds decode each other.
 //
 //   Watch  --transferUserInfo-----------> iPhone  WatchCommand (log only)
-//       .listenEvent, .watchDownload, .watchSamples, .watchAborted, .syncMark; queued
+//       .listenEvent, .watchDownload, .watchSamples, .watchAborted, .syncMark,
+//       .watchState; queued
 //       while the phone is unreachable and delivered in order later, so each
 //       carries its own eventDate / sample dates
 //
@@ -132,6 +136,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case watchSamples(WatchListenTelemetry)
     case watchAborted(WatchListenTelemetry)
     case syncMark(SyncMark)
+    case watchState(WatchStateEvent)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -149,6 +154,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case download
         case telemetry
         case mark
+        case state
     }
 
     private enum Kind: String, Codable {
@@ -167,6 +173,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case watchSamples
         case watchAborted
         case syncMark
+        case watchState
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -218,6 +225,9 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .syncMark(let mark):
             try container.encode(Kind.syncMark, forKey: .kind)
             try container.encode(mark, forKey: .mark)
+        case .watchState(let event):
+            try container.encode(Kind.watchState, forKey: .kind)
+            try container.encode(event, forKey: .state)
         }
     }
 
@@ -261,6 +271,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .watchAborted(try container.decode(WatchListenTelemetry.self, forKey: .telemetry))
         case .syncMark:
             self = .syncMark(try container.decode(SyncMark.self, forKey: .mark))
+        case .watchState:
+            self = .watchState(try container.decode(WatchStateEvent.self, forKey: .state))
         }
     }
 }
@@ -382,6 +394,18 @@ struct WatchSample: Codable, Equatable, Sendable {
     let lowPower: Bool
     let battery: Double?
     var runtime: String? = nil
+    var runtimeLeft: Double? = nil
+}
+
+struct WatchStateEvent: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case app
+        case runtime
+    }
+
+    let kind: Kind
+    let state: String
+    let eventDate: Date
 }
 
 struct SyncMark: Codable, Equatable, Sendable {

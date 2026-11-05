@@ -28,6 +28,8 @@ struct WireProtocolTests {
         ])),
         WatchCommand.watchAborted(WatchListenTelemetry(listenID: testListenID, startedAt: Date(timeIntervalSince1970: 1_000_000), samples: [])),
         WatchCommand.syncMark(SyncMark(eventDate: Date(timeIntervalSince1970: 1_000_000.5), position: 4321.25)),
+        WatchCommand.watchState(WatchStateEvent(kind: .app, state: "inactive", eventDate: Date(timeIntervalSince1970: 1_000_001.25))),
+        WatchCommand.watchState(WatchStateEvent(kind: .runtime, state: "didInvalidate:suppressedBySystem", eventDate: Date(timeIntervalSince1970: 1_000_002))),
         WatchCommand.startListening(listenID: testListenID),
         WatchCommand.cancelListening(listenID: testListenID),
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)),

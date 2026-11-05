@@ -26,7 +26,8 @@ extension WatchSample {
             thermalState: thermalState(ProcessInfo.processInfo.thermalState),
             lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
             battery: battery < 0 ? nil : Double(battery),
-            runtime: ListenRuntimeSession.shared.status
+            runtime: ListenRuntimeSession.shared.state,
+            runtimeLeft: ListenRuntimeSession.shared.secondsLeft
         )
     }
 

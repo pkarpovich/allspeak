@@ -241,7 +241,8 @@ Event types:
 - `watchSample` - the watch process every 5 s during a watch listen, sent in one
   batch when the listen ends: `listenID`, `listenSec`, address space in use
   `vmMB`, `footprintMB`, `availMB` left before the memory limit, watch app state
-  `app` (active / inactive / background), `thermal`, `lowPower`, `battery`, and in listen all film the extended runtime session state `runtime` (`starting`, `running`, `expiring`, `invalid:<reason>`, `none`).
+  `app` (active / inactive / background), `thermal`, `lowPower`, `battery`, and in listen all film the live state of the extended runtime session `runtime` (`none`, `notStarted`, `scheduled`, `running`, `invalid`) with `runtimeLeft`, the seconds until it expires.
+- `watchState` - during listen all film, a watch app phase change (`kind` app, `state` active / inactive / background) or an extended runtime session step (`kind` runtime, `state` start, didStart, willExpire, `didInvalidate:<reason>[:<error code>]`, stop), timestamped on the watch.
 - `watchAborted` - a watch listen whose process died before it finished
   (crash, jetsam, force quit), reported on the next launch with `listenSec` of
   its last sample, followed by its `watchSample` lines.

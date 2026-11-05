@@ -24,6 +24,9 @@ struct AllspeakWatchApp: App {
         shared.makeListener = { WatchCinemaListener(catalogURL: $0) }
         shared.makeContinuousListener = { WatchCinemaListener(catalogURL: $0, continuous: true) }
         shared.telemetry = ListenTelemetry(markerURL: WatchSample.markerURL(), sample: WatchSample.current)
+        ListenRuntimeSession.shared.onEvent = { state in
+            shared.report(.watchState(WatchStateEvent(kind: .runtime, state: state, eventDate: Date())))
+        }
         shared.activate()
         shared.startInterpolationTimer()
         self._client = State(initialValue: shared)
@@ -35,6 +38,9 @@ struct AllspeakWatchApp: App {
                 .environment(client)
         }
         .onChange(of: scenePhase) { _, phase in
+            if client.autoListen.isOn {
+                client.report(.watchState(WatchStateEvent(kind: .app, state: Self.text(for: phase), eventDate: Date())))
+            }
             guard phase == .active else { return }
             client.retryDownloads()
             if client.autoListen.isOn {
@@ -47,6 +53,15 @@ struct AllspeakWatchApp: App {
             } else {
                 ListenRuntimeSession.shared.stop()
             }
+        }
+    }
+
+    private static func text(for phase: ScenePhase) -> String {
+        switch phase {
+        case .active: "active"
+        case .inactive: "inactive"
+        case .background: "background"
+        @unknown default: "unknown"
         }
     }
 }

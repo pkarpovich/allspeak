@@ -782,6 +782,8 @@ final class PlaybackCoordinator {
             noteWatchAborted(telemetry)
         case .syncMark(let mark):
             markDesync(source: .watch, watchPosition: mark.position, eventDate: mark.eventDate)
+        case .watchState(let event):
+            noteWatchState(event)
         }
     }
 
@@ -848,6 +850,11 @@ final class PlaybackCoordinator {
     func markDesync(source: ListenSource, watchPosition: Double? = nil, eventDate: Date? = nil) {
         guard let controller else { return }
         diagnostics.log(.mark(source: source, pos: controller.livePosition, watchPos: watchPosition, rxDelay: rxDelay(since: eventDate)))
+    }
+
+    func noteWatchState(_ event: WatchStateEvent) {
+        guard let controller else { return }
+        diagnostics.log(.watchState(kind: event.kind.rawValue, state: event.state, pos: controller.livePosition, rxDelay: rxDelay(since: event.eventDate) ?? 0))
     }
 
     private func rxDelay(since date: Date?) -> Double? {
