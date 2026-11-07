@@ -483,6 +483,16 @@ xcodebuild test -scheme Allspeak \
 Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`, `.catalog`)
 so subsets can be run with the `--filter` flag.
 
+## Claude plugins
+
+The repository is a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) named `allspeak`. It carries the `cinema-prep` plugin (`plugins/cinema-prep`): the skill that prepares film sources into the dub track, subtitles and ShazamKit fingerprint the app plays. Install it anywhere with:
+
+```
+/plugin install cinema-prep --marketplace pkarpovich/allspeak
+```
+
+This checkout enables it through `.claude/settings.json`. To try an edit to the skill before it merges, start Claude Code with `claude --plugin-dir ./plugins/cinema-prep`, which shadows the installed copy for that session.
+
 ## Commit messages
 
 [Conventional Commits](https://www.conventionalcommits.org/) — `feat:`,

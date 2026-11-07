@@ -1,0 +1,12 @@
+{
+  "name": "allspeak",
+  "description": "Plugins that travel with the Allspeak cinema app",
+  "owner": { "name": "Pavel Karpovich" },
+  "plugins": [
+    {
+      "name": "cinema-prep",
+      "source": "./plugins/cinema-prep",
+      "description": "Prepare film sources into a clean dub track, subtitles and a ShazamKit fingerprint for Allspeak, and judge rips before a screening."
+    }
+  ]
+}
