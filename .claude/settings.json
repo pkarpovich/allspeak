@@ -1,5 +1,14 @@
 {
   "enabledPlugins": {
-    "axiom@axiom-marketplace": true
+    "axiom@axiom-marketplace": true,
+    "cinema-prep@allspeak": true
+  },
+  "extraKnownMarketplaces": {
+    "allspeak": {
+      "source": {
+        "source": "github",
+        "repo": "pkarpovich/allspeak"
+      }
+    }
   }
 }

@@ -5,8 +5,8 @@ description: Build, run, drive, and screenshot the Allspeak iOS app and its Appl
 
 # Allspeak simulator driving
 
-Everything here runs on the Mac (this is a native iOS/watchOS app - Xcode 26,
-iOS 26 / watchOS 26 deploy targets). Screenshots for the public README, bug
+Everything here runs on the Mac (this is a native iOS/watchOS app - Xcode 27,
+iOS 26 / watchOS 26 deploy targets, run on the iOS 27 / watchOS 26 simulators). Screenshots for the public README, bug
 repro, and the Apple Watch remote all go through here.
 
 ## THE watch lesson (read first): why the watch showed "No active session"
@@ -24,11 +24,11 @@ WatchConnectivity. First attempt failed for THREE reasons, none of them the app:
    (`WKCompanionAppBundleIdentifier`, WCSession activation) - all correct. The
    fault was the sim link, exactly as Pavel said.
 
-### Working procedure (verified 2026-07-20)
+### Working procedure (verified 2026-07-20, device names updated 2026-11-05)
 
 ```sh
-W=<watch-udid>   # Apple Watch Series 11 (46mm), watchOS 26.x
-P=<phone-udid>   # iPhone 17 Pro, iOS 26.x
+W=<watch-udid>   # Apple Watch Ultra (49mm), watchOS 26.5
+P=<phone-udid>   # iPhone 18 Pro, iOS 27.0
 
 xcrun simctl pair "$W" "$P"                 # 1. create the pair
 xcrun simctl shutdown "$W" "$P"             # 2. REBOOT both as a pair -
@@ -68,12 +68,15 @@ snapshot with `sendMessage` (needs `isReachable`); the watch reads
 
 ## Toolchain
 
-- **Xcode 26.6**, XcodeGen (`project.yml`). After editing `project.yml` or a
-  plist: `xcodegen generate`.
-- **Deploy targets are iOS 26 / watchOS 26.** You MUST target an iOS 26 / watchOS
-  26 sim (iPhone 17 Pro, Apple Watch Series 11/Ultra 3). A booted "iPhone 16 Pro"
-  was iOS 18.2 -> `install failed: Requires a Newer Version of iOS`. List real
-  OS with `xcrun simctl list devices "iOS 26.5"` / `"watchOS 26.5"`.
+- **Xcode 27.2**, XcodeGen (`project.yml`). After editing `project.yml`, a
+  plist, or adding a file to a target that lists files one by one (the watch
+  target): `xcodegen generate`. The iOS target takes the whole `Allspeak/`
+  folder, but a new file still needs a regenerate before it compiles.
+- **Deploy targets are iOS 26 / watchOS 26.** The sims on this Mac that meet
+  them are `iPhone 18 Pro` (iOS 27.0) and `Apple Watch Ultra (49mm)` (watchOS
+  26.5); the iOS 18.2 / watchOS 11.2 runtimes also installed are too old ->
+  `install failed: Requires a Newer Version of iOS`. List real OS with
+  `xcrun simctl list devices "iOS 27.0"` / `"watchOS 26.5"`.
 - **AXe** at `/opt/homebrew/bin/axe` - drives the UI (tap/swipe/type/describe-ui).
 - **xcui** (axiom plugin) - assertions/waits on the a11y tree; it does NOT tap
   (that's AXe). `xcui doctor` warns if several sims are booted - shut down extras.
@@ -94,9 +97,15 @@ printf '%s\n' 'ALLSPEAK_CATALOG_URL = https:/$()/allspeak.pkarpovich.dev' \
 
 ```sh
 xcodebuild -project Allspeak.xcodeproj -scheme Allspeak -configuration Debug \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' \
   -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build
 ```
+
+Tests: `xcodebuild test -project Allspeak.xcodeproj -scheme Allspeak -destination
+'platform=iOS Simulator,name=iPhone 18 Pro'` (Swift Testing, ~650 tests, ~10 s
+once built). Redirect the output to a file and grep `Test run with|TEST
+(SUCCEEDED|FAILED)|✘`: the WCSession "DeviceNotPaired" spam otherwise buries
+the summary. `xcrun simctl diagnose` can hang after a test run; don't chain it.
 
 - Product lands at `build/dd/Build/Products/Debug-iphonesimulator/Allspeak.app`
   (embedded watch app: `.../Allspeak.app/Watch/AllspeakWatch.app`; standalone
@@ -107,11 +116,24 @@ xcodebuild -project Allspeak.xcodeproj -scheme Allspeak -configuration Debug \
 - To find the product dir when unsure: `-showBuildSettings ... | grep BUILT_PRODUCTS_DIR`
   (use an iOS 26 destination or it errors and prints nothing).
 
+## Seeding the app container
+
+`xcrun simctl get_app_container "$P" dev.karpovich.allspeak data` is the app's
+data container (launch the app once first so it exists). Screening logs live in
+`Documents/diagnostics/*.jsonl`; copy real ones from `~/Downloads` there to
+exercise the log upload, then relaunch. Unit-test runs leave hundreds of
+244-byte `a-*.jsonl` stubs in the same folder; the uploader skips them (no
+catalog id) and Settings counts them as skipped.
+
+Listen page without a phone: `xcrun simctl launch "$W"
+dev.karpovich.allspeak.watchkitapp -listenSmoke` starts the watch app with a
+fake session and a fake listener that matches after 8 s (`ListenSmoke.swift`).
+
 ## Driving the UI (AXe)
 
 ```sh
-axe describe-ui --udid "$P"          # a11y tree as JSON; points, iPhone 17 Pro = 402x874
-axe tap -x <pt> -y <pt> --udid "$P"
+axe describe-ui --udid "$P"          # a11y tree as JSON; points, iPhone 18 Pro = 402x874
+axe tap -x <pt> -y <pt> --udid "$P"  # add --tap-style physical when a SwiftUI control ignores the tap but axe reports success
 axe swipe --start-x A --start-y B --end-x C --end-y D --delta 6 --duration 1.2 --udid "$P"
 ```
 
@@ -151,6 +173,10 @@ Opens on **Sessions** (dark), segmented **Mine / Catalog**.
   arrives (see the watch lesson above).
 
 ## Catalog admin (staging shots)
+
+The read token also lets you list and fetch uploaded screening logs:
+`curl -s -H "Authorization: Bearer $AUTH_READ_TOKEN" "$CATALOG_API/sessions/<catalogID>/diagnostics"`
+(catalogID is in the log's first line). Crash reports: `.../diagnostics/crashes`.
 
 Creds in `~/.config/allspeak/catalog.env` (`CATALOG_API`, `AUTH_ADMIN_TOKEN`,
 `AUTH_READ_TOKEN`; never print values). To remove a test row before a screenshot:

@@ -1,0 +1,4 @@
+{
+  "name": "cinema-prep",
+  "description": "Prepare film sources into a clean dub track, subtitles and a ShazamKit fingerprint for Allspeak, and judge rips before a screening."
+}

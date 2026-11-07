@@ -58,32 +58,9 @@ fingerprint, and the `server.json` sidecar that ties it to its catalog entry. On
 launch the app deletes any session without that sidecar (sessions created by
 hand before the catalog existed, or an import that never finished).
 
-### Audio prep pipeline (`scripts/bifrost.fish`)
+### Audio prep pipeline
 
-The `.m4a` voice track is produced by `scripts/bifrost.fish` (fish, macOS):
-decode, optional FPS retime, Demucs vocal separation, Sidon speech
-restoration, then loudnorm. See the header comment in the script for full
-usage.
-
-Demucs runs on the Apple Silicon GPU via the
-[`demucs-mlx`](https://github.com/ssmall256/demucs-mlx) port (base `htdemucs`),
-roughly 20x faster than the old CPU path (~7 min vs ~3h for a 2h film). Base
-`htdemucs` is used rather than `htdemucs_ft`: the 4-model `_ft` ensemble is far
-heavier on this GPU for a quality difference that is inaudible after Sidon
-restoration on cam sources. Two pins are REQUIRED:
-
-- `mlx-audio-io==1.3.10` holds `mlx` at `0.31.0`; `mlx` `0.31.2` made GPU streams
-  thread-local and crashes the port with `There is no Stream(gpu, 1) in current
-  thread` (upstream regression,
-  [ml-explore/mlx-lm#1179](https://github.com/ml-explore/mlx-lm/issues/1179)).
-  Drop it only once `demucs-mlx` runs on `mlx >= 0.31.2`.
-- the `[convert]` extra converts `htdemucs`'s weights to MLX on first run (cached
-  in `~/.cache/demucs-mlx/`); only `htdemucs_ft` ships pre-converted weights.
-
-The port writes all four stems to `<out>/<track>/vocals.wav` (no per-model
-subdir), so the script resolves the vocals path with `find`. Sidon stays on CPU
-(~25 min for a 2h film): its checkpoints are CUDA-traced TorchScript with float64,
-which Apple's MPS backend does not support.
+The voice track, subtitles, opening clip and fingerprint are produced by the `cinema-prep` skill in `plugins/cinema-prep` (see "Claude plugins" below): DINOv3 + DTW alignment against an English reference for ad detection and drift, Bandit v2 separation with a shout patch, MossFormer2 restoration, static-gain normalization, GigaAM subtitles and a two-layer ShazamKit catalog. `scripts/bifrost.fish` is the legacy demucs + Sidon chain, kept for comparisons only.
 
 ### Switching tracks at runtime
 
@@ -509,6 +486,16 @@ xcodebuild test -scheme Allspeak \
 
 Suites are tagged (`.parser`, `.coreData`, `.storage`, `.audio`, `.catalog`)
 so subsets can be run with the `--filter` flag.
+
+## Claude plugins
+
+The repository is a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) named `allspeak`. It carries the `cinema-prep` plugin (`plugins/cinema-prep`): the skill that prepares film sources into the dub track, subtitles and ShazamKit fingerprint the app plays. Install it anywhere with:
+
+```
+/plugin install cinema-prep --marketplace pkarpovich/allspeak
+```
+
+This checkout enables it through `.claude/settings.json`. To try an edit to the skill before it merges, start Claude Code with `claude --plugin-dir ./plugins/cinema-prep`, which shadows the installed copy for that session.
 
 ## Commit messages
 
