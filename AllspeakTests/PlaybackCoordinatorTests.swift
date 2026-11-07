@@ -1867,6 +1867,20 @@ struct PlaybackCoordinatorTests {
         #expect(seek["from"] as? Double == 0)
     }
 
+    @Test("an apply is logged under the listen id the watch sent, not the phone's last listen")
+    func applySyncLogsSentListenID() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        let sentListenID = UUID(uuidString: "A81D0000-0000-4000-8000-000000000001")!
+        let sessionID = try #require(fixture.coordinator.sessionUUID)
+        fixture.coordinator.startListening(listenID: testListenID)
+
+        fixture.coordinator.apply(.applySync(sessionID: sessionID, trackTime: 1.0, matchDate: Self.listenNow, source: .watch, sha256: "abc123", listenID: sentListenID))
+
+        let apply = try #require(try Self.listenLines(fixture.log).last { $0["phase"] as? String == "apply" })
+        #expect(apply["listenID"] as? String == sentListenID.uuidString)
+    }
+
     @Test("applySync on a playing player does not log another play")
     func applySyncKeepsPlayingPlayer() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)
@@ -2047,6 +2061,23 @@ struct PlaybackCoordinatorTests {
         #expect(lines[1]["rxDelay"] as? Double == 3)
     }
 
+    @Test("watch app and runtime session states log with the watch's delivery delay")
+    func watchStatesLogged() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.controller?.seek(to: 1.0)
+
+        fixture.coordinator.apply(.watchState(WatchStateEvent(kind: .app, state: "inactive", eventDate: Self.listenNow.addingTimeInterval(-30))))
+        fixture.coordinator.apply(.watchState(WatchStateEvent(kind: .runtime, state: "didInvalidate:suppressedBySystem", eventDate: Self.listenNow)))
+
+        let logURL = try #require(fixture.log.currentFileURL)
+        let lines = try Self.readJSONLines(logURL).filter { $0["event"] as? String == "watchState" }
+        #expect(lines.map { $0["kind"] as? String } == ["app", "runtime"])
+        #expect(lines.map { $0["state"] as? String } == ["inactive", "didInvalidate:suppressedBySystem"])
+        #expect(lines.map { $0["rxDelay"] as? Double } == [30, 0])
+        #expect(lines.map { $0["pos"] as? Double } == [1.0, 1.0])
+    }
+
     @Test("watch samples log one line each, an aborted listen logs a marker line first")
     func watchSamplesAndAbortLogged() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)
@@ -2057,7 +2088,7 @@ struct PlaybackCoordinatorTests {
                 date: startedAt.addingTimeInterval(seconds), listenSeconds: seconds,
                 virtualMB: 410.5, footprintMB: 62.25, availableMB: 18,
                 appState: "background", thermalState: "fair", lowPower: true, battery: 0.5,
-                runtime: "running"
+                runtime: "running", runtimeLeft: 3540.5, uptime: 86_400.25
             )
         }
         let telemetry = WatchListenTelemetry(listenID: testListenID, startedAt: startedAt, samples: samples)
@@ -2078,6 +2109,8 @@ struct PlaybackCoordinatorTests {
         #expect(lines[1]["lowPower"] as? Double == 1)
         #expect(lines[1]["battery"] as? Double == 0.5)
         #expect(lines[1]["runtime"] as? String == "running")
+        #expect(lines[1]["runtimeLeft"] as? Double == 3540.5)
+        #expect(lines[1]["uptime"] as? Double == 86_400.25)
         #expect(lines[1]["rxDelay"] as? Double == 55)
         #expect(lines[2]["listenSec"] as? Double == 5)
         #expect(lines[2]["rxDelay"] as? Double == 55)

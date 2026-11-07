@@ -107,13 +107,14 @@ final class WatchSessionHost: NSObject {
         switch command {
         case .switchTrack:
             break
-        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256):
+        case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256, let listenID):
             guard coordinator.applySync(
                 sessionID: sessionID,
                 trackTime: trackTime,
                 matchDate: matchDate,
                 source: source,
-                sha256: sha256
+                sha256: sha256,
+                listenID: listenID
             ) else {
                 return .empty
             }

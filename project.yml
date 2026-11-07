@@ -88,6 +88,8 @@ targets:
       - path: Allspeak/Watch/ListenPanelState.swift
       - path: Allspeak/Watch/ListenTelemetry.swift
       - path: Allspeak/Watch/ListenActionIntent.swift
+      - path: Allspeak/Watch/StreamListening.swift
+      - path: Allspeak/Watch/WatchCinemaListener.swift
     dependencies:
       - target: AllspeakWatchWidget
       - sdk: ShazamKit.framework

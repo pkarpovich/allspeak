@@ -334,3 +334,72 @@ struct ListenPanelStateTests {
         #expect(ListenPanelState().statusText(for: .phone, interpolatedPosition: 0, now: start) == "")
     }
 }
+
+@Suite("AutoListenState")
+struct AutoListenStateTests {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    private func match(trackTime: Double, at seconds: TimeInterval) -> FingerprintMatch {
+        FingerprintMatch(trackTime: trackTime, matchDate: t0.addingTimeInterval(seconds), chunkStart: 0)
+    }
+
+    @Test("a shift up to 3 s is suggested at once and a shift under 1 s clears it")
+    func smallShiftsAreImmediate() {
+        var state = AutoListenState(isOn: true)
+
+        state.receive(match(trackTime: 100, at: 0), delta: -2.5)
+        #expect(state.suggestion == match(trackTime: 100, at: 0))
+        #expect(state.pending == nil)
+
+        state.receive(match(trackTime: 105, at: 5), delta: 0.4)
+        #expect(state.suggestion == nil)
+        #expect(state.lastMatch == match(trackTime: 105, at: 5))
+    }
+
+    @Test("a shift over 3 s waits for a second match whose track time advanced with the clock")
+    func largeShiftNeedsAgreement() {
+        var state = AutoListenState(isOn: true)
+
+        state.receive(match(trackTime: 4775.9, at: 0), delta: 111.4)
+        #expect(state.suggestion == nil)
+        #expect(state.pending == match(trackTime: 4775.9, at: 0))
+
+        state.receive(match(trackTime: 4774.1, at: 7.4), delta: 102.2)
+        #expect(state.suggestion == nil)
+        #expect(state.pending == match(trackTime: 4774.1, at: 7.4))
+
+        state.receive(match(trackTime: 3994.9, at: 20), delta: 28.0)
+        state.receive(match(trackTime: 4000.1, at: 25.3), delta: 27.9)
+        #expect(state.suggestion == match(trackTime: 4000.1, at: 25.3))
+        #expect(state.pending == nil)
+    }
+
+    @Test("a stale match delivered after a freeze is dropped by the next live one")
+    func staleMatchIsDropped() {
+        var state = AutoListenState(isOn: true)
+
+        state.receive(match(trackTime: 190.4, at: 0), delta: -20.7)
+        #expect(state.suggestion == nil)
+
+        state.receive(match(trackTime: 232.5, at: 19.9), delta: 1.6)
+        #expect(state.suggestion == match(trackTime: 232.5, at: 19.9))
+        #expect(state.pending == nil)
+    }
+
+    @Test("a waiting match expires after 30 s")
+    func pendingExpires() {
+        var state = AutoListenState(isOn: true)
+
+        state.receive(match(trackTime: 100, at: 0), delta: 10)
+        state.receive(match(trackTime: 135, at: 35), delta: 10)
+        #expect(state.suggestion == nil)
+        #expect(state.pending == match(trackTime: 135, at: 35))
+    }
+
+    @Test("agreement tolerates 2 s of drift between the two matches")
+    func agreementTolerance() {
+        #expect(AutoListenState.agrees(match(trackTime: 100, at: 0), match(trackTime: 111.9, at: 10)))
+        #expect(!AutoListenState.agrees(match(trackTime: 100, at: 0), match(trackTime: 112.1, at: 10)))
+        #expect(!AutoListenState.agrees(match(trackTime: 100, at: 10), match(trackTime: 90, at: 0)))
+    }
+}
