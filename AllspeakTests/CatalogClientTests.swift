@@ -294,3 +294,48 @@ struct CatalogClientTests {
         }
     }
 }
+
+@Suite("CatalogClient uploads")
+struct CatalogClientUploadTests {
+    private let receipt = Data(#"{"key":"diagnostics/x/log.jsonl","size":12}"#.utf8)
+
+    @Test("uploadSessionLog posts the bytes with the name and the ndjson content type")
+    func uploadSessionLogRequest() async throws {
+        let transport = MockCatalogTransport(data: receipt, statusCode: 201)
+        let client = CatalogClient(baseURL: URL(string: "https://allspeak.pkarpovich.dev")!, readToken: "tok", transport: transport)
+        let id = UUID(uuidString: "5E7A1C2B-0000-4000-8000-0000000000AA")!
+
+        let result = try await client.uploadSessionLog(sessionID: id, name: "film-1.jsonl", data: Data("hello".utf8))
+
+        #expect(result == DiagnosticsUploadReceipt(key: "diagnostics/x/log.jsonl", size: 12))
+        let request = try #require(await transport.recordedRequests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == "https://allspeak.pkarpovich.dev/api/v1/sessions/5e7a1c2b-0000-4000-8000-0000000000aa/diagnostics?name=film-1.jsonl")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/x-ndjson")
+        #expect(request.httpBody == Data("hello".utf8))
+    }
+
+    @Test("uploadDiagnosticReport posts to the crashes route as JSON")
+    func uploadReportRequest() async throws {
+        let transport = MockCatalogTransport(data: receipt, statusCode: 201)
+        let client = CatalogClient(baseURL: URL(string: "https://allspeak.pkarpovich.dev")!, readToken: "tok", transport: transport)
+
+        _ = try await client.uploadDiagnosticReport(name: "crash-1.json", data: Data("{}".utf8))
+
+        let request = try #require(await transport.recordedRequests.first)
+        #expect(request.url?.absoluteString == "https://allspeak.pkarpovich.dev/api/v1/diagnostics/crashes?name=crash-1.json")
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+    }
+
+    @Test("a 413 or 400 is reported as rejected, not as a network error", arguments: [400, 413])
+    func rejectedUpload(status: Int) async {
+        let transport = MockCatalogTransport(data: Data(), statusCode: status)
+        let client = CatalogClient(baseURL: URL(string: "https://allspeak.pkarpovich.dev")!, readToken: "tok", transport: transport)
+
+        await #expect(throws: CatalogClientError.rejected) {
+            try await client.uploadDiagnosticReport(name: "crash-1.json", data: Data())
+        }
+    }
+}
+

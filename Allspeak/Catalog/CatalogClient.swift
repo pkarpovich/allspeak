@@ -13,8 +13,14 @@ extension URLSession: CatalogTransport {
 enum CatalogClientError: Error, Equatable {
     case unauthorized
     case notFound
+    case rejected
     case network
     case decoding
+}
+
+struct DiagnosticsUploadReceipt: Decodable, Equatable, Sendable {
+    let key: String
+    let size: Int64
 }
 
 struct CatalogClient: Sendable {
@@ -43,9 +49,26 @@ struct CatalogClient: Sendable {
         return try await send(request)
     }
 
+    func uploadSessionLog(sessionID: UUID, name: String, data: Data) async throws -> DiagnosticsUploadReceipt {
+        try await send(makeUpload(path: "api/v1/sessions/\(sessionID.uuidString.lowercased())/diagnostics", name: name, data: data, contentType: "application/x-ndjson"))
+    }
+
+    func uploadDiagnosticReport(name: String, data: Data) async throws -> DiagnosticsUploadReceipt {
+        try await send(makeUpload(path: "api/v1/diagnostics/crashes", name: name, data: data, contentType: "application/json"))
+    }
+
     private func makeRequest(path: String) -> URLRequest {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.setValue("Bearer \(readToken)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    private func makeUpload(path: String, name: String, data: Data, contentType: String) -> URLRequest {
+        var request = makeRequest(path: path)
+        request.url = request.url?.appending(queryItems: [URLQueryItem(name: "name", value: name)])
+        request.httpMethod = "POST"
+        request.httpBody = data
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         return request
     }
 
@@ -69,6 +92,8 @@ struct CatalogClient: Sendable {
             throw CatalogClientError.unauthorized
         case 404:
             throw CatalogClientError.notFound
+        case 400, 413:
+            throw CatalogClientError.rejected
         default:
             throw CatalogClientError.network
         }

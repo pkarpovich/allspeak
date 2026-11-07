@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @State private var uploader = DiagnosticsUploader.shared
+
     private static let houseRules = [
         "Phone on silent. Subtitles on loud.",
         "One AirPod in, one ear on the room.",
@@ -13,6 +15,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 32) {
                     manifesto
                     houseRulesCard
+                    diagnosticsCard
                     footer
                 }
                 .padding(20)
@@ -63,6 +66,44 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    private var diagnosticsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Diagnostics")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Tokens.text3)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Screening logs go to the catalog on their own after each session. If one is missing, send it here.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Tokens.text)
+                Text(uploadStatus)
+                    .font(Tokens.Font.monoSmall)
+                    .foregroundStyle(Tokens.text2)
+                Button(uploader.isRunning ? "Uploading..." : "Upload logs now") {
+                    uploader.schedule()
+                }
+                .disabled(uploader.isRunning)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Tokens.accent)
+                .buttonStyle(.borderless)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Tokens.surface, in: .rect(cornerRadius: 14))
+        }
+    }
+
+    private var uploadStatus: String {
+        let pending = uploader.pendingCount
+        guard let report = uploader.lastReport, let run = uploader.lastRun else {
+            return "\(pending) waiting"
+        }
+        let when = run.formatted(date: .omitted, time: .shortened)
+        if let error = report.error {
+            return "\(pending) waiting, last try \(when) failed: \(error)"
+        }
+        return "\(pending) waiting, last run \(when): \(report.uploaded) sent, \(report.skipped) skipped"
     }
 
     private var footer: some View {

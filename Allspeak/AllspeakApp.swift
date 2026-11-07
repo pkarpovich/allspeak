@@ -11,6 +11,10 @@ struct AllspeakApp: App {
         Task.detached(priority: .utility) { storage.removeLegacySyncFiles() }
         let repository = SessionRepository()
         Task.detached(priority: .utility) { try? await repository.removeSessionsWithoutCatalog() }
+        let uploader = DiagnosticsUploader.shared
+        DiagnosticsLog.shared.onEnd = { uploader.schedule() }
+        DiagnosticReportCollector.shared.start(into: uploader.reportsDirectory) { uploader.schedule() }
+        uploader.schedule()
     }
 
     var body: some Scene {

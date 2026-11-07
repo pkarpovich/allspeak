@@ -36,6 +36,7 @@ final class DiagnosticsLog {
     }
 
     var currentFileURL: URL? { fileURL }
+    var onEnd: (@MainActor () -> Void)?
 
     func begin(filmTitle: String) {
         closeHandle()
@@ -87,7 +88,9 @@ final class DiagnosticsLog {
 
     func end() {
         closeHandle()
+        guard fileURL != nil else { return }
         fileURL = nil
+        onEnd?()
     }
 
     private func ensureHandle(at url: URL) -> FileHandle? {

@@ -25,6 +25,7 @@ struct RootView: View {
             case .active:
                 PlaybackCoordinator.shared.noteAppState(foreground: true)
                 Task { await catalogStore.refreshIfStale() }
+                DiagnosticsUploader.shared.schedule()
             case .background:
                 PlaybackCoordinator.shared.noteAppState(foreground: false)
             default:
