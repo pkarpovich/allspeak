@@ -76,11 +76,23 @@ final class WatchSessionClient: NSObject {
         session.delegate = self
         session.activate()
         self.session = session
-        self.isConnected = session.isReachable
-        let stored = session.receivedApplicationContext
-        if !stored.isEmpty {
-            handleReceivedApplicationContext(stored)
+    }
+
+    // receivedApplicationContext is valid only once activation completes, and
+    // WC does not re-deliver a context it delivered before a crash, so a
+    // relaunched watch restores it here and then asks the phone for the live
+    // session, which also covers a context that went stale meanwhile.
+    func activationCompleted(state: WCSessionActivationState, reachable: Bool, storedContext: [String: Any]) {
+        isConnected = reachable
+        guard state == .activated else { return }
+        reportAbortedListen()
+        if !storedContext.isEmpty {
+            handleReceivedApplicationContext(storedContext)
         }
+        sendCommand(.requestSession, errorHandler: { _ in })
+        guard reachable else { return }
+        retryDownloads()
+        retryPhoneCancelIfNeeded()
     }
 
     var interpolatedTime: TimeInterval {
@@ -583,15 +595,9 @@ extension WatchSessionClient: WCSessionDelegate {
         error _: Error?
     ) {
         let reachable = session.isReachable
+        let stored = SendableDictionary(value: state == .activated ? session.receivedApplicationContext : [:])
         Task { @MainActor in
-            if state == .activated {
-                self.reportAbortedListen()
-            }
-            self.isConnected = reachable
-            if reachable {
-                self.retryDownloads()
-                self.retryPhoneCancelIfNeeded()
-            }
+            self.activationCompleted(state: state, reachable: reachable, storedContext: stored.value)
         }
     }
 

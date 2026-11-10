@@ -32,6 +32,7 @@ struct WireProtocolTests {
         WatchCommand.watchState(WatchStateEvent(kind: .runtime, state: "didInvalidate:suppressedBySystem", eventDate: Date(timeIntervalSince1970: 1_000_002))),
         WatchCommand.startListening(listenID: testListenID),
         WatchCommand.cancelListening(listenID: testListenID),
+        WatchCommand.requestSession,
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)),
         WatchCommand.listenEvent(ListenUpdate(
             listenID: testListenID,

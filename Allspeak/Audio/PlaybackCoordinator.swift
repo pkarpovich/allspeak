@@ -770,6 +770,8 @@ final class PlaybackCoordinator {
             startListening(listenID: listenID)
         case .cancelListening(let listenID):
             cancelListening(listenID: listenID)
+        case .requestSession:
+            break
         case .listenEvent(let update):
             noteWatchListenEvent(update)
         case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256, let listenID):
