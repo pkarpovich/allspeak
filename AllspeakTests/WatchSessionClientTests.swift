@@ -132,6 +132,35 @@ struct WatchSessionClientTests {
         }
     }
 
+    @Test("a session request that failed while unreachable goes out again when the phone becomes reachable")
+    func sessionRequestRetriedOnReachability() async throws {
+        let (client, sender, _) = try makeClient()
+        sender.nextError = WatchMessageError.notReachable
+
+        client.activationCompleted(state: .activated, reachable: false, storedContext: try Self.relaunchMeta.toPropertyList())
+        sender.nextError = nil
+        sender.nextReply = try PlaybackSnapshot.empty.toPropertyList()
+        client.reachabilityChanged(true)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.requestSession, .requestSession])
+        #expect(client.isConnected)
+    }
+
+    @Test("a reply to the session request stops later reachability changes from sending it again")
+    func sessionRequestNotResentAfterReply() async throws {
+        let (client, sender, _) = try makeClient()
+        sender.nextReply = [:]
+
+        client.activationCompleted(state: .activated, reachable: true, storedContext: [:])
+        try await Task.sleep(for: .milliseconds(50))
+        client.reachabilityChanged(false)
+        client.reachabilityChanged(true)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.requestSession])
+    }
+
     @Test("the snapshot the phone replies with refreshes the restored session's position")
     func sessionRequestReplyRefreshesPosition() async throws {
         let (client, sender, _) = try makeClient()

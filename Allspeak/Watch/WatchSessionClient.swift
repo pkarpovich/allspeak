@@ -44,6 +44,7 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored private var abortedListen: WatchListenTelemetry?
     @ObservationIgnored private var listenID: UUID?
     @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
+    @ObservationIgnored private var sessionRequestPending = false
     @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private var session: WCSession?
@@ -89,10 +90,28 @@ final class WatchSessionClient: NSObject {
         if !storedContext.isEmpty {
             handleReceivedApplicationContext(storedContext)
         }
-        sendCommand(.requestSession, errorHandler: { _ in })
+        sessionRequestPending = true
+        requestSessionIfPending()
         guard reachable else { return }
         retryDownloads()
         retryPhoneCancelIfNeeded()
+    }
+
+    func reachabilityChanged(_ reachable: Bool) {
+        isConnected = reachable
+        guard reachable else { return }
+        retryDownloads()
+        retryPhoneCancelIfNeeded()
+        requestSessionIfPending()
+    }
+
+    // Right after a cold launch the phone is often not reachable yet, so the
+    // first request fails; it is sent again once reachability turns true.
+    private func requestSessionIfPending() {
+        guard sessionRequestPending else { return }
+        sendCommand(.requestSession, snapshotReplyHandler: { [weak self] _ in
+            self?.sessionRequestPending = false
+        }, errorHandler: { _ in })
     }
 
     var interpolatedTime: TimeInterval {
@@ -604,11 +623,7 @@ extension WatchSessionClient: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let reachable = session.isReachable
         Task { @MainActor in
-            self.isConnected = reachable
-            if reachable {
-                self.retryDownloads()
-                self.retryPhoneCancelIfNeeded()
-            }
+            self.reachabilityChanged(reachable)
         }
     }
 
