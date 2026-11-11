@@ -26,13 +26,16 @@ env:
 
 jobs:
   deploy:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_27.2.app
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -137,7 +140,7 @@ jobs:
             -destination 'generic/platform=iOS'
 
       - name: Upload dSYMs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dSYMs-${{ env.BUILD_NUMBER }}
           path: ${{ runner.temp }}/Allspeak.xcarchive/dSYMs
