@@ -60,6 +60,7 @@ enum DiagnosticsEvent: Sendable {
         var error: String?
         var skew: Double?
         var spread: Double?
+        var compute: Double?
         var rxDelay: Double?
     }
 
@@ -181,6 +182,7 @@ enum DiagnosticsEvent: Sendable {
             builder.add("error", listen.error)
             builder.add("skew", listen.skew)
             builder.addPosition("spread", listen.spread)
+            builder.addPosition("compute", listen.compute)
             builder.addPosition("rxDelay", listen.rxDelay)
         case let .download(event, pos, rxDelay):
             builder.add("kind", event.kind.rawValue)

@@ -445,6 +445,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
     let error: String?
     let frequencySkew: Double?
     var spread: Double? = nil
+    var compute: Double? = nil
     var eventDate: Date?
 
     init(
@@ -458,6 +459,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         error: String? = nil,
         frequencySkew: Double? = nil,
         spread: Double? = nil,
+        compute: Double? = nil,
         eventDate: Date? = nil
     ) {
         self.listenID = listenID
@@ -470,6 +472,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         self.error = error
         self.frequencySkew = frequencySkew
         self.spread = spread
+        self.compute = compute
         self.eventDate = eventDate
     }
 
@@ -500,6 +503,7 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         case .failed(let message):
             self.init(listenID: listenID, source: source, phase: .failed, listenSeconds: event.listenSeconds, error: message)
         }
+        compute = event.compute
     }
 
     var event: ListenEvent? {

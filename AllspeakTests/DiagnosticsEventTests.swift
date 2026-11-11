@@ -252,6 +252,15 @@ struct DiagnosticsEventTests {
         )
     }
 
+    @Test("listen nomatch logs the compute time of its window")
+    func listenCompute() {
+        let event = DiagnosticsEvent.listen(.init(source: .watch, phase: .nomatch, listenSec: 15, compute: 0.0139))
+        #expect(
+            event.jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"listen","source":"watch","phase":"nomatch","listenSec":15,"compute":0.014}"#
+        )
+    }
+
     @Test("listen match logs track time, position, delta, latency, listen time and chunk")
     func listenMatch() {
         let event = DiagnosticsEvent.listen(.init(

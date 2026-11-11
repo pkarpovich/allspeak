@@ -94,6 +94,7 @@ struct ListenEvent: Equatable, Sendable {
 
     let phase: Phase
     let listenSeconds: Double
+    var compute: Double? = nil
 }
 
 @MainActor

@@ -116,10 +116,17 @@ no automatic or background listening.
   with an empty snapshot. The watch shows `Done` only
   when the reply snapshot belongs to the same session.
 - Each listener stops on its first match, after 120 s, or on `Stop`. A
-  ShazamKit `matchAttemptFailed` (code 202, returned about every 12 s without
-  a match) is treated as "no match yet" and listening goes on. Both listeners
-  record with their own `AVAudioEngine` input tap and match the stream with
-  `SHSession`; the watch's audio session is `.record`. A recording on watchOS
+  ShazamKit `matchAttemptFailed` (code 202) is treated as "no match yet" and
+  listening goes on. Both listeners record with their own `AVAudioEngine` input
+  tap and hand the buffers to `ShazamWindowMatcher`: every 3 s of audio it
+  builds a signature of the newest 12 s (less at the start, so the first
+  attempt comes after 3 s) and matches it with `SHSession.match`, one attempt
+  at a time, so a slow attempt makes the next ones skip instead of queue.
+  `SHSession.matchStreamingBuffer` is not used: with a custom catalog it dies
+  with SIGBUS on the 16th consecutive window without a match (192 s) when the
+  buffers are 8192 frames at 48 kHz, which is what the watch tap delivers
+  (three watch crashes at Godzilla, 2026-11-10), whatever the stack size.
+  The watch's audio session is `.record`. A recording on watchOS
   can only start while the app is active, so a watch listen started right
   after the first microphone prompt waits for the app to become active, and any
   other start in Always On ends as `interrupted`. Both listeners stop as
@@ -159,7 +166,7 @@ The waveform circle between the ±3 s buttons on the watch transport screen
 the 120 s timeout and without the phone. A listen that ended on its own
 (interruption, error) starts again the next time the app becomes active; only
 `Stop` and a session change end it for good. Every match is reported as a watch `listen` event of one
-`listenID`, and every 12 s block without a match as a `nomatch` event, so the
+`listenID`, and every attempt without a match (one per 3 s of audio) as a `nomatch` event, so the
 log shows whether the matcher kept running with the wrist down. A match whose offset is over 1 s switches to the Listen page with
 `Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it.
 When one match names several places of the film (overlapping chunks, or
@@ -221,7 +228,7 @@ Event types:
 - `listen` - a cinema-listen phase: `listenID` (shared by the phone and the
   watch listen of one attempt and by its `apply`; the watch sends it with `applySync`, so an apply from listen all film carries that run's id), `source` (phone or watch),
   `phase` (`start`, `match`, `nomatch`, `timeout`, `cancel`, `interrupted`,
-  `failed`, `apply`), `listenSec`, and `error` on failure. A match adds
+  `failed`, `apply`), `listenSec`, and `error` on failure. A watch `match` or `nomatch` carries `compute`, the seconds that attempt took (signature and catalog search). A match adds
   `trackTime`, the matched `chunk` start, ShazamKit's `skew` (frequency skew of
   the hall audio against the reference), `delta` against the current position
   and the output `latency`; `apply` adds `elapsed` since the match and the seek

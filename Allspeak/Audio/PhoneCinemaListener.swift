@@ -39,7 +39,7 @@ final class PhoneCinemaListener: CinemaListening {
         catalogURL: URL,
         audioSession: any ListeningAudioSession = SystemListeningAudioSession(),
         capture: any ListenCapture = EngineInputCapture(),
-        makeMatcher: @escaping StreamMatcherFactory = ShazamStreamMatcher.make,
+        makeMatcher: @escaping StreamMatcherFactory = ShazamWindowMatcher.make,
         timeout: Duration = ListenEvent.timeout,
         requestMicPermission: @escaping @MainActor () async -> Bool = { await AVAudioApplication.requestRecordPermission() },
         now: @escaping () -> Date = { Date() }
@@ -136,10 +136,10 @@ final class PhoneCinemaListener: CinemaListening {
     private func handle(_ outcome: ListenMatcherOutcome) {
         guard state == .running else { return }
         switch outcome {
-        case .found(let candidates, let matchDate):
+        case .found(let candidates, let matchDate, _):
             guard let match = FingerprintMatch.make(candidates: candidates, matchDate: matchDate) else { return }
             finish(.matched(match))
-        case .notFound(let error):
+        case .notFound(let error, _):
             guard let error else { return }
             finish(.failed(error))
         }
