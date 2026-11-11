@@ -4,10 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    # Only what ends up in the archive, plus this file so a change to the
-    # deploy is exercised when it lands. Tests, docs, skills and the prep
-    # scripts do not ship, and a merge of those used to upload a build that
-    # was identical to the previous one.
+    # This file is listed so that a change to the deploy runs it.
     paths:
       - Allspeak/**
       - AllspeakWatch/**
@@ -20,8 +17,6 @@ on:
   schedule:
     - cron: "0 6 1 * *"
 
-# Two merges in a row used to upload two builds; the newer run replaces the
-# older one, since its archive contains everything the older one had.
 concurrency:
   group: deploy-testflight
   cancel-in-progress: true
