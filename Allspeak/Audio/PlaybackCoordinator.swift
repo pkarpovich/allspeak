@@ -61,6 +61,12 @@ final class PlaybackCoordinator {
     private var persistence: PersistenceController = .shared
     var diagnostics: DiagnosticsLog = .shared
     private var monitor: DiagnosticsMonitor?
+    // A killed app (force quit, jetsam) never reaches endSession or the
+    // background save, so the position is also saved on a timer while playing.
+    // Task.sleep keeps running in the background, unlike the display link
+    // behind onTick.
+    var positionSaveInterval: Duration = .seconds(5)
+    private var positionSaver: Task<Void, Never>?
     var systemVolumeReader: () -> Float = { AVAudioSession.sharedInstance().outputVolume }
     var routeReader: DiagnosticsMonitor.Route = {
         let session = AVAudioSession.sharedInstance()
@@ -259,7 +265,20 @@ final class PlaybackCoordinator {
         )
     }
 
+    private func startPositionSaver() {
+        positionSaver?.cancel()
+        let interval = positionSaveInterval
+        positionSaver = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled, let controller = self?.controller, controller.isPlayerPlaying else { continue }
+                await controller.persistPosition()
+            }
+        }
+    }
+
     private func startMonitor() {
+        startPositionSaver()
         let monitor = DiagnosticsMonitor(
             snapshot: { [weak self] in
                 (self?.controller?.livePosition ?? 0, self?.controller?.isPlayerPlaying ?? false)
@@ -574,7 +593,8 @@ final class PlaybackCoordinator {
     }
 
     private func handleControllerStateChange() {
-        guard controller != nil else { return }
+        guard let controller else { return }
+        Task { await controller.persistPosition() }
         #if os(iOS)
         WatchSessionHost.shared.forceBroadcastSnapshot()
         // Refresh the latest-wins application context so a watch waking after a
@@ -589,6 +609,8 @@ final class PlaybackCoordinator {
         loadGeneration += 1
         monitor?.stop()
         monitor = nil
+        positionSaver?.cancel()
+        positionSaver = nil
         diagnostics.end()
         guard let controller else { return }
         controller.onTick = nil

@@ -135,7 +135,7 @@ final class AudioController {
 
     func persistPosition() async {
         guard player != nil, let repository, let sessionID else { return }
-        let pos = currentTime
+        let pos = livePosition
         try? await repository.updateLastPosition(id: sessionID, seconds: pos)
     }
 
