@@ -11,9 +11,7 @@ on:
       - AllspeakWatchWidget/**
       - project.yml
       - .github/workflows/deploy-testflight.yml
-  # TestFlight expires a build 90 days after upload and has no way to extend
-  # one, so main is rebuilt and re-uploaded monthly to keep an installable
-  # build on the device even when nothing has been merged.
+  # A TestFlight build expires 90 days after upload.
   schedule:
     - cron: "0 6 1 * *"
 
@@ -123,9 +121,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # The run number keeps scheduled rebuilds of an unchanged commit unique -
-      # App Store Connect rejects a build number it has already seen - while the
-      # leading commit count keeps the next merge ahead of them.
+      # App Store Connect rejects a build number it has already seen.
       - name: Set build number
         run: |
           BUILD_NUMBER=$(git rev-list --count HEAD).${{ github.run_number }}
