@@ -261,6 +261,23 @@ struct DiagnosticsEventTests {
         )
     }
 
+    @Test("a watch prompt logs the shift the watch computed and the other candidates")
+    func listenPrompt() {
+        let event = DiagnosticsEvent.listen(.init(
+            source: .watch,
+            phase: .prompt,
+            trackTime: 373.5,
+            listenSec: 357,
+            watchDelta: -4.5,
+            alternatives: [FingerprintMatch.Alternative(trackTime: 463.5121, chunkStart: 453.138)]
+        ))
+        #expect(
+            event.jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"listen","source":"watch","phase":"prompt","#
+                + #""trackTime":373.5,"listenSec":357,"watchDelta":-4.5,"alts":[[463.512,453.138]]}"#
+        )
+    }
+
     @Test("listen match logs track time, position, delta, latency, listen time and chunk")
     func listenMatch() {
         let event = DiagnosticsEvent.listen(.init(

@@ -1203,7 +1203,7 @@ struct WatchSessionClientTests {
             guard case .listenEvent(let update) = command else { return nil }
             return update.phase
         }
-        #expect(phases == [.start, .match, .match, .match])
+        #expect(phases == [.start, .match, .match, .prompt, .match])
     }
 
     @Test("listen all film takes the candidate nearest to the playing position and reports its spread")
@@ -1245,6 +1245,59 @@ struct WatchSessionClientTests {
             return update.compute
         }
         #expect(reported == [0.25, 0.5])
+    }
+
+    private static func watchListenUpdates(_ sender: MockSender) -> [ListenUpdate] {
+        reportedCommands(sender.transferredUserInfo).compactMap { command -> ListenUpdate? in
+            guard case .listenEvent(let update) = command, update.phase != .start else { return nil }
+            return update
+        }
+    }
+
+    @Test("a listen all film match reports the shift the watch computed and every other candidate")
+    func autoListenReportsWatchDeltaAndAlternatives() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let position = client.interpolatedTime
+        let other = FingerprintMatch.Alternative(trackTime: position + 90, chunkStart: 4761)
+        let match = FingerprintMatch(trackTime: position + 0.5, matchDate: Self.autoNow, chunkStart: 4671, alternatives: [other])
+
+        client.startAutoListen()
+        listener.emit(.matched(match))
+
+        let reported = Self.watchListenUpdates(sender)
+        #expect(reported.map(\.phase) == [.match])
+        #expect(reported.first?.watchDelta == 0.5)
+        #expect(reported.first?.alternatives == [other])
+    }
+
+    @Test("a suggestion is reported as a prompt when it appears and as a dismiss when the user rejects it")
+    func autoListenReportsPromptAndDismiss() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let position = client.interpolatedTime
+
+        client.startAutoListen()
+        listener.emit(.matched(FingerprintMatch(trackTime: position + 2, matchDate: Self.autoNow, chunkStart: 10)))
+        listener.emit(.matched(FingerprintMatch(trackTime: position + 2.5, matchDate: Self.autoNow, chunkStart: 10)))
+        client.dismissAutoSuggestion()
+
+        let reported = Self.watchListenUpdates(sender)
+        #expect(reported.map(\.phase) == [.match, .prompt, .match, .dismiss])
+        #expect(reported.map(\.watchDelta) == [2, 2, 2.5, 2.5])
+        #expect(reported.map(\.trackTime) == [position + 2, position + 2, position + 2.5, position + 2.5])
+        #expect(client.autoListen.suggestion == nil)
+    }
+
+    @Test("a dismiss with no suggestion on screen reports nothing")
+    func dismissWithoutSuggestionIsSilent() throws {
+        let (client, sender, _, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        client.startAutoListen()
+        client.dismissAutoSuggestion()
+
+        #expect(Self.watchListenUpdates(sender).isEmpty)
     }
 
     @Test("a shift over 3 s is suggested only after a second match that advanced with the clock")

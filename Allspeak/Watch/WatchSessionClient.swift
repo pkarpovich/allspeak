@@ -527,7 +527,26 @@ final class WatchSessionClient: NSObject {
     }
 
     func dismissAutoSuggestion() {
+        if let match = autoListen.suggestion {
+            reportSuggestion(.dismiss, match)
+        }
         autoListen.suggestion = nil
+    }
+
+    private func reportSuggestion(_ phase: ListenUpdate.Phase, _ match: FingerprintMatch) {
+        guard let listenID = autoListenID else { return }
+        let date = now()
+        report(.listenEvent(ListenUpdate(
+            listenID: listenID,
+            source: .watch,
+            phase: phase,
+            trackTime: match.trackTime,
+            matchDate: match.matchDate,
+            chunkStart: match.chunkStart,
+            listenSeconds: autoListen.startedAt.map { date.timeIntervalSince($0) } ?? 0,
+            watchDelta: ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: date),
+            eventDate: date
+        )))
     }
 
     private func handleAutoListenEvent(_ event: ListenEvent, listenID: UUID) {
@@ -538,12 +557,21 @@ final class WatchSessionClient: NSObject {
         }
         var update = ListenUpdate(listenID: listenID, source: .watch, event: event)
         update.eventDate = now()
+        if case .matched(let match) = event.phase {
+            let delta = ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now())
+            update.watchDelta = delta
+            report(.listenEvent(update))
+            let hadSuggestion = autoListen.suggestion != nil
+            autoListen.receive(match, delta: delta)
+            if !hadSuggestion, let suggestion = autoListen.suggestion {
+                reportSuggestion(.prompt, suggestion)
+            }
+            return
+        }
         report(.listenEvent(update))
         switch event.phase {
-        case .started, .noMatch:
+        case .started, .noMatch, .matched:
             break
-        case .matched(let match):
-            autoListen.receive(match, delta: ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now()))
         case .timedOut, .cancelled, .interrupted, .failed:
             autoListener = nil
             autoListenID = nil
