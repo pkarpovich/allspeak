@@ -445,6 +445,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         case cancel
         case interrupted
         case failed
+        case prompt
+        case dismiss
     }
 
     let listenID: UUID
@@ -458,6 +460,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
     let frequencySkew: Double?
     var spread: Double? = nil
     var compute: Double? = nil
+    var watchDelta: Double? = nil
+    var alternatives: [FingerprintMatch.Alternative]? = nil
     var eventDate: Date?
 
     init(
@@ -472,6 +476,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         frequencySkew: Double? = nil,
         spread: Double? = nil,
         compute: Double? = nil,
+        watchDelta: Double? = nil,
+        alternatives: [FingerprintMatch.Alternative]? = nil,
         eventDate: Date? = nil
     ) {
         self.listenID = listenID
@@ -485,6 +491,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
         self.frequencySkew = frequencySkew
         self.spread = spread
         self.compute = compute
+        self.watchDelta = watchDelta
+        self.alternatives = alternatives
         self.eventDate = eventDate
     }
 
@@ -502,7 +510,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
                 chunkStart: match.chunkStart,
                 listenSeconds: event.listenSeconds,
                 frequencySkew: match.frequencySkew,
-                spread: match.alternatives.isEmpty ? nil : match.spread
+                spread: match.alternatives.isEmpty ? nil : match.spread,
+                alternatives: match.alternatives.isEmpty ? nil : match.alternatives
             )
         case .noMatch:
             self.init(listenID: listenID, source: source, phase: .nomatch, listenSeconds: event.listenSeconds)
@@ -536,6 +545,8 @@ struct ListenUpdate: Codable, Equatable, Sendable {
             phase = .interrupted
         case .failed:
             phase = .failed(error ?? "")
+        case .prompt, .dismiss:
+            return nil
         }
         return ListenEvent(phase: phase, listenSeconds: listenSeconds)
     }

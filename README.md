@@ -228,7 +228,7 @@ Event types:
 - `listen` - a cinema-listen phase: `listenID` (shared by the phone and the
   watch listen of one attempt and by its `apply`; the watch sends it with `applySync`, so an apply from listen all film carries that run's id), `source` (phone or watch),
   `phase` (`start`, `match`, `nomatch`, `timeout`, `cancel`, `interrupted`,
-  `failed`, `apply`), `listenSec`, and `error` on failure. A watch `match` or `nomatch` carries `compute`, the seconds that attempt took (signature and catalog search). A match adds
+  `failed`, `apply`, `prompt`, `dismiss`), `listenSec`, and `error` on failure. A watch `match` or `nomatch` carries `compute`, the seconds that attempt took (signature and catalog search). A watch `match` also carries `watchDelta`, the shift the watch computed when the match arrived (the phone's `delta` is computed when the line is delivered, which can be minutes later), and `alts`, the other candidates of that match as `[trackTime, chunk]` pairs. In listen all film `prompt` marks the moment a sync suggestion appears on the watch and `dismiss` the user rejecting it, both with the suggestion's `trackTime`, `chunk` and `watchDelta`. A match adds
   `trackTime`, the matched `chunk` start, ShazamKit's `skew` (frequency skew of
   the hall audio against the reference), `delta` against the current position
   and the output `latency`; `apply` adds `elapsed` since the match and the seek

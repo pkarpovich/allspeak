@@ -942,6 +942,8 @@ final class PlaybackCoordinator {
             skew: update.frequencySkew,
             spread: update.spread,
             compute: update.compute,
+            watchDelta: update.watchDelta,
+            alternatives: update.alternatives,
             rxDelay: rxDelay(since: update.eventDate)
         )
         if let trackTime = update.trackTime, let matchDate = update.matchDate {
@@ -961,6 +963,8 @@ final class PlaybackCoordinator {
         case .cancel: return .cancel
         case .interrupted: return .interrupted
         case .failed: return .failed
+        case .prompt: return .prompt
+        case .dismiss: return .dismiss
         }
     }
 

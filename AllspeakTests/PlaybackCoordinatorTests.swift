@@ -2080,6 +2080,23 @@ struct PlaybackCoordinatorTests {
         #expect(line["compute"] as? Double == 0.125)
     }
 
+    @Test("watch prompt and dismiss events are logged with the shift the watch computed")
+    func watchSuggestionEventsLogged() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        let matchDate = Self.listenNow.addingTimeInterval(-2)
+
+        for phase in [ListenUpdate.Phase.prompt, .dismiss] {
+            fixture.coordinator.apply(.listenEvent(ListenUpdate(
+                listenID: testListenID, source: .watch, phase: phase, trackTime: 373.5, matchDate: matchDate, chunkStart: 366.41, listenSeconds: 357, watchDelta: -4.5
+            )))
+        }
+
+        let lines = try Self.listenLines(fixture.log)
+        #expect(lines.map { $0["phase"] as? String } == ["prompt", "dismiss"])
+        #expect(lines.map { $0["watchDelta"] as? Double } == [-4.5, -4.5])
+    }
+
     @Test("a queued watch event logs its listen id, skew and delivery delay")
     func queuedWatchEventLogsDelay() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)

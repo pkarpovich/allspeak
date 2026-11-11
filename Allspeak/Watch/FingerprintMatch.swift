@@ -7,7 +7,7 @@ import ShazamKit
 // trackTime, the rest as alternatives, so the watch can take the one nearest to
 // the playing position and the log can show the spread.
 struct FingerprintMatch: Equatable, Sendable {
-    struct Alternative: Equatable, Sendable {
+    struct Alternative: Codable, Equatable, Sendable {
         let trackTime: Double
         let chunkStart: Double
     }

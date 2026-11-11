@@ -43,6 +43,8 @@ enum DiagnosticsEvent: Sendable {
         case interrupted
         case failed
         case apply
+        case prompt
+        case dismiss
     }
 
     struct Listen: Sendable {
@@ -61,6 +63,8 @@ enum DiagnosticsEvent: Sendable {
         var skew: Double?
         var spread: Double?
         var compute: Double?
+        var watchDelta: Double?
+        var alternatives: [FingerprintMatch.Alternative]?
         var rxDelay: Double?
     }
 
@@ -183,6 +187,8 @@ enum DiagnosticsEvent: Sendable {
             builder.add("skew", listen.skew)
             builder.addPosition("spread", listen.spread)
             builder.addPosition("compute", listen.compute)
+            builder.addPosition("watchDelta", listen.watchDelta)
+            builder.add("alts", listen.alternatives?.map { [$0.trackTime, $0.chunkStart] })
             builder.addPosition("rxDelay", listen.rxDelay)
         case let .download(event, pos, rxDelay):
             builder.add("kind", event.kind.rawValue)
@@ -268,6 +274,12 @@ private struct JSONLineBuilder {
     mutating func addPosition(_ key: String, _ value: Double?) {
         guard let value else { return }
         addPosition(key, value)
+    }
+
+    mutating func add(_ key: String, _ rows: [[Double]]?) {
+        guard let rows, !rows.isEmpty else { return }
+        let body = rows.map { "[" + $0.map { Self.number(($0 * 1000).rounded() / 1000) }.joined(separator: ",") + "]" }
+        parts.append(Self.encode(key) + ":[" + body.joined(separator: ",") + "]")
     }
 
     func line() -> String {

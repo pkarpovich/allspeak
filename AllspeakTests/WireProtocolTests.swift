@@ -345,11 +345,22 @@ struct WireProtocolTests {
         ListenUpdate(listenID: testListenID, source: .phone, phase: .timeout, listenSeconds: 120),
         ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 1, error: "no built-in mic"),
         ListenUpdate(listenID: testListenID, source: .watch, phase: .nomatch, listenSeconds: 15, compute: 0.125),
+        ListenUpdate(
+            listenID: testListenID, source: .watch, phase: .match, trackTime: 373.5, matchDate: listenDate, chunkStart: 366.41, listenSeconds: 357,
+            watchDelta: -4.5, alternatives: [FingerprintMatch.Alternative(trackTime: 463.5, chunkStart: 453.138)]
+        ),
+        ListenUpdate(listenID: testListenID, source: .watch, phase: .prompt, trackTime: 373.5, matchDate: listenDate, chunkStart: 366.41, listenSeconds: 357, watchDelta: -4.5),
+        ListenUpdate(listenID: testListenID, source: .watch, phase: .dismiss, trackTime: 373.5, matchDate: listenDate, chunkStart: 366.41, listenSeconds: 362, watchDelta: -4.5),
     ])
     func listenUpdateRoundTrip(update: ListenUpdate) throws {
         let plist = try update.toPropertyList()
         #expect(plist[WirePayloadKey.kind] as? String == WirePayloadKind.listenUpdate.rawValue)
         #expect(try ListenUpdate(propertyList: plist) == update)
+    }
+
+    @Test("a prompt or dismiss update is no listener event", arguments: [ListenUpdate.Phase.prompt, .dismiss])
+    func suggestionUpdatesAreNotListenerEvents(phase: ListenUpdate.Phase) {
+        #expect(ListenUpdate(listenID: testListenID, source: .watch, phase: phase, trackTime: 1, matchDate: Self.listenDate, listenSeconds: 2).event == nil)
     }
 
     @Test("ListenUpdate built from an event carries its compute time")
