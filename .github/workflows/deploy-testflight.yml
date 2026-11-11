@@ -4,11 +4,20 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-  # TestFlight expires a build 90 days after upload and has no way to extend
-  # one, so main is rebuilt and re-uploaded monthly to keep an installable
-  # build on the device even when nothing has been merged.
+    # This file is listed so that a change to the deploy runs it.
+    paths:
+      - Allspeak/**
+      - AllspeakWatch/**
+      - AllspeakWatchWidget/**
+      - project.yml
+      - .github/workflows/deploy-testflight.yml
+  # A TestFlight build expires 90 days after upload.
   schedule:
     - cron: "0 6 1 * *"
+
+concurrency:
+  group: deploy-testflight
+  cancel-in-progress: true
 
 env:
   XCODE_PROJECT: Allspeak.xcodeproj
@@ -17,13 +26,16 @@ env:
 
 jobs:
   deploy:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_27.2.app
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -112,9 +124,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # The run number keeps scheduled rebuilds of an unchanged commit unique -
-      # App Store Connect rejects a build number it has already seen - while the
-      # leading commit count keeps the next merge ahead of them.
+      # App Store Connect rejects a build number it has already seen.
       - name: Set build number
         run: |
           BUILD_NUMBER=$(git rev-list --count HEAD).${{ github.run_number }}
@@ -130,7 +140,7 @@ jobs:
             -destination 'generic/platform=iOS'
 
       - name: Upload dSYMs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dSYMs-${{ env.BUILD_NUMBER }}
           path: ${{ runner.temp }}/Allspeak.xcarchive/dSYMs

@@ -340,6 +340,7 @@ first-run builds still compile). The two values flow into `Info.plist`
 `CatalogConfig`. On push to `main`,
 `.github/workflows/deploy-testflight.yml` writes the real `CatalogConfig.xcconfig`
 from the `ALLSPEAK_CATALOG_URL` / `ALLSPEAK_CATALOG_READ_TOKEN` GitHub secrets.
+That workflow uploads a TestFlight build only when the push changes the app (`Allspeak/`, `AllspeakWatch/`, `AllspeakWatchWidget/`, `project.yml` or the workflow itself), a newer run cancels one still in progress, and it also runs monthly and by hand (`gh workflow run deploy-testflight.yml`).
 
 ## Apple Watch remote
 

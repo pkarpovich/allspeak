@@ -1,11 +1,8 @@
 import Foundation
 import MetricKit
 
-// Writes every MetricKit diagnostic payload (a crash arrives on the next
-// launch, a hang or an exception at once) as one JSON file for the uploader.
-// The subscriber API is used instead of the iOS 27 MetricManager stream so the
-// iOS 26 SDK on CI compiles it; MetricKit never exists on watchOS, so this
-// covers the phone and watch crashes still only reach Xcode Organizer.
+// MetricKit does not exist on watchOS: this covers the phone, and watch
+// crashes still only reach Xcode Organizer.
 @MainActor
 final class DiagnosticReportCollector: NSObject, MXMetricManagerSubscriber {
     static let shared = DiagnosticReportCollector()
