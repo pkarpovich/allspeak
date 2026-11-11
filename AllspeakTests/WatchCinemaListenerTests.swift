@@ -118,6 +118,17 @@ struct WatchCinemaListenerTests {
         #expect(audioSession.calls == [.activateRecording])
     }
 
+    @Test("listen all film events carry the time the matcher spent on the window")
+    func continuousEventsCarryCompute() async {
+        let listener = makeListener(continuous: true)
+        await startListening(listener)
+
+        matcherHub.deliver(.notFound(error: nil, compute: 0.25))
+        matcherHub.deliver(.found([candidate(offset: 1)], matchDate: matchDate, compute: 0.5))
+
+        #expect(recorder.events.map(\.compute) == [nil, 0.25, 0.5])
+    }
+
     @Test("listen all film has no timeout")
     func continuousHasNoTimeout() async {
         let listener = makeListener(continuous: true, timeout: .milliseconds(10))

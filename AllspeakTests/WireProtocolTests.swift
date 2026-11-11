@@ -344,11 +344,18 @@ struct WireProtocolTests {
         ListenUpdate(listenID: testListenID, source: .phone, phase: .match, trackTime: 612.5, matchDate: listenDate, chunkStart: 600, listenSeconds: 23.25),
         ListenUpdate(listenID: testListenID, source: .phone, phase: .timeout, listenSeconds: 120),
         ListenUpdate(listenID: testListenID, source: .watch, phase: .failed, listenSeconds: 1, error: "no built-in mic"),
+        ListenUpdate(listenID: testListenID, source: .watch, phase: .nomatch, listenSeconds: 15, compute: 0.125),
     ])
     func listenUpdateRoundTrip(update: ListenUpdate) throws {
         let plist = try update.toPropertyList()
         #expect(plist[WirePayloadKey.kind] as? String == WirePayloadKind.listenUpdate.rawValue)
         #expect(try ListenUpdate(propertyList: plist) == update)
+    }
+
+    @Test("ListenUpdate built from an event carries its compute time")
+    func listenUpdateCarriesCompute() {
+        let event = ListenEvent(phase: .noMatch, listenSeconds: 15, compute: 0.125)
+        #expect(ListenUpdate(listenID: testListenID, source: .watch, event: event).compute == 0.125)
     }
 
     @Test("ListenUpdate omits nil optional fields from the JSON payload")

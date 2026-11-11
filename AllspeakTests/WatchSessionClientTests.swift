@@ -985,8 +985,8 @@ struct WatchSessionClientTests {
             handler?(ListenEvent(phase: phase, listenSeconds: seconds))
         }
 
-        func emit(_ phase: ListenEvent.Phase, seconds: Double = 1) {
-            onEvent?(ListenEvent(phase: phase, listenSeconds: seconds))
+        func emit(_ phase: ListenEvent.Phase, seconds: Double = 1, compute: Double? = nil) {
+            onEvent?(ListenEvent(phase: phase, listenSeconds: seconds, compute: compute))
         }
     }
 
@@ -1228,6 +1228,23 @@ struct WatchSessionClientTests {
         }
         #expect(reported.map(\.trackTime) == [position + 0.5])
         #expect(reported.map(\.spread) == [89.5])
+    }
+
+    @Test("listen all film reports the compute time of every match and no-match")
+    func autoListenReportsCompute() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let match = FingerprintMatch(trackTime: client.interpolatedTime, matchDate: Self.autoNow, chunkStart: 4671)
+
+        client.startAutoListen()
+        listener.emit(.noMatch, compute: 0.25)
+        listener.emit(.matched(match), compute: 0.5)
+
+        let reported = Self.reportedCommands(sender.transferredUserInfo).compactMap { command -> Double? in
+            guard case .listenEvent(let update) = command else { return nil }
+            return update.compute
+        }
+        #expect(reported == [0.25, 0.5])
     }
 
     @Test("a shift over 3 s is suggested only after a second match that advanced with the clock")

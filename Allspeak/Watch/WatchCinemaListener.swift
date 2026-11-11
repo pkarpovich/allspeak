@@ -81,7 +81,7 @@ final class WatchCinemaListener: CinemaListening {
         continuous: Bool = false,
         audioSession: any WatchListeningAudioSession = SystemWatchListeningAudioSession(),
         capture: any ListenCapture = EngineInputCapture(),
-        makeMatcher: @escaping StreamMatcherFactory = ShazamStreamMatcher.make,
+        makeMatcher: @escaping StreamMatcherFactory = ShazamWindowMatcher.make,
         timeout: Duration = ListenEvent.timeout,
         requestMicPermission: @escaping @MainActor () async -> Bool = { await AVAudioApplication.requestRecordPermission() },
         permissionPrompts: @escaping @MainActor () -> Bool = { AVAudioApplication.shared.recordPermission == .undetermined },
@@ -182,23 +182,23 @@ final class WatchCinemaListener: CinemaListening {
     private func handle(_ outcome: ListenMatcherOutcome) {
         guard state == .running else { return }
         switch outcome {
-        case .found(let candidates, let matchDate):
+        case .found(let candidates, let matchDate, let compute):
             guard let match = FingerprintMatch.make(candidates: candidates, matchDate: matchDate) else { return }
             if continuous {
-                emit(.matched(match))
+                emit(.matched(match), compute: compute)
             } else {
-                finish(.matched(match))
+                finish(.matched(match), compute: compute)
             }
-        case .notFound(let error):
+        case .notFound(let error, let compute):
             if let error {
                 finish(.failed(error))
             } else if continuous {
-                emit(.noMatch)
+                emit(.noMatch, compute: compute)
             }
         }
     }
 
-    private func finish(_ phase: ListenEvent.Phase) {
+    private func finish(_ phase: ListenEvent.Phase, compute: Double? = nil) {
         guard state == .running else { return }
         state = .finished
         preparation?.cancel()
@@ -214,12 +214,12 @@ final class WatchCinemaListener: CinemaListening {
             audioSession.deactivate()
             sessionActivated = false
         }
-        emit(phase)
+        emit(phase, compute: compute)
         onEvent = nil
     }
 
-    private func emit(_ phase: ListenEvent.Phase) {
+    private func emit(_ phase: ListenEvent.Phase, compute: Double? = nil) {
         let listenSeconds = startedAt.map { now().timeIntervalSince($0) } ?? 0
-        onEvent?(ListenEvent(phase: phase, listenSeconds: listenSeconds))
+        onEvent?(ListenEvent(phase: phase, listenSeconds: listenSeconds, compute: compute))
     }
 }

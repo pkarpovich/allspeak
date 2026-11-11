@@ -2068,6 +2068,18 @@ struct PlaybackCoordinatorTests {
         #expect(fixture.harness.updates.isEmpty)
     }
 
+    @Test("a watch no-match event logs the compute time of its window")
+    func watchEventLogsCompute() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+
+        fixture.coordinator.apply(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .nomatch, listenSeconds: 15, compute: 0.125)))
+
+        let line = try #require(try Self.listenLines(fixture.log).first)
+        #expect(line["phase"] as? String == "nomatch")
+        #expect(line["compute"] as? Double == 0.125)
+    }
+
     @Test("a queued watch event logs its listen id, skew and delivery delay")
     func queuedWatchEventLogsDelay() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)
