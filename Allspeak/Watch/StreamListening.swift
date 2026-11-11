@@ -21,8 +21,6 @@ struct ListenCandidate: Equatable, Sendable {
     var frequencySkew: Double? = nil
 }
 
-// `compute` is the seconds one attempt took, signature and catalog search
-// together.
 enum ListenMatcherOutcome: Equatable, Sendable {
     case found([ListenCandidate], matchDate: Date, compute: Double? = nil)
     case notFound(error: String?, compute: Double? = nil)
@@ -90,10 +88,8 @@ final class EngineInputCapture: ListenCapture {
     }
 }
 
-// The audio one match attempt needs: the newest `length` seconds, an attempt
-// every `hop` seconds of audio and never two at once. A match that runs longer
-// than a hop makes the next attempts skip instead of queue, so every attempt
-// starts from the newest audio.
+// A slow attempt makes later ones skip, not queue, so each starts from the
+// newest audio.
 struct ListenWindow<Chunk> {
     private let length: Double
     private let hop: Double
@@ -128,21 +124,16 @@ struct ListenWindow<Chunk> {
 
 extension ListenWindow: Sendable where Chunk: Sendable {}
 
-// Builds its own signatures and matches them one by one instead of calling
-// SHSession.matchStreamingBuffer. With a custom catalog the streaming driver
-// retries inside the matcher's own callback and dies with SIGBUS on the 16th
-// consecutive window without a match when the buffers are 8192 frames at
-// 48 kHz, which is what the watch tap delivers (three crashes at Godzilla,
-// 2026-11-10). No stack size survives it, and 0.1 s buffers only happen to
-// avoid it. A signature made here never reaches that driver.
+// Not SHSession.matchStreamingBuffer: with a custom catalog it dies with
+// SIGBUS on the 16th consecutive window without a match when the buffers are
+// 8192 frames at 48 kHz (the watch tap), whatever the stack size.
 final class ShazamWindowMatcher: NSObject, SHSessionDelegate, StreamMatching, @unchecked Sendable {
     typealias Executor = @Sendable (@escaping @Sendable () -> Void) -> Void
 
     static let windowLength = 12.0
     static let hop = 3.0
 
-    // The buffer is a private copy, so after the hand-off only the matcher's
-    // executor touches it.
+    // A private copy: after the hand-off only the executor touches it.
     private struct Chunk: @unchecked Sendable {
         let buffer: AVAudioPCMBuffer
         let time: AVAudioTime
@@ -153,8 +144,7 @@ final class ShazamWindowMatcher: NSObject, SHSessionDelegate, StreamMatching, @u
         var attemptStarted: ContinuousClock.Instant?
     }
 
-    // SHSession is not Sendable: it is used only inside `perform`, which runs
-    // one attempt at a time.
+    // Not Sendable: used only inside `perform`, one attempt at a time.
     private let session: SHSession
     private let onOutcome: @MainActor @Sendable (ListenMatcherOutcome) -> Void
     private let perform: Executor
