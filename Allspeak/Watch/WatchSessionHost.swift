@@ -107,6 +107,12 @@ final class WatchSessionHost: NSObject {
         switch command {
         case .switchTrack:
             break
+        case .requestSession:
+            if coordinator.currentMetadata() == nil {
+                broadcastSessionEnded()
+            } else {
+                broadcastCurrentSession()
+            }
         case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256, let listenID):
             guard coordinator.applySync(
                 sessionID: sessionID,

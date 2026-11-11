@@ -695,6 +695,31 @@ struct WatchSessionHostTests {
         #expect(fixture.coordinator.currentSnapshot().currentTime == 0)
     }
 
+    @Test("dispatch(.requestSession) replies with the live snapshot and leaves playback alone")
+    func dispatchRequestSessionRepliesWithSnapshot() async throws {
+        let fixture = try await makeMultiTrackFixture()
+        defer {
+            fixture.coordinator.endSession()
+            try? FileManager.default.removeItem(at: fixture.root)
+        }
+        let before = fixture.coordinator.currentSnapshot()
+
+        let snapshot = await fixture.host.dispatch(.requestSession)
+
+        #expect(snapshot.sessionID == fixture.sessionUUID)
+        #expect(snapshot.isPlaying == before.isPlaying)
+        #expect(snapshot.currentTime == before.currentTime)
+    }
+
+    @Test("dispatch(.requestSession) without a session replies with the empty snapshot")
+    func dispatchRequestSessionWithoutSession() async throws {
+        let host = WatchSessionHost(coordinator: PlaybackCoordinator())
+
+        let snapshot = await host.dispatch(.requestSession)
+
+        #expect(snapshot == .empty)
+    }
+
     @Test("dispatch(.listenEvent) logs the watch phase without starting a phone listener")
     func dispatchListenEventDoesNotStartListener() async throws {
         let fixture = try await makeMultiTrackFixture(fingerprint: (Self.fingerprintSHA, Self.fingerprintData))

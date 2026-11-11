@@ -425,6 +425,55 @@ struct PlaybackCoordinatorTests {
         #expect(coordinator.sessionTitle == "B")
     }
 
+    // MARK: - Saving the playback position
+
+    private static func savedPosition(_ session: UnstartedSession) -> Double? {
+        session.persistence.viewContext.refreshAllObjects()
+        return (try? session.persistence.viewContext.existingObject(with: session.sessionID))?
+            .value(forKey: "lastPositionSeconds") as? Double
+    }
+
+    private static func waitForSavedPosition(_ session: UnstartedSession, atLeast minimum: Double) async throws -> Double? {
+        for _ in 0..<60 {
+            if let saved = savedPosition(session), saved >= minimum { return saved }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return savedPosition(session)
+    }
+
+    @Test("the position is saved while playing, with no background event or session end")
+    func positionSavedDuringPlayback() async throws {
+        let session = try await Self.importSession()
+        defer { try? FileManager.default.removeItem(at: session.root) }
+        let coordinator = PlaybackCoordinator()
+        coordinator.positionSaveInterval = .milliseconds(100)
+        try await coordinator.startSession(sessionID: session.sessionID, repository: session.repo, persistence: session.persistence, storage: session.storage)
+        defer { coordinator.endSession() }
+
+        coordinator.play()
+        let saved = try await Self.waitForSavedPosition(session, atLeast: 0.5)
+
+        let live = try #require(coordinator.controller?.livePosition)
+        let position = try #require(saved)
+        #expect(position >= 0.5)
+        #expect(position <= live)
+    }
+
+    @Test("a seek while paused is saved right away")
+    func seekWhilePausedSaved() async throws {
+        let session = try await Self.importSession()
+        defer { try? FileManager.default.removeItem(at: session.root) }
+        let coordinator = PlaybackCoordinator()
+        coordinator.positionSaveInterval = .seconds(3600)
+        try await coordinator.startSession(sessionID: session.sessionID, repository: session.repo, persistence: session.persistence, storage: session.storage)
+        defer { coordinator.endSession() }
+
+        coordinator.seek(to: 3.25)
+        let saved = try await Self.waitForSavedPosition(session, atLeast: 3.25)
+
+        #expect(saved == 3.25)
+    }
+
     // MARK: - Diagnostics begin/end wiring
 
     private struct UnstartedSession {

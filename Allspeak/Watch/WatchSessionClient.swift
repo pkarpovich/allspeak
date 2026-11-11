@@ -44,6 +44,7 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored private var abortedListen: WatchListenTelemetry?
     @ObservationIgnored private var listenID: UUID?
     @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
+    @ObservationIgnored private var sessionRequestPending = false
     @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private var session: WCSession?
@@ -76,11 +77,41 @@ final class WatchSessionClient: NSObject {
         session.delegate = self
         session.activate()
         self.session = session
-        self.isConnected = session.isReachable
-        let stored = session.receivedApplicationContext
-        if !stored.isEmpty {
-            handleReceivedApplicationContext(stored)
+    }
+
+    // receivedApplicationContext is valid only once activation completes, and
+    // WC does not re-deliver a context it delivered before a crash, so a
+    // relaunched watch restores it here and then asks the phone for the live
+    // session, which also covers a context that went stale meanwhile.
+    func activationCompleted(state: WCSessionActivationState, reachable: Bool, storedContext: [String: Any]) {
+        isConnected = reachable
+        guard state == .activated else { return }
+        reportAbortedListen()
+        if !storedContext.isEmpty {
+            handleReceivedApplicationContext(storedContext)
         }
+        sessionRequestPending = true
+        requestSessionIfPending()
+        guard reachable else { return }
+        retryDownloads()
+        retryPhoneCancelIfNeeded()
+    }
+
+    func reachabilityChanged(_ reachable: Bool) {
+        isConnected = reachable
+        guard reachable else { return }
+        retryDownloads()
+        retryPhoneCancelIfNeeded()
+        requestSessionIfPending()
+    }
+
+    // Right after a cold launch the phone is often not reachable yet, so the
+    // first request fails; it is sent again once reachability turns true.
+    private func requestSessionIfPending() {
+        guard sessionRequestPending else { return }
+        sendCommand(.requestSession, snapshotReplyHandler: { [weak self] _ in
+            self?.sessionRequestPending = false
+        }, errorHandler: { _ in })
     }
 
     var interpolatedTime: TimeInterval {
@@ -583,26 +614,16 @@ extension WatchSessionClient: WCSessionDelegate {
         error _: Error?
     ) {
         let reachable = session.isReachable
+        let stored = SendableDictionary(value: state == .activated ? session.receivedApplicationContext : [:])
         Task { @MainActor in
-            if state == .activated {
-                self.reportAbortedListen()
-            }
-            self.isConnected = reachable
-            if reachable {
-                self.retryDownloads()
-                self.retryPhoneCancelIfNeeded()
-            }
+            self.activationCompleted(state: state, reachable: reachable, storedContext: stored.value)
         }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let reachable = session.isReachable
         Task { @MainActor in
-            self.isConnected = reachable
-            if reachable {
-                self.retryDownloads()
-                self.retryPhoneCancelIfNeeded()
-            }
+            self.reachabilityChanged(reachable)
         }
     }
 

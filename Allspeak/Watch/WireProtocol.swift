@@ -27,6 +27,12 @@ import Foundation
 //   .cancelListening(listenID:)       stop the phone listener when it still
 //                                     runs this attempt; a late retry for an
 //                                     older attempt leaves a newer one alone
+//   .requestSession                   sent by the watch when its session
+//                                     activates (a relaunch after a crash
+//                                     included): the phone re-sends the active
+//                                     session's metadata context, or the
+//                                     session-ended signal when it has none,
+//                                     and replies with the current snapshot
 //   .listenEvent(ListenUpdate)        a phase of the watch's own listener
 //                                     (source watch); the phone only logs it
 //   .applySync(sessionID:,            seek to a match: the phone computes
@@ -132,6 +138,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case setVolume(Float)
     case startListening(listenID: UUID)
     case cancelListening(listenID: UUID)
+    case requestSession
     case listenEvent(ListenUpdate)
     case applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String, listenID: UUID? = nil)
     case watchDownload(WatchDownloadEvent)
@@ -169,6 +176,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case setVolume
         case startListening
         case cancelListening
+        case requestSession
         case listenEvent
         case applySync
         case watchDownload
@@ -205,6 +213,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .cancelListening(let listenID):
             try container.encode(Kind.cancelListening, forKey: .kind)
             try container.encode(listenID, forKey: .listenID)
+        case .requestSession:
+            try container.encode(Kind.requestSession, forKey: .kind)
         case .listenEvent(let update):
             try container.encode(Kind.listenEvent, forKey: .kind)
             try container.encode(update, forKey: .update)
@@ -256,6 +266,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
             self = .startListening(listenID: try container.decode(UUID.self, forKey: .listenID))
         case .cancelListening:
             self = .cancelListening(listenID: try container.decode(UUID.self, forKey: .listenID))
+        case .requestSession:
+            self = .requestSession
         case .listenEvent:
             self = .listenEvent(try container.decode(ListenUpdate.self, forKey: .update))
         case .applySync:

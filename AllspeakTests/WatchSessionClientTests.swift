@@ -73,6 +73,111 @@ struct WatchSessionClientTests {
         #expect(reported == [meta, nil])
     }
 
+    private static let relaunchMeta = SessionMetadata(
+        sessionID: UUID(uuidString: "6D0D2A11-0000-4000-8000-000000000001")!,
+        revision: 3, title: "Godzilla", duration: 7500, cueCount: 0,
+        isPlaying: true, currentTime: 1550, serverDate: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+
+    @Test("a relaunched watch applies the stored session context once activation completes and asks the phone for the session")
+    func activationRestoresStoredContext() throws {
+        let (client, sender, _) = try makeClient()
+        sender.holdsReplies = true
+
+        client.activationCompleted(state: .activated, reachable: true, storedContext: try Self.relaunchMeta.toPropertyList())
+
+        #expect(client.metadata == Self.relaunchMeta)
+        #expect(client.isConnected)
+        #expect(Self.sentCommands(sender.sentMessages) == [.requestSession])
+    }
+
+    @Test("a stored session-ended context leaves the relaunched watch without a session")
+    func activationWithEndedContext() throws {
+        let (client, sender, _) = try makeClient()
+        sender.holdsReplies = true
+
+        client.activationCompleted(state: .activated, reachable: true, storedContext: SessionEndedSignal.propertyList())
+
+        #expect(client.metadata == nil)
+        #expect(Self.sentCommands(sender.sentMessages) == [.requestSession])
+    }
+
+    @Test("activation that did not complete applies nothing and asks for nothing")
+    func activationNotActivated() throws {
+        let (client, sender, _) = try makeClient()
+
+        client.activationCompleted(state: .inactive, reachable: false, storedContext: try Self.relaunchMeta.toPropertyList())
+
+        #expect(client.metadata == nil)
+        #expect(sender.sentMessages.isEmpty)
+    }
+
+    @Test("a session request that fails, gets no reply, or gets an empty or undecodable reply keeps the restored session")
+    func sessionRequestFailuresKeepRestoredSession() async throws {
+        let replies: [(String, (MockSender) throws -> Void)] = [
+            ("error reply", { $0.nextError = WatchMessageError.notReachable }),
+            ("no reply", { $0.holdsReplies = true }),
+            ("no session on the phone", { $0.nextReply = try PlaybackSnapshot.empty.toPropertyList() }),
+            ("old phone build", { $0.nextReply = [:] }),
+        ]
+        for (name, configure) in replies {
+            let (client, sender, _) = try makeClient()
+            try configure(sender)
+
+            client.activationCompleted(state: .activated, reachable: true, storedContext: try Self.relaunchMeta.toPropertyList())
+            try await Task.sleep(for: .milliseconds(50))
+
+            #expect(client.metadata == Self.relaunchMeta, "\(name)")
+            #expect(client.lastSnapshot == nil, "\(name)")
+        }
+    }
+
+    @Test("a session request that failed while unreachable goes out again when the phone becomes reachable")
+    func sessionRequestRetriedOnReachability() async throws {
+        let (client, sender, _) = try makeClient()
+        sender.nextError = WatchMessageError.notReachable
+
+        client.activationCompleted(state: .activated, reachable: false, storedContext: try Self.relaunchMeta.toPropertyList())
+        sender.nextError = nil
+        sender.nextReply = try PlaybackSnapshot.empty.toPropertyList()
+        client.reachabilityChanged(true)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.requestSession, .requestSession])
+        #expect(client.isConnected)
+    }
+
+    @Test("a reply to the session request stops later reachability changes from sending it again")
+    func sessionRequestNotResentAfterReply() async throws {
+        let (client, sender, _) = try makeClient()
+        sender.nextReply = [:]
+
+        client.activationCompleted(state: .activated, reachable: true, storedContext: [:])
+        try await Task.sleep(for: .milliseconds(50))
+        client.reachabilityChanged(false)
+        client.reachabilityChanged(true)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(Self.sentCommands(sender.sentMessages) == [.requestSession])
+    }
+
+    @Test("the snapshot the phone replies with refreshes the restored session's position")
+    func sessionRequestReplyRefreshesPosition() async throws {
+        let (client, sender, _) = try makeClient()
+        let live = PlaybackSnapshot(
+            sessionID: Self.relaunchMeta.sessionID, revision: 3,
+            currentTime: 1610, duration: 7500, currentIndex: 0,
+            isPlaying: true, serverDate: Date(timeIntervalSince1970: 1_800_000_060)
+        )
+        sender.nextReply = try live.toPropertyList()
+
+        client.activationCompleted(state: .activated, reachable: true, storedContext: try Self.relaunchMeta.toPropertyList())
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(client.lastSnapshot == live)
+        #expect(client.metadata?.currentTime == 1610)
+    }
+
     @Test("send(.togglePlayPause) writes encoded command to sender")
     func sendCommandEncodesToSender() async throws {
         let (client, sender, dir) = try makeClient()

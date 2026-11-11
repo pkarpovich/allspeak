@@ -433,6 +433,7 @@ The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `watchDownload(_:)`, `watchSamples(_:)`, `watchAborted(_:)` and `syncMark(_:)`.
 The diagnostics commands and `listenEvent(_:)` travel over `transferUserInfo`
 instead of `sendMessage`.
+When its WatchConnectivity session activates, a relaunched watch (after a crash included) restores the last session context the phone sent, since `receivedApplicationContext` is valid only after activation and WC does not re-deliver a context it already delivered, then sends `requestSession`: the phone re-sends the live session's context, or the session-ended signal when it has none, and replies with the current snapshot. An older phone build answers with a decode error and the watch keeps the restored context.
 Session metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
 the current `activeTrackID`, an optional `serverDate` playback anchor, and
 optional `fingerprintSHA`, `catalogID` and `subtitleSHA` (all decoded with
