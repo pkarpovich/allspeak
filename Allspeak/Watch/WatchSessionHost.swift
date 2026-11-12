@@ -112,6 +112,7 @@ final class WatchSessionHost: NSObject {
         case .switchTrack:
             break
         case .requestSession:
+            coordinator.noteSessionRequest()
             if coordinator.currentMetadata() == nil {
                 broadcastSessionEnded()
             } else {

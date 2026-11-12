@@ -80,10 +80,41 @@ final class DiagnosticsLog {
         guard let fileURL else { return }
         let line = event.jsonLine(timestamp: timestampFormatter.string(from: now()))
         logger.log("\(line, privacy: .public)")
+        let isFirstLine = handle == nil
         guard let handle = ensureHandle(at: fileURL),
               let data = (line + "\n").data(using: .utf8) else { return }
         try? handle.write(contentsOf: data)
+        if isFirstLine, let held = try? Data(contentsOf: heldURL) {
+            try? handle.write(contentsOf: held)
+            try? fileManager.removeItem(at: heldURL)
+        }
         try? handle.synchronize()
+    }
+
+    static let heldLimit = 256 * 1024
+
+    // For an event with no session open (a watch report, a file sent at import): the next log
+    // takes the held lines right after its session header, each with the time it happened.
+    func logOrHold(_ event: DiagnosticsEvent) {
+        guard fileURL == nil else {
+            log(event)
+            return
+        }
+        let size = (try? heldURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        let line = event.jsonLine(timestamp: timestampFormatter.string(from: now()))
+        guard size < Self.heldLimit, let data = (line + "\n").data(using: .utf8) else { return }
+        try? fileManager.createDirectory(at: heldURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !fileManager.fileExists(atPath: heldURL.path) {
+            fileManager.createFile(atPath: heldURL.path, contents: nil)
+        }
+        guard let held = try? FileHandle(forWritingTo: heldURL) else { return }
+        _ = try? held.seekToEnd()
+        try? held.write(contentsOf: data)
+        try? held.close()
+    }
+
+    private var heldURL: URL {
+        rootURL.appendingPathComponent("diagnostics", isDirectory: true).appendingPathComponent("held.txt")
     }
 
     func end() {

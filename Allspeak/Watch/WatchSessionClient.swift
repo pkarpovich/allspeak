@@ -45,6 +45,7 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored private var listenID: UUID?
     @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
     @ObservationIgnored private var sessionRequestPending = false
+    @ObservationIgnored private var lastSessionProbe: Date?
     @ObservationIgnored private var phoneTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private let sender: WatchMessageSender
     @ObservationIgnored private var session: WCSession?
@@ -112,9 +113,28 @@ final class WatchSessionClient: NSObject {
     // first request fails; it is sent again once reachability turns true.
     private func requestSessionIfPending() {
         guard sessionRequestPending else { return }
-        sendCommand(.requestSession, snapshotReplyHandler: { [weak self] _ in
+        requestSession()
+    }
+
+    private func requestSession() {
+        sendCommand(.requestSession, snapshotReplyHandler: { [weak self] snapshot in
             self?.sessionRequestPending = false
+            if snapshot?.sessionID == PlaybackSnapshot.empty.sessionID {
+                self?.sessionEnded()
+            }
         }, errorHandler: { _ in })
+    }
+
+    // A phone app that dies sends no session-ended signal, so a listen all
+    // film would record until the battery is empty. sendMessage starts the
+    // phone app, which then answers that it has no session.
+    static let sessionProbeInterval: TimeInterval = 300
+
+    private func probeSessionIfDue() {
+        let date = now()
+        if let last = lastSessionProbe, date.timeIntervalSince(last) < Self.sessionProbeInterval { return }
+        lastSessionProbe = date
+        requestSession()
     }
 
     var interpolatedTime: TimeInterval {
@@ -259,12 +279,7 @@ final class WatchSessionClient: NSObject {
 
     func handleReceivedApplicationContext(_ context: [String: Any]) {
         if SessionEndedSignal.isSessionEnded(context) {
-            cancelListening()
-            stopAutoListen()
-            self.metadata = nil
-            self.lastSnapshot = nil
-            downloader?.cancel()
-            clearSessionFiles()
+            sessionEnded()
             return
         }
         guard let meta = try? SessionMetadata(propertyList: context) else { return }
@@ -281,6 +296,15 @@ final class WatchSessionClient: NSObject {
             self.lastSnapshot = nil
         }
         refreshSessionFiles()
+    }
+
+    private func sessionEnded() {
+        cancelListening()
+        stopAutoListen()
+        self.metadata = nil
+        self.lastSnapshot = nil
+        downloader?.cancel()
+        clearSessionFiles()
     }
 
     func retryDownloads() {
@@ -499,6 +523,7 @@ final class WatchSessionClient: NSObject {
         let listenID = makeListenID()
         autoListenID = listenID
         autoListen = AutoListenState(isOn: true, startedAt: now())
+        lastSessionProbe = now()
         let listener = makeContinuousListener(url)
         autoListener = listener
         telemetry?.begin(listenID: listenID)
@@ -563,6 +588,7 @@ final class WatchSessionClient: NSObject {
 
     private func handleAutoListenEvent(_ event: ListenEvent, listenID: UUID) {
         guard autoListenID == listenID else { return }
+        probeSessionIfDue()
         var event = event
         if case .matched(let match) = event.phase {
             event = ListenEvent(phase: .matched(match.nearest(to: interpolatedTime, now: now())), listenSeconds: event.listenSeconds, compute: event.compute)
