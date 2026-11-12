@@ -20,6 +20,7 @@ struct PlayerView: View {
     @State private var cinema: CinemaMode = .off
     @State private var clipURL: URL?
     @State private var isPresentingClip = false
+    @State private var isAskingHall = false
 
     private let repository: SessionRepository
 
@@ -118,6 +119,9 @@ struct PlayerView: View {
                 ClipSheet(url: clipURL, openingCues: Array((controller?.subtitles ?? []).prefix(ClipSheet.openingCueCount)))
             }
         }
+        .sheet(isPresented: $isAskingHall) {
+            HallPromptSheet(onSelect: selectHall)
+        }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .task {
@@ -193,6 +197,7 @@ struct PlayerView: View {
             tracks = PlaybackCoordinator.shared.tracks
             activeTrackID = PlaybackCoordinator.shared.activeTrackID
             selectedHallKey = PlaybackCoordinator.shared.selectedHallKey
+            isAskingHall = Hall.needsSelection(selectedHallKey)
             clipURL = locateClip()
         } catch PlaybackCoordinator.StartError.sessionNotFound {
             loadError = "Couldn't load session."

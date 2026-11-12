@@ -253,7 +253,7 @@ The player's title capsule is a menu with the Cinema City Łódź Manufaktura ha
 list (IMAX, Sala 1-14). The hall is saved on the session, so it can be picked
 at home before going to the cinema: every later log of that session carries it
 in the `session` header, and the hall name shows under the title. Changing it
-logs a `hall` event.
+logs a `hall` event. While a session has no hall, the player opens with a "Which hall are you in?" sheet every time. Halls are stored by number, since the sponsor part of a name changes.
 
 Logs older than 365 days are deleted when the next session starts.
 

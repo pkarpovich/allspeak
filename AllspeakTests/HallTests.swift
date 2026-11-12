@@ -19,6 +19,13 @@ struct HallTests {
         #expect(Array(keys.dropFirst()) == (1...14).map(String.init))
     }
 
+    @Test("a session asks for its hall while it has none or one that is not in the list", arguments: [
+        (nil, true), ("4", false), ("IMAX", false), ("99", true),
+    ] as [(String?, Bool)])
+    func needsSelection(key: String?, expected: Bool) {
+        #expect(Hall.needsSelection(key) == expected)
+    }
+
     @Test("hall id is its key")
     func idIsKey() {
         #expect(Hall.manufaktura.allSatisfy { $0.id == $0.key })

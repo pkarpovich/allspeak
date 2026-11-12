@@ -8,12 +8,16 @@ struct Hall: Identifiable, Equatable, Sendable {
 
     static let manufakturaCinemaID = "cinema-city-lodz-manufaktura"
 
+    static func needsSelection(_ key: String?) -> Bool {
+        !manufaktura.contains { $0.key == key }
+    }
+
     static let manufaktura: [Hall] = [
         Hall(key: "IMAX", name: "IMAX BNP Paribas"),
         Hall(key: "1", name: "Sala 1 Lorenz"),
         Hall(key: "2", name: "Sala 2"),
         Hall(key: "3", name: "Sala 3 Tarczyński"),
-        Hall(key: "4", name: "Sala 4 Costa"),
+        Hall(key: "4", name: "Sala 4 Milka"),
         Hall(key: "5", name: "Sala 5 Credit Agricole"),
         Hall(key: "6", name: "Sala 6 McDonalds"),
         Hall(key: "7", name: "Sala 7 BNP Paribas"),

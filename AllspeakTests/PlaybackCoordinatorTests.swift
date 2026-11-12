@@ -1102,7 +1102,7 @@ struct PlaybackCoordinatorTests {
         let headerRecords = try Self.readJSONLines(try #require(log.currentFileURL))
         let header = try #require(headerRecords.first)
         #expect(header["hall"] as? String == "4")
-        #expect(header["hallName"] as? String == "Sala 4 Costa")
+        #expect(header["hallName"] as? String == "Sala 4 Milka")
     }
 
     @Test("the session header omits trackSHA but keeps catalog fields when server.json has no entry for the active track")
