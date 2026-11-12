@@ -7,14 +7,19 @@ final class CatalogFileCache {
         case shaMismatch
     }
 
+    // Several films: the phone sends a session's files at import, days before the film plays.
+    static let capacity = 4
+
     let baseURL: URL
     private let fileExtension: String
     private let fileManager: FileManager
+    private let now: () -> Date
 
-    init(baseURL: URL, fileExtension: String, fileManager: FileManager = .default) throws {
+    init(baseURL: URL, fileExtension: String, fileManager: FileManager = .default, now: @escaping () -> Date = Date.init) throws {
         self.baseURL = baseURL
         self.fileExtension = fileExtension
         self.fileManager = fileManager
+        self.now = now
         try fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
     }
 
@@ -38,23 +43,33 @@ final class CatalogFileCache {
         guard Self.sha256Hex(of: data) == key else { throw CacheError.shaMismatch }
         let url = fileURL(sha256: key)
         try data.write(to: url, options: .atomic)
-        evictStale(keeping: url.lastPathComponent)
+        markUsed(url)
+        evictLeastRecentlyUsed()
         return url
     }
 
     func url(sha256: String) -> URL? {
         let url = fileURL(sha256: sha256.lowercased())
-        return fileManager.fileExists(atPath: url.path) ? url : nil
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        markUsed(url)
+        return url
     }
 
     private func fileURL(sha256: String) -> URL {
         baseURL.appendingPathComponent("\(sha256).\(fileExtension)")
     }
 
-    private func evictStale(keeping filename: String) {
-        let urls = (try? fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil)) ?? []
-        for url in urls where url.lastPathComponent != filename {
-            try? fileManager.removeItem(at: url)
+    private func markUsed(_ url: URL) {
+        try? fileManager.setAttributes([.modificationDate: now()], ofItemAtPath: url.path)
+    }
+
+    private func evictLeastRecentlyUsed() {
+        let urls = (try? fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let used = urls.map { url in
+            (url: url, date: (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast)
+        }
+        for entry in used.sorted(by: { $0.date > $1.date }).dropFirst(Self.capacity) {
+            try? fileManager.removeItem(at: entry.url)
         }
     }
 }

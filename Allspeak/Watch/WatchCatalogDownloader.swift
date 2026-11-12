@@ -19,6 +19,7 @@ final class WatchCatalogDownloader {
 
     var onFile: ((Kind, String, URL) -> Void)?
     var onEvent: ((WatchDownloadEvent) -> Void)?
+    var onNeed: ((Kind, String) -> Void)?
 
     private let client: CatalogClient?
     private let transport: any CatalogTransport
@@ -63,11 +64,15 @@ final class WatchCatalogDownloader {
     func request(catalogID: UUID, files: [Kind: String]) {
         let request = Request(catalogID: catalogID, files: files.mapValues { $0.lowercased() })
         if request == self.request, task != nil { return }
+        let isNew = request != self.request
         cancel()
         self.request = request
         pending = [:]
         for (kind, sha) in request.files.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
             if let url = caches[kind]?.url(sha256: sha) {
+                if isNew {
+                    emit(kind, .cached, sha: sha, source: nil)
+                }
                 onFile?(kind, sha, url)
             } else {
                 pending[kind] = sha
@@ -77,7 +82,10 @@ final class WatchCatalogDownloader {
     }
 
     func retryNow() {
-        guard task == nil else { return }
+        guard task == nil else {
+            askForPending()
+            return
+        }
         startIfNeeded()
     }
 
@@ -88,8 +96,30 @@ final class WatchCatalogDownloader {
         pending = [:]
     }
 
+    // Kept even with no session open: the phone sends files at import, before the film plays.
+    func store(_ data: Data, transfer: WatchFileTransfer) {
+        let kind = transfer.kind
+        let sha = transfer.sha256
+        guard let cache = caches[kind] else { return }
+        let url: URL
+        do {
+            url = try cache.save(data, sha256: sha)
+        } catch {
+            emit(kind, .failed, sha: sha, source: .phone, error: Self.describe(error))
+            return
+        }
+        emit(kind, .done, sha: sha, source: .phone, bytes: data.count, seconds: now().timeIntervalSince(transfer.queuedAt))
+        guard pending[kind] == sha else { return }
+        pending[kind] = nil
+        onFile?(kind, sha, url)
+        guard pending.isEmpty else { return }
+        task?.cancel()
+        task = nil
+    }
+
     private func startIfNeeded() {
         guard let request, !pending.isEmpty else { return }
+        askForPending()
         task = Task { [weak self] in
             await self?.run(request)
         }
@@ -110,6 +140,12 @@ final class WatchCatalogDownloader {
             guard !Task.isCancelled, self.request == request else { return }
         }
         task = nil
+    }
+
+    private func askForPending() {
+        for (kind, sha) in pending.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            onNeed?(kind, sha)
+        }
     }
 
     private func downloadPending(_ request: Request, attempt: Int) async {
@@ -156,7 +192,11 @@ final class WatchCatalogDownloader {
 
     private func report(_ kind: Kind, _ phase: WatchDownloadEvent.Phase, attempt: Int, bytes: Int? = nil, seconds: Double? = nil, error: String? = nil) {
         guard let sha = request?.files[kind] else { return }
-        onEvent?(WatchDownloadEvent(kind: kind, phase: phase, sha256: sha, attempt: attempt, bytes: bytes, seconds: seconds, error: error))
+        emit(kind, phase, sha: sha, source: .catalog, attempt: attempt, bytes: bytes, seconds: seconds, error: error)
+    }
+
+    private func emit(_ kind: Kind, _ phase: WatchDownloadEvent.Phase, sha: String, source: WatchDownloadEvent.Source?, attempt: Int = 0, bytes: Int? = nil, seconds: Double? = nil, error: String? = nil) {
+        onEvent?(WatchDownloadEvent(kind: kind, phase: phase, sha256: sha, attempt: attempt, bytes: bytes, seconds: seconds, error: error, source: source))
     }
 
     private static func remoteURL(_ kind: Kind, sha: String, detail: CatalogSessionDetail) -> URL? {

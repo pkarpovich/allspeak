@@ -68,6 +68,9 @@ final class WatchSessionClient: NSObject {
             event.eventDate = self.now()
             self.report(.watchDownload(event))
         }
+        downloader?.onNeed = { [weak self] kind, sha in
+            self?.requestFileFromPhone(kind, sha256: sha)
+        }
     }
 
     func activate() {
@@ -305,6 +308,15 @@ final class WatchSessionClient: NSObject {
         files[.subtitle] = subtitleSHA
         files[.fingerprint] = fingerprintSHA
         downloader?.request(catalogID: catalogID, files: files)
+    }
+
+    // Not queued with transferUserInfo: a late request would make the phone send a file the watch already has.
+    private func requestFileFromPhone(_ kind: WatchDownloadEvent.Kind, sha256: String) {
+        sendCommand(.requestFile(kind: kind, sha256: sha256), errorHandler: { _ in })
+    }
+
+    func handleReceivedFile(_ data: Data, transfer: WatchFileTransfer) {
+        downloader?.store(data, transfer: transfer)
     }
 
     private func clearSessionFiles() {
@@ -659,6 +671,16 @@ extension WatchSessionClient: WCSessionDelegate {
         let bridge = SendableDictionary(value: message)
         Task { @MainActor in
             self.handleReceivedMessage(bridge.value)
+        }
+    }
+
+    // The system deletes the file when this method returns.
+    nonisolated func session(_: WCSession, didReceive file: WCSessionFile) {
+        guard let transfer = WatchFileTransfer(metadata: file.metadata),
+              let data = try? Data(contentsOf: file.fileURL) else { return }
+        Task { @MainActor in
+            self.handleReceivedFile(data, transfer: transfer)
+            self.completePendingBackgroundTasksIfSettled()
         }
     }
 

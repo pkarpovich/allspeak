@@ -44,23 +44,35 @@ struct CatalogFileCacheTests {
         #expect(cache.url(sha256: sha.uppercased()) != nil)
     }
 
-    @Test("saving a new fingerprint evicts the previous file")
-    func evictsPrevious() throws {
+    private final class Clock {
+        var date = Date(timeIntervalSince1970: 1_800_000_000)
+
+        func tick() -> Date {
+            date += 60
+            return date
+        }
+    }
+
+    @Test("files of several films stay, and past the capacity the least recently used one goes")
+    func evictsLeastRecentlyUsed() throws {
         let dir = makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let cache = try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog")
-        let first = Self.sample(3)
-        let second = Self.sample(4)
-        let firstSHA = CatalogFileCache.sha256Hex(of: first)
-        let secondSHA = CatalogFileCache.sha256Hex(of: second)
+        let clock = Clock()
+        let cache = try CatalogFileCache(baseURL: dir, fileExtension: "shazamcatalog", now: clock.tick)
+        let files = (0..<UInt8(CatalogFileCache.capacity)).map { Self.sample(10 + $0) }
+        let shas = files.map(CatalogFileCache.sha256Hex(of:))
+        for (file, sha) in zip(files, shas) {
+            try cache.save(file, sha256: sha)
+        }
+        #expect(shas.allSatisfy { cache.url(sha256: $0) != nil })
 
-        try cache.save(first, sha256: firstSHA)
-        try cache.save(second, sha256: secondSHA)
+        _ = cache.url(sha256: shas[0])
+        let extra = Self.sample(99)
+        try cache.save(extra, sha256: CatalogFileCache.sha256Hex(of: extra))
 
-        #expect(cache.url(sha256: firstSHA) == nil)
-        #expect(cache.url(sha256: secondSHA) != nil)
-        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path)
-        #expect(files.count == 1)
+        #expect(cache.url(sha256: shas[0]) != nil)
+        #expect(cache.url(sha256: shas[1]) == nil)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).count == CatalogFileCache.capacity)
     }
 
     @Test("the cached file survives a reload from the same directory")

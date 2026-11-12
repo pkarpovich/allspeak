@@ -792,7 +792,7 @@ final class PlaybackCoordinator {
             startListening(listenID: listenID)
         case .cancelListening(let listenID):
             cancelListening(listenID: listenID)
-        case .requestSession:
+        case .requestSession, .requestFile:
             break
         case .listenEvent(let update):
             noteWatchListenEvent(update)
@@ -851,6 +851,11 @@ final class PlaybackCoordinator {
     func noteWatchDownload(_ event: WatchDownloadEvent) {
         guard let controller else { return }
         diagnostics.log(.download(event, pos: controller.livePosition, rxDelay: rxDelay(since: event.eventDate)))
+    }
+
+    func noteFileTransfer(_ event: WatchFileSender.Event) {
+        guard let controller else { return }
+        diagnostics.log(.transfer(event, pos: controller.livePosition))
     }
 
     func noteWatchSamples(_ telemetry: WatchListenTelemetry) {

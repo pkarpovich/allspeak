@@ -33,6 +33,9 @@ struct WireProtocolTests {
         WatchCommand.startListening(listenID: testListenID),
         WatchCommand.cancelListening(listenID: testListenID),
         WatchCommand.requestSession,
+        WatchCommand.requestFile(kind: .fingerprint, sha256: "885815be"),
+        WatchCommand.watchDownload(WatchDownloadEvent(kind: .fingerprint, phase: .done, sha256: "885815be", attempt: 0, bytes: 3_220_498, seconds: 41, source: .phone)),
+        WatchCommand.watchDownload(WatchDownloadEvent(kind: .subtitle, phase: .cached, sha256: "c6534d42", attempt: 0)),
         WatchCommand.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .start, listenSeconds: 0)),
         WatchCommand.listenEvent(ListenUpdate(
             listenID: testListenID,
@@ -81,6 +84,16 @@ struct WireProtocolTests {
         #expect(throws: WireCodingError.self) {
             _ = try WatchCommand(propertyList: plist)
         }
+    }
+
+    @Test("file transfer metadata round-trips and lowercases the sha")
+    func fileTransferMetadata() {
+        let transfer = WatchFileTransfer(kind: .fingerprint, sha256: "885815BE", queuedAt: Date(timeIntervalSince1970: 1_800_000_000))
+
+        #expect(transfer.sha256 == "885815be")
+        #expect(WatchFileTransfer(metadata: transfer.metadata) == transfer)
+        #expect(WatchFileTransfer(metadata: nil) == nil)
+        #expect(WatchFileTransfer(metadata: ["kind": "poster", "sha256": "885815be", "queuedAt": Date()]) == nil)
     }
 
     @Test("watchDownload payload without the event fails to decode")

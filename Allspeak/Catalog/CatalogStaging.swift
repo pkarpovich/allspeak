@@ -25,9 +25,12 @@ struct CatalogStaging: Sendable {
         root.appendingPathComponent(serverID.uuidString, isDirectory: true)
     }
 
+    static func stagedFilename(sha256: String, filename: String) -> String {
+        "\(sha256.lowercased())-\((filename as NSString).lastPathComponent)"
+    }
+
     func stagedURL(serverID: UUID, sha256: String, filename: String) -> URL {
-        let safeName = (filename as NSString).lastPathComponent
-        return serverDir(for: serverID).appendingPathComponent("\(sha256.lowercased())-\(safeName)")
+        serverDir(for: serverID).appendingPathComponent(Self.stagedFilename(sha256: sha256, filename: filename))
     }
 
     func isStaged(serverID: UUID, sha256: String, filename: String) async -> Bool {

@@ -82,6 +82,7 @@ enum DiagnosticsEvent: Sendable {
     case hall(key: String, name: String, cinema: String, pos: Double)
     case listen(Listen)
     case download(WatchDownloadEvent, pos: Double, rxDelay: Double?)
+    case transfer(WatchFileSender.Event, pos: Double)
     case watchSample(listenID: UUID, sample: WatchSample, rxDelay: Double)
     case watchAborted(listenID: UUID, listenSec: Double?, rxDelay: Double)
     case watchState(kind: String, state: String, pos: Double, rxDelay: Double)
@@ -103,6 +104,7 @@ enum DiagnosticsEvent: Sendable {
         case .hall: return "hall"
         case .listen: return "listen"
         case .download: return "download"
+        case .transfer: return "transfer"
         case .watchSample: return "watchSample"
         case .watchAborted: return "watchAborted"
         case .watchState: return "watchState"
@@ -193,6 +195,7 @@ enum DiagnosticsEvent: Sendable {
         case let .download(event, pos, rxDelay):
             builder.add("kind", event.kind.rawValue)
             builder.add("phase", event.phase.rawValue)
+            builder.add("source", event.source?.rawValue)
             builder.add("sha", event.sha256)
             builder.add("attempt", event.attempt)
             builder.add("bytes", event.bytes)
@@ -200,6 +203,15 @@ enum DiagnosticsEvent: Sendable {
             builder.add("error", event.error)
             builder.addPosition("pos", pos)
             builder.addPosition("rxDelay", rxDelay)
+        case let .transfer(event, pos):
+            builder.add("kind", event.kind.rawValue)
+            builder.add("phase", event.phase.rawValue)
+            builder.add("sha", event.sha256)
+            builder.add("bytes", event.bytes)
+            builder.add("progress", event.progress)
+            builder.add("seconds", event.seconds)
+            builder.add("error", event.error)
+            builder.addPosition("pos", pos)
         case let .watchSample(listenID, sample, rxDelay):
             builder.add("listenID", listenID.uuidString)
             builder.addPosition("listenSec", sample.listenSeconds)

@@ -2035,6 +2035,22 @@ struct PlaybackCoordinatorTests {
         #expect(line["pos"] as? Double == 1.0)
     }
 
+    @Test("a file transfer step is logged as a transfer line with the track position")
+    func fileTransferLogged() async throws {
+        let fixture = try await Self.makeListenFixture(withFingerprint: true)
+        defer { Self.tearDown(fixture) }
+        fixture.coordinator.controller?.seek(to: 1.0)
+
+        fixture.coordinator.noteFileTransfer(.init(kind: .fingerprint, phase: .queued, sha256: "fp-sha", bytes: 2048))
+
+        let logURL = try #require(fixture.log.currentFileURL)
+        let line = try #require(try Self.readJSONLines(logURL).last)
+        #expect(line["event"] as? String == "transfer")
+        #expect(line["phase"] as? String == "queued")
+        #expect(line["bytes"] as? Int == 2048)
+        #expect(line["pos"] as? Double == 1.0)
+    }
+
     @Test("watch listen events are logged with the watch source and not echoed back")
     func watchListenEventsLogged() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)

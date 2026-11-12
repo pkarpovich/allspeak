@@ -150,8 +150,7 @@ no automatic or background listening.
   input, so AirPods keep playing over A2DP instead of switching to the HFP mic.
   The player keeps playing, and `.playback` / `.spokenAudio` is restored
   afterwards.
-- The watch downloads the fingerprint from the catalog together with the
-  subtitle (see "Watch downloads").
+- The watch gets the fingerprint together with the subtitle (see "Watch files").
 - Both sources write `listen` events to the phone's diagnostics log (the watch
   reports its phases to the phone), so the logs show which mic matches better.
   The watch queues its reports with `transferUserInfo`, so they survive a
@@ -244,9 +243,8 @@ Event types:
 - `mark` - the user marked the dub out of sync: `source`, and on the watch also
   the watch's own `watchPos`. On the watch it is the flag circle between the
   ±1 s buttons; on the phone it is the last item of the title menu.
-- `download` - a watch catalog download step: `kind` (subtitle or fingerprint),
-  `phase` (`start`, `done`, `failed`), `sha`, `attempt`, and `bytes` / `seconds`
-  on success or `error` on failure.
+- `download` - a step of getting a file on the watch: `kind` (subtitle or fingerprint), `phase` (`start`, `done`, `failed`, `cached`), `source` (`catalog` or `phone`, absent for `cached`), `sha`, `attempt`, and `bytes` / `seconds` on success or `error` on failure. For a file from the phone `seconds` counts from the moment the phone queued it. `cached` means the file was already on the watch when the session opened.
+- `transfer` - a step of the phone sending a file to the watch: `kind`, `phase`, `sha`. `queued` carries `bytes`. `pending` is a repeated request for a file still in the queue and carries `progress` (0-1), so a transfer that does not move shows as the same `progress` in successive lines. `missing` means no session on the phone has that sha. `cancel` means the watch got the file another way. `sent` and `failed` carry `seconds` since `queued`, `failed` also `error`.
 
 The player's title capsule is a menu with the Cinema City Łódź Manufaktura hall
 list (IMAX, Sala 1-14). The hall is saved on the session, so it can be picked
@@ -370,28 +368,20 @@ listener as a second source.
    starts working.
 4. Open a session on the iPhone. The watch receives the session metadata via
    `updateApplicationContext`, including the catalog session id and the sha256
-   of the subtitle and the fingerprint, and downloads both files itself from the
-   catalog (see "Watch downloads" below). Nothing is transferred file-by-file
-   over WatchConnectivity.
+   of the subtitle and the fingerprint, and gets both files by them (see
+   "Watch files" below).
 
-### Watch downloads
+### Watch files
 
-The watch fetches the session files straight from the catalog with
-`URLSession`, which watchOS routes through the paired iPhone, Wi-Fi or LTE.
-`WatchCatalogDownloader` calls `GET /api/v1/sessions/{catalogID}` with the read
-token for fresh presigned URLs, downloads the subtitle and the fingerprint whose
-sha256 match the metadata, verifies each sha256 and keeps the latest file of
-each kind in Application Support (`subtitles/<sha>.srt`,
-`fingerprint/<sha>.shazamcatalog`). Subtitles are parsed on the watch with
-`SRTParser`. A cached file is used at once without any network request.
+The watch needs the subtitle and the fingerprint of the session. Both are kept in Application Support under their sha256 (`subtitles/<sha>.srt`, `fingerprint/<sha>.shazamcatalog`), the four most recently used of each kind, so a cached file is used at once. A file reaches the cache in one of three ways, and the first copy with the right sha256 wins:
 
-A failed attempt is retried after 5, 15 and 45 s, and again whenever the watch
-app becomes active or the phone becomes reachable. Every attempt is reported to
-the phone as a `download` diagnostics line (`kind`, `phase` start / done /
-failed, `sha`, `attempt`, `bytes`, `seconds`, `error`). The watch reads the
-catalog URL and read token from its own Info.plist
-(`AllspeakCatalogURL` / `AllspeakCatalogReadToken`), filled from
-`Allspeak/CatalogConfig.xcconfig` through `AllspeakWatch/Signing.xcconfig`.
+1. The phone sends both files with `WCSession.transferFile` when it imports a session from the catalog, and the changed ones when it updates a session. The system picks the delivery moment, which can be minutes or hours later, so this is done ahead of the screening and not in the hall.
+2. When a session opens and a file is not cached, the watch downloads it from the catalog with `URLSession`, which watchOS routes through the paired iPhone, Wi-Fi or LTE. `WatchCatalogDownloader` calls `GET /api/v1/sessions/{catalogID}` with the read token for fresh presigned URLs and downloads the files whose sha256 match the metadata.
+3. At the same moment the watch asks the phone for the file with `requestFile`, and the phone queues a `transferFile` unless that file is already in its queue. This is the path that works in a hall without internet.
+
+Subtitles are parsed on the watch with `SRTParser`. `transferFile` does not work between simulators, so this path is only checked on devices: open a session that the watch has not cached with internet off on both devices and read the `transfer` and `download` lines of the log.
+
+A failed catalog attempt is retried after 5, 15 and 45 s, and again whenever the watch app becomes active or the phone becomes reachable. The request to the phone is repeated at the same moments. Every step is reported to the phone as a `download` diagnostics line. The watch reads the catalog URL and read token from its own Info.plist (`AllspeakCatalogURL` / `AllspeakCatalogReadToken`), filled from `Allspeak/CatalogConfig.xcconfig` through `AllspeakWatch/Signing.xcconfig`.
 
 ### Usage
 
@@ -437,7 +427,8 @@ The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `togglePlayPause`, `skip(seconds:)`, `seek(time:)`, `switchTrack(id:)`,
 `setVolume(_:)`, for cinema listen `startListening(listenID:)`,
 `cancelListening(listenID:)`, `listenEvent(_:)` and
-`applySync(sessionID:trackTime:matchDate:source:sha256:)`, and for diagnostics
+`applySync(sessionID:trackTime:matchDate:source:sha256:)`, for session files
+`requestFile(kind:sha256:)`, and for diagnostics
 `watchDownload(_:)`, `watchSamples(_:)`, `watchAborted(_:)` and `syncMark(_:)`.
 The diagnostics commands and `listenEvent(_:)` travel over `transferUserInfo`
 instead of `sendMessage`.

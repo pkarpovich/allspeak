@@ -856,6 +856,63 @@ struct WatchSessionClientTests {
         #expect(Set(done.map(\.kind)) == [.subtitle, .fingerprint])
     }
 
+    @Test("a file the watch lacks is requested from the phone while it downloads from the catalog")
+    func missingFileRequestedFromPhone() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        let shas = fixture.server.publish(catalogID: Self.catalogID, subtitle: Self.subtitleData, fingerprint: Self.fingerprintData)
+        let subtitleSHA = try #require(shas.subtitleSHA)
+        let fingerprintSHA = try #require(shas.fingerprintSHA)
+
+        fixture.client.handleReceivedApplicationContext(
+            try Self.catalogMeta(subtitleSHA: subtitleSHA, fingerprintSHA: fingerprintSHA).toPropertyList()
+        )
+
+        #expect(Self.sentCommands(fixture.sender.sentMessages) == [
+            .requestFile(kind: .fingerprint, sha256: fingerprintSHA),
+            .requestFile(kind: .subtitle, sha256: subtitleSHA),
+        ])
+        try await waitForFiles(fixture.client)
+    }
+
+    @Test("a file request the phone did not get is sent again when the phone becomes reachable")
+    func fileRequestRepeatedWhenReachable() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        fixture.sender.nextError = WatchMessageError.notReachable
+        let fingerprintSHA = CatalogFileCache.sha256Hex(of: Self.fingerprintData)
+        let request = WatchCommand.requestFile(kind: .fingerprint, sha256: fingerprintSHA)
+        fixture.client.handleReceivedApplicationContext(
+            try Self.catalogMeta(fingerprintSHA: fingerprintSHA).toPropertyList()
+        )
+        #expect(Self.sentCommands(fixture.sender.sentMessages) == [request])
+
+        fixture.client.reachabilityChanged(true)
+
+        #expect(Self.sentCommands(fixture.sender.sentMessages).filter { $0 == request }.count == 2)
+        #expect(!Self.sentCommands(fixture.sender.transferredUserInfo).contains(request))
+    }
+
+    @Test("files received from the phone load the session when the catalog is out of reach")
+    func filesFromPhoneLoadSession() async throws {
+        let fixture = try makeCatalogClient()
+        defer { try? FileManager.default.removeItem(at: fixture.dir) }
+        let subtitleSHA = CatalogFileCache.sha256Hex(of: Self.subtitleData)
+        let fingerprintSHA = CatalogFileCache.sha256Hex(of: Self.fingerprintData)
+        fixture.client.handleReceivedApplicationContext(
+            try Self.catalogMeta(subtitleSHA: subtitleSHA, fingerprintSHA: fingerprintSHA).toPropertyList()
+        )
+        #expect(fixture.client.cues.isEmpty)
+
+        fixture.client.handleReceivedFile(Self.subtitleData, transfer: WatchFileTransfer(kind: .subtitle, sha256: subtitleSHA, queuedAt: Date()))
+        fixture.client.handleReceivedFile(Self.fingerprintData, transfer: WatchFileTransfer(kind: .fingerprint, sha256: fingerprintSHA, queuedAt: Date()))
+
+        #expect(fixture.client.cues.map(\.text) == ["first", "second"])
+        #expect(fixture.client.hasFingerprint)
+        let done = Self.downloadEvents(fixture.sender.transferredUserInfo).filter { $0.phase == .done }
+        #expect(done.map(\.source) == [.phone, .phone])
+    }
+
     @Test("cached files are used at once without a download")
     func catalogCacheHit() async throws {
         let fixture = try makeCatalogClient()

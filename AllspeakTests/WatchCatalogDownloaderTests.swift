@@ -91,7 +91,93 @@ struct WatchCatalogDownloaderTests {
         #expect(fixture.recorder.files.map(\.2) == [url])
         #expect(!fixture.downloader.isDownloading)
         #expect(fixture.server.requests.isEmpty)
-        #expect(fixture.recorder.events.isEmpty)
+        #expect(fixture.recorder.events == [WatchDownloadEvent(kind: .fingerprint, phase: .cached, sha256: sha, attempt: 0)])
+    }
+
+    @Test("a repeated request for the same cached file reports the cache hit once")
+    func cacheHitReportedOnce() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let sha = CatalogFileCache.sha256Hex(of: Self.fingerprint)
+        try #require(fixture.caches[.fingerprint]).save(Self.fingerprint, sha256: sha)
+        let catalogID = UUID()
+
+        fixture.downloader.request(catalogID: catalogID, files: [.fingerprint: sha])
+        fixture.downloader.request(catalogID: catalogID, files: [.fingerprint: sha])
+
+        #expect(fixture.recorder.events.map(\.phase) == [.cached])
+        #expect(fixture.recorder.files.count == 2)
+    }
+
+    @Test("every missing file is asked for when a download starts and on each retry, running or not")
+    func missingFilesAskedFor() async throws {
+        let fixture = try makeFixture(client: false)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var needed: [String] = []
+        fixture.downloader.onNeed = { kind, sha in needed.append("\(kind.rawValue):\(sha)") }
+        let once = ["fingerprint:def", "subtitle:abc"]
+
+        fixture.downloader.request(catalogID: UUID(), files: [.subtitle: "abc", .fingerprint: "def"])
+        #expect(needed == once)
+        #expect(fixture.downloader.isDownloading)
+        fixture.downloader.retryNow()
+        #expect(needed == once + once)
+        try await waitUntilIdle(fixture.downloader)
+        fixture.downloader.retryNow()
+        try await waitUntilIdle(fixture.downloader)
+
+        #expect(needed == once + once + once)
+    }
+
+    @Test("a file from the phone fills the request, stops the catalog download and is reported with its source")
+    func phoneFileFillsRequest() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let catalogID = UUID()
+        let sha = CatalogFileCache.sha256Hex(of: Self.fingerprint)
+        fixture.server.failNext(catalogID.uuidString.lowercased(), times: 4)
+        fixture.downloader.request(catalogID: catalogID, files: [.fingerprint: sha])
+
+        fixture.downloader.store(Self.fingerprint, transfer: WatchFileTransfer(kind: .fingerprint, sha256: sha, queuedAt: Date().addingTimeInterval(-30)))
+
+        #expect(!fixture.downloader.isDownloading)
+        #expect(fixture.recorder.files.map(\.1) == [sha])
+        #expect(fixture.caches[.fingerprint]?.url(sha256: sha) != nil)
+        let done = try #require(fixture.recorder.events.last)
+        #expect(done.phase == .done)
+        #expect(done.source == .phone)
+        #expect(done.bytes == Self.fingerprint.count)
+        #expect((done.seconds ?? 0) >= 30)
+        let eventCount = fixture.recorder.events.count
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(fixture.recorder.events.count == eventCount)
+    }
+
+    @Test("a file the phone sent before any session opened is kept and used by the next request")
+    func phoneFileBeforeSession() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let sha = CatalogFileCache.sha256Hex(of: Self.fingerprint)
+
+        fixture.downloader.store(Self.fingerprint, transfer: WatchFileTransfer(kind: .fingerprint, sha256: sha, queuedAt: Date()))
+        #expect(fixture.recorder.files.isEmpty)
+        fixture.downloader.request(catalogID: UUID(), files: [.fingerprint: sha])
+
+        #expect(fixture.recorder.files.map(\.1) == [sha])
+        #expect(fixture.recorder.events.map(\.phase) == [.done, .cached])
+        #expect(fixture.server.requests.isEmpty)
+    }
+
+    @Test("a file from the phone whose content does not match its sha is rejected")
+    func phoneFileShaMismatch() async throws {
+        let fixture = try makeFixture(client: false)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let sha = CatalogFileCache.sha256Hex(of: Self.fingerprint)
+
+        fixture.downloader.store(Data("other".utf8), transfer: WatchFileTransfer(kind: .fingerprint, sha256: sha, queuedAt: Date()))
+
+        #expect(fixture.caches[.fingerprint]?.url(sha256: sha) == nil)
+        #expect(fixture.recorder.events == [WatchDownloadEvent(kind: .fingerprint, phase: .failed, sha256: sha, attempt: 0, error: "sha mismatch", source: .phone)])
     }
 
     @Test("a file whose content does not match its sha is rejected and retried")
