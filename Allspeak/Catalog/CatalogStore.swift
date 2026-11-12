@@ -28,6 +28,7 @@ final class CatalogStore {
     @ObservationIgnored private let importer: CatalogImporter
     @ObservationIgnored private let applier: CatalogSyncApplier
     @ObservationIgnored private let documentsRoot: URL
+    @ObservationIgnored private let sendToWatch: @MainActor (WatchDownloadEvent.Kind, String) -> Void
 
     init(
         client: CatalogClient,
@@ -35,7 +36,8 @@ final class CatalogStore {
         runner: ImportTaskRunner,
         importer: CatalogImporter,
         applier: CatalogSyncApplier,
-        documentsRoot: URL
+        documentsRoot: URL,
+        sendToWatch: @escaping @MainActor (WatchDownloadEvent.Kind, String) -> Void = { _, _ in }
     ) {
         self.client = client
         self.downloader = downloader
@@ -43,6 +45,7 @@ final class CatalogStore {
         self.importer = importer
         self.applier = applier
         self.documentsRoot = documentsRoot
+        self.sendToWatch = sendToWatch
     }
 
     static func live() -> CatalogStore {
@@ -70,7 +73,8 @@ final class CatalogStore {
         )
         return CatalogStore(
             client: client, downloader: downloader, runner: runner,
-            importer: importer, applier: applier, documentsRoot: storage.documentsURL
+            importer: importer, applier: applier, documentsRoot: storage.documentsURL,
+            sendToWatch: { WatchSessionHost.shared.sendFile($0, sha256: $1) }
         )
     }
 
@@ -149,6 +153,7 @@ final class CatalogStore {
             // sidecar-derived state and the user can retry from the row.
         }
         reloadSidecars()
+        sendChangedFilesToWatch(serverID: summary.id, previous: nil)
         activeDownloadID = nil
     }
 
@@ -166,7 +171,16 @@ final class CatalogStore {
             try await applier.apply(plan: plan, detail: detail, sessionID: sessionID, sidecar: sidecar)
         }
         reloadSidecars()
+        sendChangedFilesToWatch(serverID: detail.id, previous: sidecar)
         activeDownloadID = nil
+    }
+
+    // Sent at import, not in the hall: the system delivers a transferFile when it chooses.
+    private func sendChangedFilesToWatch(serverID: UUID, previous: CatalogSidecar?) {
+        guard let current = sidecars.first(where: { $0.serverID == serverID }) else { return }
+        for file in current.watchFiles(changedSince: previous) {
+            sendToWatch(file.kind, file.sha256)
+        }
     }
 }
 

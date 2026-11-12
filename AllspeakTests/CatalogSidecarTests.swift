@@ -89,6 +89,42 @@ struct CatalogSidecarTests {
         #expect(loaded.clip == nil)
     }
 
+    private func sidecar(subtitle: String, fingerprint: String?) -> CatalogSidecar {
+        CatalogSidecar(
+            serverID: UUID(),
+            revision: 1,
+            subtitle: .init(filename: "movie.srt", sha256: subtitle),
+            tracks: [],
+            fingerprint: fingerprint.map { .init(filename: "movie.shazamcatalog", sha256: $0) }
+        )
+    }
+
+    @Test("a new import sends the watch both files, an update only the files whose sha changed")
+    func watchFilesChanged() {
+        let imported = sidecar(subtitle: "cc01", fingerprint: "ff01")
+        #expect(imported.watchFiles(changedSince: nil).map(\.sha256) == ["cc01", "ff01"])
+        #expect(imported.watchFiles(changedSince: nil).map(\.kind) == [.subtitle, .fingerprint])
+        #expect(imported.watchFiles(changedSince: imported).isEmpty)
+        #expect(sidecar(subtitle: "cc01", fingerprint: "ff02").watchFiles(changedSince: imported).map(\.sha256) == ["ff02"])
+        #expect(sidecar(subtitle: "cc02", fingerprint: nil).watchFiles(changedSince: imported).map(\.sha256) == ["cc02"])
+    }
+
+    @Test("the subtitle is found under its staged name in the session directory")
+    func subtitleURL() throws {
+        let root = makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = DocumentsStorage(documentsURL: root)
+        let sessionID = UUID()
+        let sidecar = sidecar(subtitle: "CC01", fingerprint: nil)
+        #expect(sidecar.subtitleURL(sessionID: sessionID, storage: storage) == nil)
+
+        let dir = storage.sessionDir(for: sessionID)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("srt".utf8).write(to: dir.appendingPathComponent("cc01-movie.srt"))
+
+        #expect(sidecar.subtitleURL(sessionID: sessionID, storage: storage)?.lastPathComponent == "cc01-movie.srt")
+    }
+
     @Test("round-trips a sidecar carrying a fingerprint")
     func roundTripWithFingerprint() throws {
         let root = makeTempRoot()

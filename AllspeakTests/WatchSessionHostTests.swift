@@ -883,6 +883,46 @@ struct WatchSessionHostTests {
         #expect(sends.count == 1)
     }
 
+    @MainActor
+    private final class FakeFileLink {
+        var outstanding: [WatchFileSender.Outstanding] = []
+        var transfers: [[String: Any]] = []
+        var cancelled: [String] = []
+
+        func makeSender(file: URL) -> WatchFileSender {
+            WatchFileSender(
+                link: .init(canSend: { true }, outstanding: { self.outstanding }, transfer: { self.transfers.append($1) }),
+                locate: { _, _ in file }
+            )
+        }
+    }
+
+    @Test("a file request from the watch queues a transfer of that file")
+    func requestFileQueuesTransfer() async throws {
+        let coordinator = PlaybackCoordinator()
+        let files = FakeFileLink()
+        let host = WatchSessionHost(coordinator: coordinator, fileSender: files.makeSender(file: URL(fileURLWithPath: "/dev/null")))
+
+        _ = await host.dispatch(.requestFile(kind: .fingerprint, sha256: "AA11"))
+
+        #expect(files.transfers.compactMap { WatchFileTransfer(metadata: $0) }.map(\.sha256) == ["aa11"])
+    }
+
+    @Test("a transfer still in the queue is dropped once the watch has the file", arguments: [WatchDownloadEvent.Phase.done, .cached])
+    func watchHasFileCancelsTransfer(phase: WatchDownloadEvent.Phase) async throws {
+        let coordinator = PlaybackCoordinator()
+        let files = FakeFileLink()
+        files.outstanding = [WatchFileSender.Outstanding(kind: .fingerprint, sha256: "aa11", fraction: 0.5) { files.cancelled.append("aa11") }]
+        let host = WatchSessionHost(coordinator: coordinator, fileSender: files.makeSender(file: URL(fileURLWithPath: "/dev/null")))
+
+        _ = await host.dispatch(.watchDownload(WatchDownloadEvent(kind: .fingerprint, phase: .start, sha256: "aa11", attempt: 1, source: .catalog)))
+        _ = await host.dispatch(.watchDownload(WatchDownloadEvent(kind: .fingerprint, phase: .failed, sha256: "aa11", attempt: 1, error: "network", source: .catalog)))
+        #expect(files.cancelled.isEmpty)
+
+        _ = await host.dispatch(.watchDownload(WatchDownloadEvent(kind: .fingerprint, phase: phase, sha256: "aa11", attempt: 1)))
+        #expect(files.cancelled == ["aa11"])
+    }
+
 }
 
 @MainActor

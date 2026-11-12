@@ -71,6 +71,24 @@ struct CatalogSidecar: Codable, Equatable, Sendable {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    // The import keeps the subtitle under its staged name.
+    func subtitleURL(sessionID: UUID, storage: DocumentsStorage) -> URL? {
+        let name = CatalogStaging.stagedFilename(sha256: subtitle.sha256, filename: subtitle.filename)
+        let url = storage.sessionDir(for: sessionID).appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func watchFiles(changedSince previous: CatalogSidecar?) -> [(kind: WatchDownloadEvent.Kind, sha256: String)] {
+        var files: [(kind: WatchDownloadEvent.Kind, sha256: String)] = []
+        if subtitle.sha256 != previous?.subtitle.sha256 {
+            files.append((.subtitle, subtitle.sha256))
+        }
+        if let fingerprint, fingerprint.sha256 != previous?.fingerprint?.sha256 {
+            files.append((.fingerprint, fingerprint.sha256))
+        }
+        return files
+    }
+
     func fingerprintURL(sessionID: UUID, storage: DocumentsStorage) -> URL? {
         guard let fingerprint else { return nil }
         let url = storage.fingerprintURL(sessionID: sessionID, sha256: fingerprint.sha256, filename: fingerprint.filename)

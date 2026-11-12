@@ -42,9 +42,12 @@ import Foundation
 //                                     active session and sha256 its fingerprint;
 //                                     listenID (optional) names the watch listen
 //                                     whose match is applied, for the log
-//   .watchDownload(WatchDownloadEvent) a phase of the watch's catalog download
-//                                     (subtitle or fingerprint); the phone only
-//                                     logs it
+//   .watchDownload(WatchDownloadEvent) a step of getting the subtitle or the
+//                                     fingerprint on the watch; the phone logs
+//                                     it and drops its transfer of a file the
+//                                     watch already has
+//   .requestFile(kind:, sha256:)      the watch lacks this file: the phone sends
+//                                     it with transferFile
 //   .watchSamples(WatchListenTelemetry) memory and device samples taken during
 //                                     one watch listen; the phone only logs them
 //   .watchAborted(WatchListenTelemetry) a watch listen whose process died before
@@ -70,9 +73,9 @@ import Foundation
 //                                             predates cinema listen)
 //   SessionMetadata.catalogID: UUID?         (allspeak-catalog session id and the
 //   SessionMetadata.subtitleSHA: String?      sha256 of its subtitle; the watch
-//                                             downloads the subtitle and the
-//                                             fingerprint from the catalog by
-//                                             these, see WatchCatalogDownloader)
+//                                             gets the subtitle and the
+//                                             fingerprint by these, see
+//                                             WatchCatalogDownloader)
 //
 // Transports (one-way arrows reflect actual reachability semantics):
 //
@@ -115,8 +118,9 @@ import Foundation
 // property-list-only (no nested Codable), and a single discriminator key
 // lets the receiver route to the correct decoder without sniffing fields.
 //
-// Files (subtitle, fingerprint) never travel over WatchConnectivity: the watch
-// downloads them from allspeak-catalog with URLSession.
+//   iPhone --transferFile--------------> Watch   subtitle, fingerprint
+//       whole files with WatchFileTransfer metadata, at import and on
+//       requestFile; the system picks the delivery moment
 //
 // Adding a new command:
 //   1. Add a case to `WatchCommand` + its `Kind` discriminator.
@@ -142,6 +146,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case listenEvent(ListenUpdate)
     case applySync(sessionID: UUID, trackTime: Double, matchDate: Date, source: ListenSource, sha256: String, listenID: UUID? = nil)
     case watchDownload(WatchDownloadEvent)
+    case requestFile(kind: WatchDownloadEvent.Kind, sha256: String)
     case watchSamples(WatchListenTelemetry)
     case watchAborted(WatchListenTelemetry)
     case syncMark(SyncMark)
@@ -164,6 +169,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case telemetry
         case mark
         case state
+        case fileKind
     }
 
     private enum Kind: String, Codable {
@@ -180,6 +186,7 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case listenEvent
         case applySync
         case watchDownload
+        case requestFile
         case watchSamples
         case watchAborted
         case syncMark
@@ -229,6 +236,10 @@ enum WatchCommand: Codable, Equatable, Sendable {
         case .watchDownload(let event):
             try container.encode(Kind.watchDownload, forKey: .kind)
             try container.encode(event, forKey: .download)
+        case .requestFile(let kind, let sha256):
+            try container.encode(Kind.requestFile, forKey: .kind)
+            try container.encode(kind, forKey: .fileKind)
+            try container.encode(sha256, forKey: .sha256)
         case .watchSamples(let telemetry):
             try container.encode(Kind.watchSamples, forKey: .kind)
             try container.encode(telemetry, forKey: .telemetry)
@@ -281,6 +292,11 @@ enum WatchCommand: Codable, Equatable, Sendable {
             )
         case .watchDownload:
             self = .watchDownload(try container.decode(WatchDownloadEvent.self, forKey: .download))
+        case .requestFile:
+            self = .requestFile(
+                kind: try container.decode(WatchDownloadEvent.Kind.self, forKey: .fileKind),
+                sha256: try container.decode(String.self, forKey: .sha256)
+            )
         case .watchSamples:
             self = .watchSamples(try container.decode(WatchListenTelemetry.self, forKey: .telemetry))
         case .watchAborted:
@@ -376,6 +392,12 @@ struct WatchDownloadEvent: Codable, Equatable, Sendable {
         case start
         case done
         case failed
+        case cached
+    }
+
+    enum Source: String, Codable, Sendable {
+        case catalog
+        case phone
     }
 
     let kind: Kind
@@ -385,9 +407,10 @@ struct WatchDownloadEvent: Codable, Equatable, Sendable {
     let bytes: Int?
     let seconds: Double?
     let error: String?
+    var source: Source? = nil
     var eventDate: Date?
 
-    init(kind: Kind, phase: Phase, sha256: String, attempt: Int, bytes: Int? = nil, seconds: Double? = nil, error: String? = nil, eventDate: Date? = nil) {
+    init(kind: Kind, phase: Phase, sha256: String, attempt: Int, bytes: Int? = nil, seconds: Double? = nil, error: String? = nil, source: Source? = nil, eventDate: Date? = nil) {
         self.kind = kind
         self.phase = phase
         self.sha256 = sha256
@@ -395,7 +418,38 @@ struct WatchDownloadEvent: Codable, Equatable, Sendable {
         self.bytes = bytes
         self.seconds = seconds
         self.error = error
+        self.source = source
         self.eventDate = eventDate
+    }
+}
+
+struct WatchFileTransfer: Equatable, Sendable {
+    let kind: WatchDownloadEvent.Kind
+    let sha256: String
+    let queuedAt: Date
+
+    private enum Key {
+        static let kind = "kind"
+        static let sha256 = "sha256"
+        static let queuedAt = "queuedAt"
+    }
+
+    init(kind: WatchDownloadEvent.Kind, sha256: String, queuedAt: Date) {
+        self.kind = kind
+        self.sha256 = sha256.lowercased()
+        self.queuedAt = queuedAt
+    }
+
+    init?(metadata: [String: Any]?) {
+        guard let raw = metadata?[Key.kind] as? String,
+              let kind = WatchDownloadEvent.Kind(rawValue: raw),
+              let sha256 = metadata?[Key.sha256] as? String,
+              let queuedAt = metadata?[Key.queuedAt] as? Date else { return nil }
+        self.init(kind: kind, sha256: sha256, queuedAt: queuedAt)
+    }
+
+    var metadata: [String: Any] {
+        [Key.kind: kind.rawValue, Key.sha256: sha256, Key.queuedAt: queuedAt]
     }
 }
 

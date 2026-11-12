@@ -8,6 +8,7 @@ final class WatchSessionHost: NSObject {
 
     private let coordinator: PlaybackCoordinator
     private let broadcastGate: SnapshotBroadcastGate
+    private let fileSender: WatchFileSender
     private var session: WCSession?
     private var pendingListenUpdate: ListenUpdate?
     private var latestListenUpdate: ListenUpdate?
@@ -15,13 +16,16 @@ final class WatchSessionHost: NSObject {
 
     init(
         coordinator: PlaybackCoordinator = .shared,
-        broadcastGate: SnapshotBroadcastGate = SnapshotBroadcastGate()
+        broadcastGate: SnapshotBroadcastGate = SnapshotBroadcastGate(),
+        fileSender: WatchFileSender? = nil
     ) {
         self.coordinator = coordinator
         self.broadcastGate = broadcastGate
+        self.fileSender = fileSender ?? .live()
         let (stream, continuation) = AsyncStream<IncomingCommand>.makeStream()
         incomingCommands = continuation
         super.init()
+        self.fileSender.onEvent = { [coordinator] in coordinator.noteFileTransfer($0) }
         Task { [weak self] in
             for await incoming in stream {
                 self?.process(incoming)
@@ -113,6 +117,13 @@ final class WatchSessionHost: NSObject {
             } else {
                 broadcastCurrentSession()
             }
+        case .requestFile(let kind, let sha256):
+            fileSender.send(kind, sha256: sha256)
+        case .watchDownload(let event):
+            if event.phase == .done || event.phase == .cached {
+                fileSender.cancel(sha256: event.sha256)
+            }
+            coordinator.apply(command)
         case .applySync(let sessionID, let trackTime, let matchDate, let source, let sha256, let listenID):
             guard coordinator.applySync(
                 sessionID: sessionID,
@@ -128,6 +139,14 @@ final class WatchSessionHost: NSObject {
             coordinator.apply(command)
         }
         return coordinator.currentSnapshot()
+    }
+
+    func sendFile(_ kind: WatchDownloadEvent.Kind, sha256: String) {
+        fileSender.send(kind, sha256: sha256)
+    }
+
+    func fileTransferFinished(_ transfer: WatchFileTransfer, error: String?) {
+        fileSender.finished(transfer, error: error)
     }
 
     func broadcastSnapshot() {
@@ -267,6 +286,40 @@ extension WatchSessionHost: WCSessionDelegate {
     nonisolated func session(_: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         guard let command = try? WatchCommand(propertyList: userInfo) else { return }
         receive(command) { _ in }
+    }
+
+    nonisolated func session(_: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: (any Error)?) {
+        guard let transfer = WatchFileTransfer(metadata: fileTransfer.file.metadata) else { return }
+        let message = error?.localizedDescription
+        Task { @MainActor in
+            self.fileTransferFinished(transfer, error: message)
+        }
+    }
+}
+
+extension WatchFileSender {
+    static func live() -> WatchFileSender {
+        let link = Link(
+            canSend: {
+                guard WCSession.isSupported() else { return false }
+                let session = WCSession.default
+                return session.activationState == .activated && session.isPaired && session.isWatchAppInstalled
+            },
+            outstanding: {
+                WCSession.default.outstandingFileTransfers.compactMap { transfer in
+                    guard let file = WatchFileTransfer(metadata: transfer.file.metadata) else { return nil }
+                    return Outstanding(kind: file.kind, sha256: file.sha256, fraction: transfer.progress.fractionCompleted) {
+                        transfer.cancel()
+                    }
+                }
+            },
+            transfer: { url, metadata in
+                WCSession.default.transferFile(url, metadata: metadata)
+            }
+        )
+        return WatchFileSender(link: link) { kind, sha256 in
+            locate(kind, sha256: sha256, storage: .default)
+        }
     }
 }
 

@@ -235,6 +235,31 @@ struct DiagnosticsEventTests {
         )
     }
 
+    @Test("download from the phone logs its source")
+    func downloadFromPhone() {
+        let event = WatchDownloadEvent(kind: .fingerprint, phase: .done, sha256: "885815be", attempt: 0, bytes: 3_220_498, seconds: 41, source: .phone)
+        #expect(
+            DiagnosticsEvent.download(event, pos: 12, rxDelay: 0.5).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"download","kind":"fingerprint","phase":"done","source":"phone","sha":"885815be","attempt":0,"bytes":3220498,"seconds":41,"pos":12,"rxDelay":0.5}"#
+        )
+    }
+
+    @Test("transfer logs kind, phase, sha and the fields its phase carries")
+    func transfer() {
+        #expect(
+            DiagnosticsEvent.transfer(.init(kind: .fingerprint, phase: .queued, sha256: "885815be", bytes: 3_220_498), pos: 5).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"transfer","kind":"fingerprint","phase":"queued","sha":"885815be","bytes":3220498,"pos":5}"#
+        )
+        #expect(
+            DiagnosticsEvent.transfer(.init(kind: .subtitle, phase: .pending, sha256: "c6534d42", progress: 0.25), pos: 5).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"transfer","kind":"subtitle","phase":"pending","sha":"c6534d42","progress":0.25,"pos":5}"#
+        )
+        #expect(
+            DiagnosticsEvent.transfer(.init(kind: .subtitle, phase: .failed, sha256: "c6534d42", seconds: 12, error: "cancelled"), pos: 5).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"transfer","kind":"subtitle","phase":"failed","sha":"c6534d42","seconds":12,"error":"cancelled","pos":5}"#
+        )
+    }
+
     @Test("download failed logs the error and omits bytes and seconds")
     func downloadFailed() {
         let event = WatchDownloadEvent(kind: .subtitle, phase: .failed, sha256: "c6534d42", attempt: 1, error: "offline")
