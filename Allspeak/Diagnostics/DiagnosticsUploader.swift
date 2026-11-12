@@ -5,7 +5,7 @@ import Observation
 // allspeak-catalog, where the analysis agent reads them. Runs when a log
 // closes and when the app becomes active, so no screening needs a hand-off;
 // the Settings screen keeps a button for the rare miss. A ledger next to the
-// logs remembers what went up, so a file is sent once and a retry after a
+// logs remembers what went up, so an unchanged file is sent once and a retry after a
 // failed network is free. Logs without a catalog id (nothing to file them
 // under) and uploads the server rejects are recorded as skipped, not retried.
 @MainActor
@@ -134,10 +134,16 @@ final class DiagnosticsUploader {
         return report
     }
 
+    // By name, not by URL: the directory listing spells /var as /private/var, so the URLs never match.
+    // A log whose size differs from the uploaded one goes up again.
     private func pendingLogs(ledger: Ledger) -> [URL] {
-        let open = openLog()
-        return files(in: diagnosticsDirectory, extension: "jsonl")
-            .filter { $0 != open && !ledger.covers($0) }
+        let open = openLog()?.lastPathComponent
+        return files(in: diagnosticsDirectory, extension: "jsonl").filter { url in
+            let name = url.lastPathComponent
+            guard name != open, !ledger.skipped.contains(name) else { return false }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+            return ledger.uploaded[name] != size.map(Int64.init)
+        }
     }
 
     private func pendingReports(ledger: Ledger) -> [URL] {

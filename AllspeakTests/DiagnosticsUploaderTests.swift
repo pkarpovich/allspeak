@@ -62,6 +62,43 @@ struct DiagnosticsUploaderTests {
         #expect(server.uploads.count == 1)
     }
 
+    @Test("the open log waits when its url is spelled differently from the directory listing")
+    func openLogWaitsUnderAnotherSpelling() async throws {
+        let open = writeLog("film-20261105-1000.jsonl", catalogID: catalogID)
+        let respelled = root.appendingPathComponent("diagnostics/../diagnostics/\(open.lastPathComponent)")
+        #expect(respelled != open)
+        let uploader = makeUploader(openLog: respelled)
+
+        let report = await uploader.uploadPending()
+
+        #expect(report == DiagnosticsUploader.Report())
+        #expect(server.uploads.isEmpty)
+        #expect(uploader.pendingCount == 0)
+    }
+
+    @Test("a log that grew after its upload goes up again in full, then rests")
+    func grownLogUploadedAgain() async throws {
+        let log = writeLog("film-20261104-1742.jsonl", catalogID: catalogID, lines: 3)
+        let uploader = makeUploader()
+        _ = await uploader.uploadPending()
+        #expect(server.uploads.count == 1)
+
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"ts":"2026-11-04T19:00:00.000Z","event":"pause","pos":4800}"#.utf8 + [0x0A]))
+        try handle.close()
+
+        #expect(uploader.pendingCount == 1)
+        let report = await uploader.uploadPending()
+
+        #expect(report == DiagnosticsUploader.Report(uploaded: 1))
+        #expect(server.uploads.count == 2)
+        #expect(server.uploads[1].name == "film-20261104-1742.jsonl")
+        #expect(server.uploads[1].body == (try Data(contentsOf: log)))
+        #expect(uploader.pendingCount == 0)
+        #expect(await uploader.uploadPending() == DiagnosticsUploader.Report())
+    }
+
     @Test("a log without a catalog id and a log the server does not know are skipped for good")
     func skipsLogsWithoutSession() async {
         _ = writeLog("old-20260901-1530.jsonl", catalogID: nil)
