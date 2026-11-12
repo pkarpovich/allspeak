@@ -162,7 +162,7 @@ no automatic or background listening.
 The waveform circle between the ±3 s buttons on the watch transport screen
 (gold while on, tap again to stop) keeps the watch listener recording until
 `Stop`, a ShazamKit error, an audio interruption or the session ending, without
-the 120 s timeout and without the phone. A listen that ended on its own
+the 120 s timeout and without the phone. While it runs the watch sends `requestSession` every 5 minutes, so a listen left on after the phone app died stops within 5 minutes: `sendMessage` starts the phone app, and it answers that it has no session. A paused session does not stop the listen. A listen that ended on its own
 (interruption, error) starts again the next time the app becomes active; only
 `Stop` and a session change end it for good. Every match is reported as a watch `listen` event of one
 `listenID`, and every attempt without a match (one per 3 s of audio) as a `nomatch` event, so the
@@ -245,6 +245,9 @@ Event types:
   ±1 s buttons; on the phone it is the last item of the title menu.
 - `download` - a step of getting a file on the watch: `kind` (subtitle or fingerprint), `phase` (`start`, `done`, `failed`, `cached`), `source` (`catalog` or `phone`, absent for `cached`), `sha`, `attempt`, and `bytes` / `seconds` on success or `error` on failure. For a file from the phone `seconds` counts from the moment the phone queued it. `cached` means the file was already on the watch when the session opened.
 - `transfer` - a step of the phone sending a file to the watch: `kind`, `phase`, `sha`. `queued` carries `bytes`. `pending` is a repeated request for a file still in the queue and carries `progress` (0-1), so a transfer that does not move shows as the same `progress` in successive lines. `missing` means no session on the phone has that sha. `cancel` means the watch got the file another way. `sent` and `failed` carry `seconds` since `queued`, `failed` also `error`.
+- `sessionRequest` - the watch asked the phone for the live session: on a watch launch and every 5 minutes of listen all film. A run of these lines with the wrist down shows that the watch still reaches the phone.
+
+A watch report or a `transfer` step that happens with no session open is not dropped. The phone holds it and writes it into the next session's log right after the `session` line, with the time it happened and without `pos`. Such lines are older than the `session` line of that log and can belong to another film.
 
 The player's title capsule is a menu with the Cinema City Łódź Manufaktura hall
 list (IMAX, Sala 1-14). The hall is saved on the session, so it can be picked
@@ -432,7 +435,7 @@ The commands round-tripped over WatchConnectivity are: `play`, `pause`,
 `watchDownload(_:)`, `watchSamples(_:)`, `watchAborted(_:)` and `syncMark(_:)`.
 The diagnostics commands and `listenEvent(_:)` travel over `transferUserInfo`
 instead of `sendMessage`.
-When its WatchConnectivity session activates, a relaunched watch (after a crash included) restores the last session context the phone sent, since `receivedApplicationContext` is valid only after activation and WC does not re-deliver a context it already delivered, then sends `requestSession`: the phone re-sends the live session's context, or the session-ended signal when it has none, and replies with the current snapshot. An older phone build answers with a decode error and the watch keeps the restored context.
+When its WatchConnectivity session activates, a relaunched watch (after a crash included) restores the last session context the phone sent, since `receivedApplicationContext` is valid only after activation and WC does not re-deliver a context it already delivered, then sends `requestSession`: the phone re-sends the live session's context, or the session-ended signal when it has none, and replies with the current snapshot. An older phone build answers with a decode error and the watch keeps the restored context. A reply that says the phone has no session drops the session on the watch at once, without waiting for the session-ended context.
 Session metadata delivered to the watch carries a `tracks: [TrackInfo]` array,
 the current `activeTrackID`, an optional `serverDate` playback anchor, and
 optional `fingerprintSHA`, `catalogID` and `subtitleSHA` (all decoded with

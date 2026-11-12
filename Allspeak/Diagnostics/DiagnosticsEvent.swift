@@ -81,11 +81,12 @@ enum DiagnosticsEvent: Sendable {
     case watch(reachable: Bool, pos: Double)
     case hall(key: String, name: String, cinema: String, pos: Double)
     case listen(Listen)
-    case download(WatchDownloadEvent, pos: Double, rxDelay: Double?)
-    case transfer(WatchFileSender.Event, pos: Double)
+    case download(WatchDownloadEvent, pos: Double?, rxDelay: Double?)
+    case transfer(WatchFileSender.Event, pos: Double?)
+    case sessionRequest(pos: Double?)
     case watchSample(listenID: UUID, sample: WatchSample, rxDelay: Double)
     case watchAborted(listenID: UUID, listenSec: Double?, rxDelay: Double)
-    case watchState(kind: String, state: String, pos: Double, rxDelay: Double)
+    case watchState(kind: String, state: String, pos: Double?, rxDelay: Double)
     case mark(source: ListenSource, pos: Double, watchPos: Double?, rxDelay: Double?)
 
     var name: String {
@@ -105,6 +106,7 @@ enum DiagnosticsEvent: Sendable {
         case .listen: return "listen"
         case .download: return "download"
         case .transfer: return "transfer"
+        case .sessionRequest: return "sessionRequest"
         case .watchSample: return "watchSample"
         case .watchAborted: return "watchAborted"
         case .watchState: return "watchState"
@@ -211,6 +213,8 @@ enum DiagnosticsEvent: Sendable {
             builder.add("progress", event.progress)
             builder.add("seconds", event.seconds)
             builder.add("error", event.error)
+            builder.addPosition("pos", pos)
+        case let .sessionRequest(pos):
             builder.addPosition("pos", pos)
         case let .watchSample(listenID, sample, rxDelay):
             builder.add("listenID", listenID.uuidString)

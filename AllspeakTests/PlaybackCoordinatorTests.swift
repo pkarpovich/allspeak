@@ -2035,6 +2035,37 @@ struct PlaybackCoordinatorTests {
         #expect(line["pos"] as? Double == 1.0)
     }
 
+    @Test("watch reports that arrive with no session open are written into the next session's log")
+    func reportsWithoutSessionReachNextLog() async throws {
+        let imported = try await Self.importSession(name: "Held")
+        let (log, diagRoot) = Self.makeTempDiagnostics()
+        defer {
+            try? FileManager.default.removeItem(at: imported.root)
+            try? FileManager.default.removeItem(at: diagRoot)
+        }
+        let coordinator = PlaybackCoordinator()
+        coordinator.diagnostics = log
+        defer { coordinator.endSession() }
+
+        coordinator.apply(.watchDownload(WatchDownloadEvent(kind: .fingerprint, phase: .done, sha256: "fp-sha", attempt: 0, bytes: 2048, seconds: 30, source: .phone)))
+        coordinator.apply(.listenEvent(ListenUpdate(listenID: testListenID, source: .watch, phase: .nomatch, listenSeconds: 600)))
+        coordinator.noteFileTransfer(.init(kind: .fingerprint, phase: .queued, sha256: "fp-sha", bytes: 2048))
+        #expect(log.currentFileURL == nil)
+
+        try await coordinator.startSession(
+            sessionID: imported.sessionID,
+            repository: imported.repo,
+            persistence: imported.persistence,
+            storage: imported.storage
+        )
+
+        let lines = try Self.readJSONLines(try #require(log.currentFileURL))
+        #expect(lines.prefix(4).map { $0["event"] as? String } == ["session", "download", "listen", "transfer"])
+        #expect(lines[1]["source"] as? String == "phone")
+        #expect(lines[1]["pos"] == nil)
+        #expect(lines[2]["phase"] as? String == "nomatch")
+    }
+
     @Test("a file transfer step is logged as a transfer line with the track position")
     func fileTransferLogged() async throws {
         let fixture = try await Self.makeListenFixture(withFingerprint: true)

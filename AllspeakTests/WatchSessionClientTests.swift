@@ -112,12 +112,24 @@ struct WatchSessionClientTests {
         #expect(sender.sentMessages.isEmpty)
     }
 
-    @Test("a session request that fails, gets no reply, or gets an empty or undecodable reply keeps the restored session")
+    @Test("a session request answered with no session on the phone drops the restored session")
+    func sessionRequestWithoutPhoneSessionDropsRestoredSession() async throws {
+        let (client, sender, _) = try makeClient()
+        sender.nextReply = try PlaybackSnapshot.empty.toPropertyList()
+
+        client.activationCompleted(state: .activated, reachable: true, storedContext: try Self.relaunchMeta.toPropertyList())
+        for _ in 0..<200 where client.metadata != nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(client.metadata == nil)
+    }
+
+    @Test("a session request that fails, gets no reply, or gets an undecodable reply keeps the restored session")
     func sessionRequestFailuresKeepRestoredSession() async throws {
         let replies: [(String, (MockSender) throws -> Void)] = [
             ("error reply", { $0.nextError = WatchMessageError.notReachable }),
             ("no reply", { $0.holdsReplies = true }),
-            ("no session on the phone", { $0.nextReply = try PlaybackSnapshot.empty.toPropertyList() }),
             ("old phone build", { $0.nextReply = [:] }),
         ]
         for (name, configure) in replies {
@@ -1234,6 +1246,81 @@ struct WatchSessionClientTests {
 
     private static func autoMatch(delta: Double) -> FingerprintMatch {
         FingerprintMatch(trackTime: delta, matchDate: autoNow, chunkStart: 0)
+    }
+
+    @MainActor
+    private final class Clock {
+        var date = WatchSessionClientTests.autoNow
+    }
+
+    private static func sessionRequests(_ sender: MockSender) -> Int {
+        sentCommands(sender.sentMessages).filter { $0 == .requestSession }.count
+    }
+
+    @Test("listen all film asks the phone for the session once per probe interval")
+    func autoListenProbesSession() throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let clock = Clock()
+        client.now = { clock.date }
+        client.startAutoListen()
+
+        clock.date += WatchSessionClient.sessionProbeInterval - 1
+        listener.emit(.noMatch)
+        #expect(Self.sessionRequests(sender) == 0)
+
+        clock.date += 1
+        listener.emit(.noMatch)
+        listener.emit(.noMatch)
+        #expect(Self.sessionRequests(sender) == 1)
+
+        clock.date += WatchSessionClient.sessionProbeInterval
+        listener.emit(.noMatch)
+        #expect(Self.sessionRequests(sender) == 2)
+        #expect(client.autoListen.isOn)
+    }
+
+    @Test("listen all film stops when the phone answers that it has no session")
+    func autoListenStopsWithoutPhoneSession() async throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let clock = Clock()
+        client.now = { clock.date }
+        client.startAutoListen()
+        sender.nextReply = try PlaybackSnapshot.empty.toPropertyList()
+
+        clock.date += WatchSessionClient.sessionProbeInterval
+        listener.emit(.noMatch)
+        for _ in 0..<200 where client.autoListen.isOn {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(!client.autoListen.isOn)
+        #expect(!client.autoListen.resumesOnActivation)
+        #expect(listener.cancelCount == 1)
+        #expect(client.metadata == nil)
+    }
+
+    @Test("listen all film goes on when the phone still has the session")
+    func autoListenKeepsRunningWithPhoneSession() async throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let clock = Clock()
+        client.now = { clock.date }
+        client.startAutoListen()
+        let sessionID = try #require(client.metadata?.sessionID)
+        sender.nextReply = try PlaybackSnapshot(
+            sessionID: sessionID, revision: 1, currentTime: 10, duration: 7200, currentIndex: 0,
+            isPlaying: true, serverDate: clock.date, activeTrackID: nil, volume: nil
+        ).toPropertyList()
+
+        clock.date += WatchSessionClient.sessionProbeInterval
+        listener.emit(.noMatch)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(Self.sessionRequests(sender) == 1)
+        #expect(client.autoListen.isOn)
+        #expect(client.metadata != nil)
     }
 
     @Test("listen all film keeps listening across matches and only suggests a shift over 1 s")

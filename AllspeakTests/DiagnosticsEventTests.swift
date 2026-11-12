@@ -260,6 +260,16 @@ struct DiagnosticsEventTests {
         )
     }
 
+    @Test("events with no session open omit the position")
+    func eventsWithoutSession() {
+        #expect(DiagnosticsEvent.sessionRequest(pos: nil).jsonLine(timestamp: ts) == #"{"ts":"2026-06-12T19:43:02.000Z","event":"sessionRequest"}"#)
+        #expect(DiagnosticsEvent.sessionRequest(pos: 12.5).jsonLine(timestamp: ts) == #"{"ts":"2026-06-12T19:43:02.000Z","event":"sessionRequest","pos":12.5}"#)
+        #expect(
+            DiagnosticsEvent.transfer(.init(kind: .subtitle, phase: .queued, sha256: "c6534d42", bytes: 100), pos: nil).jsonLine(timestamp: ts)
+                == #"{"ts":"2026-06-12T19:43:02.000Z","event":"transfer","kind":"subtitle","phase":"queued","sha":"c6534d42","bytes":100}"#
+        )
+    }
+
     @Test("download failed logs the error and omits bytes and seconds")
     func downloadFailed() {
         let event = WatchDownloadEvent(kind: .subtitle, phase: .failed, sha256: "c6534d42", attempt: 1, error: "offline")

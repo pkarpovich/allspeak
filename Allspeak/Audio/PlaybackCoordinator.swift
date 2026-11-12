@@ -849,26 +849,26 @@ final class PlaybackCoordinator {
     }
 
     func noteWatchDownload(_ event: WatchDownloadEvent) {
-        guard let controller else { return }
-        diagnostics.log(.download(event, pos: controller.livePosition, rxDelay: rxDelay(since: event.eventDate)))
+        diagnostics.logOrHold(.download(event, pos: controller?.livePosition, rxDelay: rxDelay(since: event.eventDate)))
+    }
+
+    func noteSessionRequest() {
+        diagnostics.logOrHold(.sessionRequest(pos: controller?.livePosition))
     }
 
     func noteFileTransfer(_ event: WatchFileSender.Event) {
-        guard let controller else { return }
-        diagnostics.log(.transfer(event, pos: controller.livePosition))
+        diagnostics.logOrHold(.transfer(event, pos: controller?.livePosition))
     }
 
     func noteWatchSamples(_ telemetry: WatchListenTelemetry) {
-        guard controller != nil else { return }
         for sample in telemetry.samples {
-            diagnostics.log(.watchSample(listenID: telemetry.listenID, sample: sample, rxDelay: rxDelay(since: sample.date) ?? 0))
+            diagnostics.logOrHold(.watchSample(listenID: telemetry.listenID, sample: sample, rxDelay: rxDelay(since: sample.date) ?? 0))
         }
     }
 
     func noteWatchAborted(_ telemetry: WatchListenTelemetry) {
-        guard controller != nil else { return }
         let last = telemetry.samples.last
-        diagnostics.log(.watchAborted(
+        diagnostics.logOrHold(.watchAborted(
             listenID: telemetry.listenID,
             listenSec: last?.listenSeconds,
             rxDelay: rxDelay(since: last?.date ?? telemetry.startedAt) ?? 0
@@ -882,8 +882,7 @@ final class PlaybackCoordinator {
     }
 
     func noteWatchState(_ event: WatchStateEvent) {
-        guard let controller else { return }
-        diagnostics.log(.watchState(kind: event.kind.rawValue, state: event.state, pos: controller.livePosition, rxDelay: rxDelay(since: event.eventDate) ?? 0))
+        diagnostics.logOrHold(.watchState(kind: event.kind.rawValue, state: event.state, pos: controller?.livePosition, rxDelay: rxDelay(since: event.eventDate) ?? 0))
     }
 
     private func rxDelay(since date: Date?) -> Double? {
@@ -934,8 +933,7 @@ final class PlaybackCoordinator {
     }
 
     private func logListen(_ update: ListenUpdate, source: ListenSource) {
-        guard let controller else { return }
-        let pos = controller.livePosition
+        let pos = controller?.livePosition
         var listen = DiagnosticsEvent.Listen(
             listenID: update.listenID,
             source: source,
@@ -953,10 +951,10 @@ final class PlaybackCoordinator {
         )
         if let trackTime = update.trackTime, let matchDate = update.matchDate {
             listen.trackTime = trackTime
-            listen.delta = trackTime + now().timeIntervalSince(matchDate) - pos
+            listen.delta = pos.map { trackTime + now().timeIntervalSince(matchDate) - $0 }
             listen.latency = routeReader().latency
         }
-        diagnostics.log(.listen(listen))
+        diagnostics.logOrHold(.listen(listen))
     }
 
     private static func diagnosticsPhase(_ phase: ListenUpdate.Phase) -> DiagnosticsEvent.ListenPhase {

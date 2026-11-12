@@ -48,6 +48,49 @@ struct DiagnosticsLogTests {
         #expect(!FileManager.default.fileExists(atPath: diagnosticsDir(root).path))
     }
 
+    @Test("an event held with no session open lands right after the next session's first line")
+    func heldEventsJoinNextLog() throws {
+        let root = makeTempRoot()
+        var clock = date("2026-06-12T19:00:00.000Z")
+        let log = DiagnosticsLog(rootURL: root, now: { clock })
+        let held = diagnosticsDir(root).appendingPathComponent("held.txt")
+
+        log.logOrHold(.sessionRequest(pos: nil))
+        clock = date("2026-06-12T19:05:00.000Z")
+        log.logOrHold(.watchState(kind: "app", state: "active", pos: nil, rxDelay: 2))
+        #expect(FileManager.default.fileExists(atPath: held.path))
+
+        clock = date("2026-06-12T19:43:02.000Z")
+        log.begin(filmTitle: "Dune")
+        log.log(.play(pos: 0))
+        log.logOrHold(.sessionRequest(pos: 4))
+        log.log(.pause(pos: 5))
+
+        let url = try #require(log.currentFileURL)
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map(String.init)
+        #expect(lines == [
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"play","pos":0}"#,
+            #"{"ts":"2026-06-12T19:00:00.000Z","event":"sessionRequest"}"#,
+            #"{"ts":"2026-06-12T19:05:00.000Z","event":"watchState","kind":"app","state":"active","rxDelay":2}"#,
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"sessionRequest","pos":4}"#,
+            #"{"ts":"2026-06-12T19:43:02.000Z","event":"pause","pos":5}"#,
+        ])
+        #expect(!FileManager.default.fileExists(atPath: held.path))
+    }
+
+    @Test("held events stop at the size limit")
+    func heldEventsLimited() throws {
+        let root = makeTempRoot()
+        let log = DiagnosticsLog(rootURL: root, now: { self.date("2026-06-12T19:43:02.000Z") })
+        let held = diagnosticsDir(root).appendingPathComponent("held.txt")
+        try FileManager.default.createDirectory(at: diagnosticsDir(root), withIntermediateDirectories: true)
+        try Data(count: DiagnosticsLog.heldLimit).write(to: held)
+
+        log.logOrHold(.sessionRequest(pos: nil))
+
+        #expect(try Data(contentsOf: held).count == DiagnosticsLog.heldLimit)
+    }
+
     @Test("every begun session writes its events, with no catalog gate")
     func loggingIsUngated() throws {
         let root = makeTempRoot()
