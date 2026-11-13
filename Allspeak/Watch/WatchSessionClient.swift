@@ -41,6 +41,7 @@ final class WatchSessionClient: NSObject {
     @ObservationIgnored var makeContinuousListener: (@MainActor (URL) -> any CinemaListening)?
     @ObservationIgnored private var autoListener: (any CinemaListening)?
     @ObservationIgnored private var autoListenID: UUID?
+    @ObservationIgnored private var awaitsApplyAnswer = false
     @ObservationIgnored private var abortedListen: WatchListenTelemetry?
     @ObservationIgnored private var listenID: UUID?
     @ObservationIgnored private var unconfirmedPhoneCancels: Set<UUID> = []
@@ -553,6 +554,7 @@ final class WatchSessionClient: NSObject {
               let sessionID = metadata?.sessionID,
               let sha256 = metadata?.fingerprintSHA else { return }
         autoListen.suggestion = nil
+        awaitsApplyAnswer = true
         sendCommand(.applySync(
             sessionID: sessionID,
             trackTime: match.trackTime,
@@ -560,7 +562,13 @@ final class WatchSessionClient: NSObject {
             source: .watch,
             sha256: sha256,
             listenID: autoListenID
-        ), errorHandler: { _ in })
+        ), snapshotReplyHandler: { [weak self] _ in
+            self?.awaitsApplyAnswer = false
+        }, errorHandler: { [weak self] _ in
+            Task { @MainActor in
+                self?.awaitsApplyAnswer = false
+            }
+        })
     }
 
     func dismissAutoSuggestion() {
@@ -599,6 +607,9 @@ final class WatchSessionClient: NSObject {
             let delta = ListenPanelState.delta(match: match, interpolatedPosition: interpolatedTime, now: now())
             update.watchDelta = delta
             report(.listenEvent(update))
+            // Until the phone answers an apply the watch still has the old position,
+            // so this match would ask for the same shift again.
+            guard !awaitsApplyAnswer else { return }
             let hadSuggestion = autoListen.suggestion != nil
             autoListen.receive(match, delta: delta)
             if !hadSuggestion, let suggestion = autoListen.suggestion {
