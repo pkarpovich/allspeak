@@ -167,7 +167,7 @@ the 120 s timeout and without the phone. While it runs the watch sends `requestS
 `Stop` and a session change end it for good. Every match is reported as a watch `listen` event of one
 `listenID`, and every attempt without a match (one per 3 s of audio) as a `nomatch` event, so the
 log shows whether the matcher kept running with the wrist down. A match whose offset is over 1 s switches to the Listen page with
-`Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it.
+`Apply` / `Dismiss` and the success haptic; a later match under 1 s clears it. After `Apply`, matches raise no prompt until the phone answers: until then the watch still has the old position and would ask for the same shift again.
 When one match names several places of the film (overlapping chunks, or
 repeated music inside a scene), the watch takes the one nearest to the playing
 position and the `listen` line logs the `spread` between them.
