@@ -259,18 +259,7 @@ Logs older than 365 days are deleted when the next session starts.
 
 ### Log upload
 
-Every closed log goes to the catalog backend on its own: when a session ends
-and whenever the app becomes active, the phone posts each log it has not sent
-yet to `POST /api/v1/sessions/{catalogID}/diagnostics?name=<file>` with the
-read token, and remembers it with its size in `Documents/diagnostics/uploaded.json`. The log of the session that is still open waits until that session ends. A log whose size differs from the uploaded size goes up again and replaces the copy on the server. A log
-whose session header has no catalog id, or whose session the server does not
-know, is skipped for good; a network failure leaves the log for the next run.
-Settings shows how many logs wait and the last result, with an `Upload logs
-now` button as the fallback. The phone also keeps every MetricKit diagnostic
-payload (a crash on the next launch, a hang or an exception at once) as
-`Documents/diagnostics/reports/<kind>-<time>.json` and posts it to
-`POST /api/v1/diagnostics/crashes?name=<file>`. watchOS has no MetricKit, so
-watch crashes still only reach Xcode Organizer through TestFlight.
+Every log goes to the catalog backend on its own: when a session ends and whenever the app becomes active, the phone posts each log whose size differs from the copy it sent to `POST /api/v1/sessions/{catalogID}/diagnostics?name=<file>` with the read token, and remembers its size and time in `Documents/diagnostics/uploaded.json`. The server replaces its copy, so the log of a session that is still open goes up as it grows and is not tied to the session ending, which may not happen for days. A log that grew waits 10 minutes since its last upload, so a screening sends a few snapshots rather than one per wake. A log whose session header has no catalog id, or whose session the server does not know, is skipped; a network failure leaves the log for the next run. Settings shows how many logs wait and the last result. Its `Send logs now` button sends every log the server lacks at once, ignoring the 10 minutes and retrying skipped logs. The phone also keeps every MetricKit diagnostic payload (a crash on the next launch, a hang or an exception at once) as `Documents/diagnostics/reports/<kind>-<time>.json` and posts it to `POST /api/v1/diagnostics/crashes?name=<file>`. watchOS has no MetricKit, so watch crashes still only reach Xcode Organizer through TestFlight.
 
 ## Catalog (online session distribution)
 

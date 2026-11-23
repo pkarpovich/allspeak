@@ -74,14 +74,14 @@ struct SettingsView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Tokens.text3)
             VStack(alignment: .leading, spacing: 10) {
-                Text("Screening logs go to the catalog on their own after each session. If one is missing, send it here.")
+                Text("Screening logs go to the catalog on their own. Send now uploads every log the catalog lacks, the one still being written included.")
                     .font(.system(size: 15))
                     .foregroundStyle(Tokens.text)
                 Text(uploadStatus)
                     .font(Tokens.Font.monoSmall)
                     .foregroundStyle(Tokens.text2)
-                Button(uploader.isRunning ? "Uploading..." : "Upload logs now") {
-                    uploader.schedule()
+                Button(uploader.isRunning ? "Sending..." : "Send logs now") {
+                    uploader.schedule(force: true)
                 }
                 .disabled(uploader.isRunning)
                 .font(.system(size: 15, weight: .semibold))
