@@ -1488,6 +1488,54 @@ struct WatchSessionClientTests {
         #expect(listener.cancelCount == 0)
     }
 
+    @Test("a match that lands before the phone answered an apply raises no new prompt")
+    func autoListenIgnoresMatchesUntilApplyAnswered() async throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = try #require(client.metadata)
+        client.startAutoListen()
+        listener.emit(.matched(Self.autoMatch(delta: 1.8)))
+        #expect(client.autoListen.suggestion != nil)
+
+        sender.holdsReplies = true
+        client.applyAutoSuggestion()
+        listener.emit(.matched(Self.autoMatch(delta: 1.75)))
+
+        #expect(client.autoListen.suggestion == nil)
+        #expect(Self.watchListenUpdates(sender).map(\.phase) == [.match, .prompt, .match])
+
+        let answered = PlaybackSnapshot(
+            sessionID: meta.sessionID, revision: meta.revision, currentTime: 1.8, duration: 7200, currentIndex: 0,
+            isPlaying: false, serverDate: Self.autoNow, activeTrackID: nil, volume: nil
+        )
+        try #require(sender.heldReplies.last).reply(try answered.toPropertyList())
+        for _ in 0..<200 where client.lastSnapshot != answered {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        listener.emit(.matched(Self.autoMatch(delta: 1.75)))
+        #expect(client.autoListen.suggestion == nil)
+
+        listener.emit(.matched(Self.autoMatch(delta: 4.0)))
+        #expect(client.autoListen.suggestion == Self.autoMatch(delta: 4.0))
+    }
+
+    @Test("a failed apply lets the next match prompt again")
+    func autoListenPromptsAgainAfterFailedApply() async throws {
+        let (client, sender, listener, dir) = try makeAutoClient()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        client.startAutoListen()
+        listener.emit(.matched(Self.autoMatch(delta: 1.8)))
+
+        sender.nextError = WatchMessageError.notReachable
+        client.applyAutoSuggestion()
+        for _ in 0..<200 where client.autoListen.suggestion == nil {
+            listener.emit(.matched(Self.autoMatch(delta: 1.8)))
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(client.autoListen.suggestion == Self.autoMatch(delta: 1.8))
+    }
+
     @Test("stopping listen all film cancels the listener and resets the state")
     func autoListenStop() throws {
         let (client, sender, listener, dir) = try makeAutoClient()

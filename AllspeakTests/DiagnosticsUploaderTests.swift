@@ -8,7 +8,11 @@ struct DiagnosticsUploaderTests {
     private let server = FakeCatalogServer()
     private let root: URL
     private let catalogID = UUID(uuidString: "5E7A1C2B-0000-4000-8000-0000000000AA")!
-    private var open: URL?
+    private var clock = Clock()
+
+    private final class Clock {
+        var now = Date(timeIntervalSince1970: 1_000_000)
+    }
 
     init() {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -16,8 +20,16 @@ struct DiagnosticsUploaderTests {
         server.knows(catalogID: catalogID)
     }
 
-    private func makeUploader(openLog: URL? = nil, client: CatalogClient? = nil) -> DiagnosticsUploader {
-        DiagnosticsUploader(rootURL: root, client: client ?? server.client, openLog: { openLog }, now: { Date(timeIntervalSince1970: 1_000_000) })
+    private func makeUploader(client: CatalogClient? = nil) -> DiagnosticsUploader {
+        let clock = clock
+        return DiagnosticsUploader(rootURL: root, client: client ?? server.client, now: { clock.now })
+    }
+
+    private func append(to log: URL) throws {
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"ts":"2026-11-04T19:00:00.000Z","event":"tick","pos":4800}"#.utf8 + [0x0A]))
+        try handle.close()
     }
 
     private func writeLog(_ name: String, catalogID: UUID?, lines: Int = 3) -> URL {
@@ -39,40 +51,60 @@ struct DiagnosticsUploaderTests {
         return url
     }
 
-    @Test("closed logs go to their catalog session once, the open log waits")
-    func uploadsClosedLogsOnce() async throws {
+    @Test("every log goes to its catalog session once, the open one included")
+    func uploadsLogsOnce() async throws {
         let closed = writeLog("film-20261104-1742.jsonl", catalogID: catalogID)
         let open = writeLog("film-20261105-1000.jsonl", catalogID: catalogID)
-        let uploader = makeUploader(openLog: open)
+        let uploader = makeUploader()
 
-        #expect(uploader.pendingCount == 1)
+        #expect(uploader.pendingCount == 2)
         let report = await uploader.uploadPending()
 
-        #expect(report == DiagnosticsUploader.Report(uploaded: 1))
-        #expect(server.uploads.count == 1)
+        #expect(report == DiagnosticsUploader.Report(uploaded: 2))
+        #expect(server.uploads.map(\.name) == ["film-20261104-1742.jsonl", "film-20261105-1000.jsonl"])
         #expect(server.uploads[0].path == "/api/v1/sessions/\(catalogID.uuidString.lowercased())/diagnostics")
-        #expect(server.uploads[0].name == "film-20261104-1742.jsonl")
         #expect(server.uploads[0].contentType == "application/x-ndjson")
         #expect(server.uploads[0].body == (try Data(contentsOf: closed)))
+        #expect(server.uploads[1].body == (try Data(contentsOf: open)))
         #expect(uploader.pendingCount == 0)
         #expect(uploader.lastRun == Date(timeIntervalSince1970: 1_000_000))
 
         let again = await uploader.uploadPending()
         #expect(again == DiagnosticsUploader.Report())
-        #expect(server.uploads.count == 1)
+        #expect(server.uploads.count == 2)
     }
 
-    @Test("the open log waits when its url is spelled differently from the directory listing")
-    func openLogWaitsUnderAnotherSpelling() async throws {
-        let open = writeLog("film-20261105-1000.jsonl", catalogID: catalogID)
-        let respelled = root.appendingPathComponent("diagnostics/../diagnostics/\(open.lastPathComponent)")
-        #expect(respelled != open)
-        let uploader = makeUploader(openLog: respelled)
+    @Test("a log that grows during a screening goes up again only after the resend interval")
+    func growingLogWaitsForInterval() async throws {
+        let log = writeLog("film-20261105-1000.jsonl", catalogID: catalogID)
+        let uploader = makeUploader()
+        _ = await uploader.uploadPending()
+        try append(to: log)
 
-        let report = await uploader.uploadPending()
+        clock.now += DiagnosticsUploader.resendInterval - 1
+        #expect(await uploader.uploadPending() == DiagnosticsUploader.Report())
+        #expect(server.uploads.count == 1)
 
-        #expect(report == DiagnosticsUploader.Report())
-        #expect(server.uploads.isEmpty)
+        clock.now += 1
+        #expect(await uploader.uploadPending() == DiagnosticsUploader.Report(uploaded: 1))
+        #expect(server.uploads[1].body == (try Data(contentsOf: log)))
+    }
+
+    @Test("sending by hand ignores the resend interval and retries skipped logs")
+    func forcedUploadSendsEverythingNotOnServer() async throws {
+        let log = writeLog("film-20261105-1000.jsonl", catalogID: catalogID)
+        let gone = UUID()
+        _ = writeLog("gone-20261001-1200.jsonl", catalogID: gone)
+        let uploader = makeUploader()
+        #expect(await uploader.uploadPending() == DiagnosticsUploader.Report(uploaded: 1, skipped: 1))
+        try append(to: log)
+        server.knows(catalogID: gone)
+
+        let report = await uploader.uploadPending(force: true)
+
+        #expect(report == DiagnosticsUploader.Report(uploaded: 2))
+        #expect(server.uploads.map(\.name) == ["film-20261105-1000.jsonl", "film-20261105-1000.jsonl", "gone-20261001-1200.jsonl"])
+        #expect(server.uploads[1].body == (try Data(contentsOf: log)))
         #expect(uploader.pendingCount == 0)
     }
 
@@ -83,10 +115,8 @@ struct DiagnosticsUploaderTests {
         _ = await uploader.uploadPending()
         #expect(server.uploads.count == 1)
 
-        let handle = try FileHandle(forWritingTo: log)
-        try handle.seekToEnd()
-        try handle.write(contentsOf: Data(#"{"ts":"2026-11-04T19:00:00.000Z","event":"pause","pos":4800}"#.utf8 + [0x0A]))
-        try handle.close()
+        try append(to: log)
+        clock.now += DiagnosticsUploader.resendInterval
 
         #expect(uploader.pendingCount == 1)
         let report = await uploader.uploadPending()
@@ -145,7 +175,7 @@ struct DiagnosticsUploaderTests {
     @Test("without a catalog config nothing is sent and the report says why")
     func noConfig() async {
         _ = writeLog("film-20261104-1742.jsonl", catalogID: catalogID)
-        let uploaderWithoutClient = DiagnosticsUploader(rootURL: root, client: nil, openLog: { nil })
+        let uploaderWithoutClient = DiagnosticsUploader(rootURL: root, client: nil)
 
         let report = await uploaderWithoutClient.uploadPending()
 
